@@ -1,0 +1,3 @@
+sed -i '/\[versions\]/a hilt = "2.51.1"\nhiltNavigationCompose = "1.2.0"' gradle/libs.versions.toml
+sed -i '/\[libraries\]/a hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }\nhilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }\nandroidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }' gradle/libs.versions.toml
+sed -i '/\[plugins\]/a dagger-hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }' gradle/libs.versions.toml

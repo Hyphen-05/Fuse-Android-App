@@ -1,0 +1,6 @@
+{
+  "name": "Fuse",
+  "description": "A Material You Expressive app that controls Bluetooth RGB devices via the DuoCo protocol, featuring modern color role palettes, shape morphs, dynamic progress elements, and customizable presets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

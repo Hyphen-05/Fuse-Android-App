@@ -1,0 +1,2 @@
+sed -i 's/val appContainer = (application as RgbControllerApplication).container/val appContainer = (context.applicationContext as RgbControllerApplication).container/g' app/src/main/java/com/example/MainActivity.kt
+sed -i 's/val factory = RgbControllerViewModelFactory(applicationContext,/val factory = RgbControllerViewModelFactory(context.applicationContext,/g' app/src/main/java/com/example/MainActivity.kt

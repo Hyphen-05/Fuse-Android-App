@@ -1,0 +1,1 @@
+sed -i '1i import dagger.hilt.android.lifecycle.HiltViewModel\nimport javax.inject.Inject\nimport dagger.hilt.android.qualifiers.ApplicationContext\nimport com.example.domain.repository.AppPreferencesRepository\nimport com.example.domain.repository.RgbDatabaseRepository' app/src/main/java/com/example/RgbControllerViewModel.kt

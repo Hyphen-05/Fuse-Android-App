@@ -1,0 +1,164 @@
+package com.example.ui.components
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.example.RgbControllerViewModel
+import com.example.ambiance.AmbianceCaptureService
+import com.example.ambiance.AmbianceCaptureState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AmbianceScreen(
+    viewModel: RgbControllerViewModel,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE) }
+
+    var responseSpeed by remember { mutableFloatStateOf(prefs.getFloat("response_speed", 0.5f)) }
+    var smoothnessMs by remember { mutableIntStateOf(prefs.getInt("smoothness_ms", 150)) }
+    var saturationBoost by remember { mutableFloatStateOf(prefs.getFloat("saturation_boost", 1.4f)) }
+    var brightnessCompensation by remember { mutableFloatStateOf(prefs.getFloat("brightness_compensation", 1.0f)) }
+    var updateRateCapFps by remember { mutableIntStateOf(prefs.getInt("update_rate_cap_fps", 20)) }
+
+    val isActive = AmbianceCaptureState.isActive.collectAsState()
+    val zoneColors = AmbianceCaptureState.zoneColors.collectAsState()
+
+    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            viewModel.setActiveFeatureName("Ambience")
+            AmbianceCaptureService.start(context, result.resultCode, result.data!!)
+        }
+    }
+
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // 1. Live 4x4 color grid
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val currentColors = zoneColors.value
+            val gridCols = 4
+            val gridRows = 4
+
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for (row in 0 until gridRows) {
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (col in 0 until gridCols) {
+                            val zoneColor = currentColors.find { it.col == col && it.row == row }
+                            val displayColor = if (zoneColor != null) {
+                                Color(zoneColor.r, zoneColor.g, zoneColor.b)
+                            } else {
+                                Color.DarkGray
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(displayColor)
+                            ) {
+                                if (zoneColor != null) {
+                                    Text(
+                                        text = "${zoneColor.r}\n${zoneColor.g}\n${zoneColor.b}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if ((zoneColor.r + zoneColor.g + zoneColor.b) / 3 > 128) Color.Black else Color.White,
+                                        modifier = Modifier.align(Alignment.Center),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Start/Stop ambiance capture button
+        val startInteractionSource = remember { MutableInteractionSource() }
+        val stopInteractionSource = remember { MutableInteractionSource() }
+        if (!isActive.value) {
+            Button(
+                onClick = {
+                    val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
+                },
+                interactionSource = startInteractionSource,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("ambiance_toggle_btn")
+                    .joyfulPress(startInteractionSource),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Start Ambiance Mode")
+            }
+        } else {
+            Button(
+                onClick = {
+                    AmbianceCaptureService.stop(context)
+                },
+                interactionSource = stopInteractionSource,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("ambiance_toggle_btn")
+                    .joyfulPress(stopInteractionSource),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Icon(imageVector = Icons.Default.Stop, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Stop Ambiance Mode")
+            }
+        }
+
+    }
+}
