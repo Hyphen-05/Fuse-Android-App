@@ -29,7 +29,7 @@ Dependency injection is manual (no Hilt/Dagger) — see `AppContainer` and `RgbC
 
 ## Hardware
 
-Targets DuoCo BLE RGB LED strips. Note: any pixel-count change on connected hardware causes a brief firmware-level LED flash — this is a hardware/firmware limitation, not a bug, and animations are designed around it (e.g. deliberate stepped transitions rather than continuous pixel-count ramps).
+Targets DuoCo BLE RGB LED strips. Note: Only tested on MELK Leds, but will likely work on ELK devices, and any other devices that use DuoCo StripX. Native hardware CCT support has not been implemented.
 
 ## Setup
 
