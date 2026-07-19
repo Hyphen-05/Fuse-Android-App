@@ -1,21 +1,47 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Expressive RGB
 
-# Run and deploy your AI Studio app
+An Android app for controlling DuoCo Bluetooth LE RGB LED hardware — with ambiance-synced screen lighting, an audio-reactive visualizer, and AI-generated lighting scenes.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/84d16055-cc6e-40c7-8b90-4f1c63d64f17
+- **Ambiance Mode** — syncs LED color to on-screen content in real time via screen capture, with luminance-weighted zone averaging and smoothed, flicker-resistant color transitions.
+- **Audio Visualizer** — beat detection (spectral flux onset, adaptive thresholding, tempo-adaptive cooldown) and frequency-band-driven color response, with multiple presets (Smooth Flow, Ambient Chill, Vocal Floor, and more).
+- **Smart Scenes** — on-device AI scene generation using Gemini Nano (ML Kit GenAI Prompt API), turning a mood/tempo description into a custom animated lighting sequence.
+- **Scene System** — full scene editing, scene chaining with configurable delay and loop behavior, and auto-cancel on manual input.
+- **Multi-device support** — per-device state persistence, automation-aware save/restore, and manual reconnection control.
 
-## Run Locally
+## Architecture
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+This project is in the middle of an incremental refactor away from a small number of large, tightly-coupled files toward a modular, unidirectional-data-flow (MVI-style) architecture. The target structure:
 
+```
+com.example
+├── core/          # Pure logic: color math, protocol serialization, calibration, animation parsing
+├── data/          # Repository implementations: database, preferences
+├── domain/        # Repository interfaces, domain models
+├── hardware/      # BLE and audio I/O (in progress)
+└── presentation/  # Compose UI and ViewModels (in progress)
+```
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+**Current status:** pure-logic extraction, dependency-injection cleanup, and connection-state management have been migrated to this structure. UI-state consolidation and hardware-layer isolation are still in progress. Expect some files to still mix responsibilities until the refactor completes.
+
+Dependency injection is manual (no Hilt/Dagger) — see `AppContainer` and `RgbControllerApplication`.
+
+## Hardware
+
+Targets DuoCo BLE RGB LED strips. Note: any pixel-count change on connected hardware causes a brief firmware-level LED flash — this is a hardware/firmware limitation, not a bug, and animations are designed around it (e.g. deliberate stepped transitions rather than continuous pixel-count ramps).
+
+## Setup
+
+1. Clone the repo and open in Android Studio.
+2. Requires Bluetooth LE and audio-recording runtime permissions (requested at first launch).
+3. Build and run on a physical device — BLE and audio capture require real hardware; the emulator won't exercise these paths meaningfully.
+
+## Known Issues
+
+- LEDs occasionally freezing during extended use — under active investigation, with diagnostic logging (exportable to file) added to help isolate the cause.
+- Some DSP/animation timing constants are sample-count-based rather than time-based, causing slightly different effective behavior between the native `AudioRecord` (~43Hz) and `Visualizer` API (~20Hz) pipelines. Audited and scoped for a future fix.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
