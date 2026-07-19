@@ -6,9 +6,21 @@ object DuoCoProtocol {
     // Target write characteristic typically found under service 0000fff0 (handle 0x0009)
     val CHARACTERISTIC_UUID = UUID.fromString("0000fff3-0000-1000-8000-00805f9b34fb") 
 
-    // TODO(refactor): mutable global state, revisit in Phase 2/3 alongside manuallyDisconnected
+    // TODO(refactor): Encapsulated mutable global state; evaluate replacing with reactive state flow or scoped repository logic in subsequent phases.
     // Active byte overrides map (key format: "mode_<index>", "audio_preset_<index>", "audio_phone_mic")
-    val overrides = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    private val overrides = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    fun getOverride(key: String): ByteArray? {
+        return overrides[key]
+    }
+
+    fun setOverride(key: String, value: ByteArray) {
+        overrides[key] = value
+    }
+
+    fun clearOverride(key: String) {
+        overrides.remove(key)
+    }
 
     fun parseHex(hex: String): ByteArray? {
         val clean = hex.replace(" ", "").replace(":", "").replace("-", "")
@@ -142,12 +154,12 @@ object DuoCoProtocol {
     }
 
     fun createModeCommand(modeIndex: Int): ByteArray {
-        return overrides["mode_$modeIndex"] ?: createDefaultModeCommand(modeIndex)
+        return getOverride("mode_$modeIndex") ?: createDefaultModeCommand(modeIndex)
     }
 
     fun createMusicPresetCommand(modeIndex: Int): ByteArray {
         val coerced = modeIndex.coerceIn(1, 8)
-        return overrides["audio_preset_$coerced"] ?: createMicVisualizerStyleCommand(coerced - 1)
+        return getOverride("audio_preset_$coerced") ?: createMicVisualizerStyleCommand(coerced - 1)
     }
 
     fun createDefaultMusicPresetCommand(modeIndex: Int): ByteArray {
@@ -167,6 +179,6 @@ object DuoCoProtocol {
     }
 
     fun createPhoneMicCommand(): ByteArray {
-        return overrides["audio_phone_mic"] ?: createDefaultPhoneMicCommand()
+        return getOverride("audio_phone_mic") ?: createDefaultPhoneMicCommand()
     }
 }

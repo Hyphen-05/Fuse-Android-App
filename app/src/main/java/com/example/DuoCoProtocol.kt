@@ -4,7 +4,10 @@ import java.util.UUID
 
 object DuoCoProtocol {
     val CHARACTERISTIC_UUID: UUID get() = com.example.core.protocol.DuoCoProtocol.CHARACTERISTIC_UUID
-    val overrides: java.util.concurrent.ConcurrentHashMap<String, ByteArray> get() = com.example.core.protocol.DuoCoProtocol.overrides
+
+    fun getOverride(key: String): ByteArray? = com.example.core.protocol.DuoCoProtocol.getOverride(key)
+    fun setOverride(key: String, value: ByteArray) = com.example.core.protocol.DuoCoProtocol.setOverride(key, value)
+    fun clearOverride(key: String) = com.example.core.protocol.DuoCoProtocol.clearOverride(key)
 
     fun parseHex(hex: String): ByteArray? = com.example.core.protocol.DuoCoProtocol.parseHex(hex)
     fun formatHex(bytes: ByteArray): String = com.example.core.protocol.DuoCoProtocol.formatHex(bytes)

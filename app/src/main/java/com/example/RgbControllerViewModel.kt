@@ -817,8 +817,7 @@ class RgbControllerViewModel(
     val protocolBytes: StateFlow<ByteArray> = _protocolBytes.asStateFlow()
 
         
-    @Volatile var bypassColorCalibration = false
-    @Volatile var currentCalibrationBrightness: Float? = null
+
 
     fun getCalibrationMatrices(calibration: ColorCalibration): Map<Float, FloatArray> {
         val map = mutableMapOf<Float, FloatArray>()
@@ -1159,7 +1158,7 @@ class RgbControllerViewModel(
             if (value is String) {
                 val bytes = DuoCoProtocol.parseHex(value)
                 if (bytes != null) {
-                    DuoCoProtocol.overrides[key] = bytes
+                    DuoCoProtocol.setOverride(key, bytes)
                     overridesMap[key] = value
                 }
             }
@@ -1171,14 +1170,14 @@ class RgbControllerViewModel(
         val cleanHex = hexString.trim().uppercase()
         if (cleanHex.isEmpty()) {
             prefsRepo.removeProtocolOverride(key)
-            DuoCoProtocol.overrides.remove(key)
+            DuoCoProtocol.clearOverride(key)
             _byteOverrides.update { it - key }
         } else {
             val bytes = DuoCoProtocol.parseHex(cleanHex)
             if (bytes != null) {
                 val formatted = DuoCoProtocol.formatHex(bytes)
                 prefsRepo.putProtocolOverrideString(key, formatted)
-                DuoCoProtocol.overrides[key] = bytes
+                DuoCoProtocol.setOverride(key, bytes)
                 _byteOverrides.update { it + (key to formatted) }
             }
         }
@@ -1187,8 +1186,7 @@ class RgbControllerViewModel(
     private var lastWriteTime = 0L
     private var pendingWriteJob: kotlinx.coroutines.Job? = null
 
-    var mediaProjectionResultCode: Int = 0
-    var mediaProjectionIntent: Intent? = null
+
 
 
 

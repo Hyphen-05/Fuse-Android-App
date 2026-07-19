@@ -1,18 +1,39 @@
-*.iml
-.gradle
-.kotlin
+# Built artifacts
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Build outputs and directories
+/build/
+/app/build/
+.build-outputs/
+captures/
+
+# Gradle caches and configuration
+.gradle/
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+/gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin / Java / Backup files
+*.class
+*.klib
+*.kt.bak
+*.bak
+
+# Android Studio / IntelliJ IDEA
+*.iml
+.idea/
+.navigation/
+
+# Local configurations / Keys / Secrets
 .env
+.env.local
 debug.keystore
+
+# Log files
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
