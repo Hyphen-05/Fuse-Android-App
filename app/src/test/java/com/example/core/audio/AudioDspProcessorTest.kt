@@ -140,4 +140,106 @@ class AudioDspProcessorTest {
             rgbDiffers
         )
     }
+
+    @Test
+    fun `Beat Only preset floors brightness at visualizerMinBrightness before any beat has fired`() {
+        // Beat Only's value formula is entirely driven by beatPulsePeak/lastBeatFlashTime (both
+        // start at their zero defaults). With no beat ever detected, beatEnvelope stays at its
+        // floor of 0, so value must equal exactly visualizerMinBrightness on every frame. Only 6
+        // total frames are processed here (well under the ~34-frame/680ms span BeatDetector needs
+        // before it will even evaluate a candidate), so isBeat is structurally guaranteed false —
+        // this isn't relying on amplitude to avoid a false beat.
+        //
+        // visualizerMinBrightness (0.15) is deliberately a *floor*, not something visibly bright:
+        // ColorConverter.hsvToRgb's HSV max-channel equals `value` before its cubic perceptual
+        // correction ((c/255)^3*255), and 0.15 cubes down to 0 post-correction. So the observable
+        // assertion is that the floor renders as black, not a literal 0.15 brightness reading.
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        val settings = defaultSettings.copy(visualizerPreset = "Beat Only")
+        var now = warmUpQuiet(processor, AudioBackend.AUDIO_RECORD, startMs = 10L)
+
+        val result = processor.process(uniformFrame(3f), settings, now)!!
+        val maxChannel = maxOf(result.r, result.g, result.b) / 255f
+
+        assertEquals(0f, maxChannel, 0.001f)
+    }
+
+    @Test
+    fun `disabling auto-gain pins observed max trackers to 100 and changes output vs auto-gain enabled`() {
+        // With isAutoGainEnabled = false, maxObservedBass/maxObservedMid are pinned to 100.0 every
+        // frame (instead of adapting to the signal), which routes bassContribution/midContribution
+        // through the flat smoothedX/100 formula instead of the adaptive-range one. For an
+        // identical moderate-energy input, that must produce different output than the auto-gain
+        // enabled path once the auto-gain tracker has had a chance to adapt away from its seed.
+        val autoGainOn = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        val autoGainOff = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        val onSettings = defaultSettings.copy(isAutoGainEnabled = true)
+        val offSettings = defaultSettings.copy(isAutoGainEnabled = false)
+
+        val onNow = warmUpQuiet(autoGainOn, AudioBackend.AUDIO_RECORD, startMs = 10L)
+        val offNow = warmUpQuiet(autoGainOff, AudioBackend.AUDIO_RECORD, startMs = 10L)
+
+        // Feed a few louder frames so the auto-gain tracker actually diverges from its seed value.
+        var onResult: com.example.core.audio.AudioDspResult? = null
+        var offResult: com.example.core.audio.AudioDspResult? = null
+        var t1 = onNow
+        var t2 = offNow
+        repeat(5) {
+            onResult = autoGainOn.process(uniformFrame(15f), onSettings, t1)
+            offResult = autoGainOff.process(uniformFrame(15f), offSettings, t2)
+            t1 += 25L
+            t2 += 25L
+        }
+
+        val rgbDiffers = onResult!!.r != offResult!!.r || onResult!!.g != offResult!!.g || onResult!!.b != offResult!!.b
+        assertTrue(
+            "expected auto-gain enabled vs disabled to diverge for identical input " +
+                "(on=${onResult!!.r},${onResult!!.g},${onResult!!.b} off=${offResult!!.r},${offResult!!.g},${offResult!!.b})",
+            rgbDiffers
+        )
+    }
+
+    @Test
+    fun `a strong transient after a quiet baseline raises Beat Only brightness above silence`() {
+        // Drives a real beat through the full BeatDetector pipeline: ~600ms of quiet warm-up
+        // (comfortably over the centered median window's half-width of 500ms) at magnitude 1,
+        // one loud transient frame at magnitude 80, then continuation frames at magnitude 5
+        // advanced until "now" reaches the transient's timestamp plus BeatDetector's 180ms
+        // lookahead — the point at which evalTimestamp lands exactly on the transient and it
+        // becomes the evaluated peak.
+        //
+        // Continuation frames deliberately use a magnitude (5) distinct from the warm-up
+        // magnitude (1): a uniform frame always gates itself out once the noise-floor history is
+        // saturated with its own value (see uniformFrame's doc comment above), so replaying the
+        // warm-up magnitude forever would self-gate every continuation frame to zero energy and
+        // the `totalEnergy >= noiseGateThreshold` guard in AudioDspProcessor.process would mask
+        // any real beat regardless of what BeatDetector decides. Magnitude 5 clears the gate
+        // (noise floor stays pinned near 1 while warm-up frames still dominate the history) while
+        // producing no flux of its own (identical consecutive frames -> zero magnitude diff), so
+        // the only flux spike in the whole run is the transient itself.
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        val settings = defaultSettings.copy(visualizerPreset = "Beat Only")
+
+        var now = 0L
+        repeat(30) {
+            processor.process(uniformFrame(1f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+            now += 20L
+        }
+
+        val transientTime = now
+        processor.process(uniformFrame(80f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+        now += 20L
+
+        var peakMaxChannel = 0f
+        while (now <= transientTime + 200L) {
+            val result = processor.process(uniformFrame(5f, backend = AudioBackend.AUDIO_RECORD), settings, now)!!
+            peakMaxChannel = maxOf(peakMaxChannel, maxOf(result.r, result.g, result.b) / 255f)
+            now += 20L
+        }
+
+        assertTrue(
+            "expected a detected beat to push Beat Only brightness measurably above the silent floor (peak=$peakMaxChannel)",
+            peakMaxChannel > 0.05f
+        )
+    }
 }
