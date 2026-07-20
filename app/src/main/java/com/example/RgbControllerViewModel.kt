@@ -767,16 +767,128 @@ class RgbControllerViewModel(
             state = coreState,
             intent = intent
         )
-        val (newState, audioEffects) = com.example.presentation.audioSettingsReducer(
+        val (audioState, audioEffects) = com.example.presentation.audioSettingsReducer(
             state = ambianceState,
             intent = intent,
             targetAddresses = getCurrentlyControlledDeviceAddresses(),
             deviceAutomationMode = deviceAutomationMode
         )
+        val identifier = audioState.audioSettings.activeAudioDeviceIdentifier
+        val savedCalibrationDelayMs = if (identifier != null) {
+            prefsRepo.getCalibrationDelayPrefInt(identifier, 0)
+        } else {
+            prefsRepo.getCalibrationDelayPrefInt("default_delay", 0)
+        }
+        val (newState, calibrationEffects) = com.example.presentation.calibrationFlowReducer(
+            state = audioState,
+            intent = intent,
+            savedCalibrationDelayMs = savedCalibrationDelayMs,
+            connectedManagerAddresses = deviceWriteManagers.keys
+        )
         _uiState.value = newState
         coreEffects.forEach { executeCoreSideEffect(it) }
         ambianceEffects.forEach { executeAmbianceSideEffect(it) }
         audioEffects.forEach { executeAudioSideEffect(it) }
+        calibrationEffects.forEach { executeCalibrationSideEffect(it) }
+    }
+
+    private fun executeCalibrationSideEffect(effect: com.example.presentation.CalibrationSideEffect) {
+        when (effect) {
+            is com.example.presentation.CalibrationSideEffect.SaveCalibrationDelayPrefInt -> prefsRepo.putCalibrationDelayPrefInt(effect.deviceKey, effect.value)
+            com.example.presentation.CalibrationSideEffect.ClearCalibrationDelayPrefs -> prefsRepo.clearCalibrationDelayPrefs()
+            is com.example.presentation.CalibrationSideEffect.SaveCalibrationPrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
+            is com.example.presentation.CalibrationSideEffect.SavePacingPrefInt -> prefsRepo.putPacingPrefInt(effect.address, effect.value)
+            com.example.presentation.CalibrationSideEffect.ClearPacingPrefs -> prefsRepo.clearPacingPrefs()
+            is com.example.presentation.CalibrationSideEffect.SaveCctCorrectionProfile -> {
+                prefsRepo.putCctCalibrationString(effect.profile.macAddress, effect.profile.toJson())
+                loadCctCalibrations()
+            }
+            is com.example.presentation.CalibrationSideEffect.DeleteCctCorrectionProfile -> {
+                prefsRepo.removeCctCalibration(effect.address)
+                loadCctCalibrations()
+            }
+            com.example.presentation.CalibrationSideEffect.ClearCctCalibrationPrefs -> {
+                prefsRepo.clearCctCalibrationPrefs()
+                _cctCalibrations.value = emptyMap()
+            }
+            is com.example.presentation.CalibrationSideEffect.SaveColorCalibration -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.insertColorCalibration(effect.calibration)
+                    addLog("Saved Color Calibration Profile for ${effect.calibration.macAddress}")
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.DeleteColorCalibration -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteColorCalibration(effect.macAddress)
+                    addLog("Deleted Color Calibration Profile for ${effect.macAddress}")
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.SetDeviceManagerPacing -> {
+                deviceWriteManagers[effect.address]?.currentPacingMs = effect.ms
+            }
+            com.example.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
+                deviceWriteManagers.forEach { (_, manager) -> manager.currentPacingMs = 100 }
+            }
+            // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
+            // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
+            com.example.presentation.CalibrationSideEffect.StartMetronome -> {
+                metronomeJob = viewModelScope.launch(Dispatchers.Default) {
+                    while (true) {
+                        metronomePlayer.playClick()
+                        val currentDelay = _uiState.value.calibrationFlow.calibrationDelayOffsetMs
+                        launch {
+                            delay(currentDelay.toLong())
+                            dispatch(RgbIntent.SendCalibrationFlash)
+                        }
+                        delay(1000L)
+                    }
+                }
+            }
+            com.example.presentation.CalibrationSideEffect.CancelMetronome -> {
+                metronomeJob?.cancel()
+                metronomeJob = null
+            }
+            com.example.presentation.CalibrationSideEffect.SendFlashPulse -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val whiteColor = DuoCoProtocol.createColorCommand(255, 255, 255)
+                    val fullBrightness = DuoCoProtocol.createBrightnessCommand(100)
+                    val pulseOn = fullBrightness + whiteColor
+                    broadcastCommandDirect(pulseOn)
+
+                    delay(120) // pulse duration
+
+                    val blackColor = DuoCoProtocol.createColorCommand(0, 0, 0)
+                    broadcastCommandDirect(blackColor)
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.StartTestPatternLoop -> {
+                testPatternJobs[effect.address] = viewModelScope.launch {
+                    val colors = listOf(
+                        android.graphics.Color.RED,
+                        android.graphics.Color.GREEN,
+                        android.graphics.Color.BLUE,
+                        android.graphics.Color.WHITE
+                    )
+                    var idx = 0
+                    while (isActive) {
+                        val c = colors[idx % colors.size]
+                        val cmd = DuoCoProtocol.createColorCommand(
+                            android.graphics.Color.red(c),
+                            android.graphics.Color.green(c),
+                            android.graphics.Color.blue(c)
+                        )
+                        deviceWriteManagers[effect.address]?.updateCommand(cmd)
+                        idx++
+                        delay(30)
+                    }
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.CancelTestPatternLoop -> {
+                testPatternJobs[effect.address]?.cancel()
+                testPatternJobs.remove(effect.address)
+            }
+            is com.example.presentation.CalibrationSideEffect.Log -> addLog(effect.message)
+        }
     }
 
     private fun executeAudioSideEffect(effect: com.example.presentation.AudioSideEffect) {
@@ -1192,50 +1304,11 @@ class RgbControllerViewModel(
     private val testPatternJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
 
     fun toggleTestPattern(address: String) {
-        val isRunning = _uiState.value.connectivity.isTestPatternRunning[address] == true
-        if (isRunning) {
-            testPatternJobs[address]?.cancel()
-            testPatternJobs.remove(address)
-            _uiState.update { s -> s.copy(connectivity = s.connectivity.copy(isTestPatternRunning = s.connectivity.isTestPatternRunning + (address to false))) }
-        } else {
-            _uiState.update { s -> s.copy(connectivity = s.connectivity.copy(isTestPatternRunning = s.connectivity.isTestPatternRunning + (address to true))) }
-            testPatternJobs[address] = viewModelScope.launch {
-                val colors = listOf(
-                    android.graphics.Color.RED,
-                    android.graphics.Color.GREEN,
-                    android.graphics.Color.BLUE,
-                    android.graphics.Color.WHITE
-                )
-                var idx = 0
-                while (isActive) {
-                    val c = colors[idx % colors.size]
-                    val cmd = DuoCoProtocol.createColorCommand(
-                        android.graphics.Color.red(c),
-                        android.graphics.Color.green(c),
-                        android.graphics.Color.blue(c)
-                    )
-                    deviceWriteManagers[address]?.updateCommand(cmd)
-                    idx++
-                    // Try to send at maximum speed to see achievable rate, but maybe we should pace it to see distinct colors?
-                    // We can just sleep for a small amount, or let the DeviceWriteManager throttle it.
-                    // If we want the user to see the colors, we should pace it at maybe 50ms interval, or whatever current pacing is.
-                    // Wait, the test pattern is to visually judge. The user needs to see it cycles fast.
-                    // Actually let's just cycle it every 50ms, the pacing will throttle it if needed.
-                    delay(30)
-                }
-            }
-        }
+        dispatch(RgbIntent.ToggleTestPattern(address))
     }
 
     fun setDevicePacing(address: String, ms: Int) {
-        val manager = deviceWriteManagers[address]
-        if (manager != null) {
-            manager.currentPacingMs = ms
-            prefsRepo.putPacingPrefInt(address, ms)
-            _uiState.update { s ->
-                s.copy(connectivity = s.connectivity.copy(devicePacingMs = s.connectivity.devicePacingMs + (address to ms)))
-            }
-        }
+        dispatch(RgbIntent.SetDevicePacing(address, ms))
     }
 
     private val _byteOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -1865,13 +1938,11 @@ class RgbControllerViewModel(
     }
 
     fun saveCctCorrectionProfile(profile: CctCorrectionProfile) {
-        prefsRepo.putCctCalibrationString(profile.macAddress, profile.toJson())
-        loadCctCalibrations()
+        dispatch(RgbIntent.SaveCctCorrectionProfile(profile))
     }
 
     fun deleteCctCorrectionProfile(address: String) {
-        prefsRepo.removeCctCalibration(address)
-        loadCctCalibrations()
+        dispatch(RgbIntent.DeleteCctCorrectionProfile(address))
     }
 
     fun addLog(message: String) {
@@ -1980,94 +2051,27 @@ class RgbControllerViewModel(
     }
 
     fun dismissCalibrationPrompt() {
-        _uiState.update { it.copy(calibrationFlow = it.calibrationFlow.copy(showCalibrationPrompt = false)) }
+        dispatch(RgbIntent.DismissCalibrationPrompt)
     }
 
     fun startCalibrationMode() {
-        stopCalibrationMode()
-        val identifier = _uiState.value.audioSettings.activeAudioDeviceIdentifier
-        val savedDelay = if (identifier != null) {
-            prefsRepo.getCalibrationDelayPrefInt(identifier, 0)
-        } else {
-            prefsRepo.getCalibrationDelayPrefInt("default_delay", 0)
-        }
-
-        _uiState.update {
-            it.copy(
-                calibrationFlow = it.calibrationFlow.copy(
-                    isCalibrationModeActive = true,
-                    calibrationDelayOffsetMs = savedDelay
-                )
-            )
-        }
-
-        addLog("Calibration Mode started. Click plays every 1000ms. Pre-populated delay: $savedDelay ms")
-
-        metronomeJob = viewModelScope.launch(Dispatchers.Default) {
-            while (true) {
-                metronomePlayer.playClick()
-                val currentDelay = _uiState.value.calibrationFlow.calibrationDelayOffsetMs
-                launch {
-                    delay(currentDelay.toLong())
-                    sendCalibrationFlash()
-                }
-                delay(1000L)
-            }
-        }
+        dispatch(RgbIntent.StartCalibrationMode)
     }
 
     fun updateCalibrationSliderValue(value: Int) {
-        _uiState.update { it.copy(calibrationFlow = it.calibrationFlow.copy(calibrationDelayOffsetMs = value)) }
+        dispatch(RgbIntent.UpdateCalibrationSliderValue(value))
     }
 
     fun saveCalibrationAndExit() {
-        val currentDelay = _uiState.value.calibrationFlow.calibrationDelayOffsetMs
-        val identifier = _uiState.value.audioSettings.activeAudioDeviceIdentifier
-
-        if (identifier != null) {
-            prefsRepo.putCalibrationDelayPrefInt(identifier, currentDelay)
-            addLog("Saved calibrated delay of $currentDelay ms for device: ${_uiState.value.audioSettings.detectedAudioDeviceName}")
-        } else {
-            prefsRepo.putCalibrationDelayPrefInt("default_delay", currentDelay)
-            addLog("Saved default calibrated delay of $currentDelay ms")
-        }
-
-        prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", currentDelay)
-
-        _uiState.update {
-            it.copy(
-                audioSettings = it.audioSettings.copy(
-                    bluetoothDelayMs = currentDelay,
-                    totalVisualDelayMs = currentDelay + BeatDetector().lookaheadMs.toInt()
-                ),
-                calibrationFlow = it.calibrationFlow.copy(showCalibrationPrompt = false)
-            )
-        }
-
-        stopCalibrationMode()
+        dispatch(RgbIntent.SaveCalibrationAndExit)
     }
 
     fun stopCalibrationMode() {
-        metronomeJob?.cancel()
-        metronomeJob = null
-        _uiState.update {
-            it.copy(calibrationFlow = it.calibrationFlow.copy(isCalibrationModeActive = false))
-        }
-        addLog("Calibration Mode stopped.")
+        dispatch(RgbIntent.StopCalibrationMode)
     }
 
     fun sendCalibrationFlash() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val whiteColor = DuoCoProtocol.createColorCommand(255, 255, 255)
-            val fullBrightness = DuoCoProtocol.createBrightnessCommand(100)
-            val pulseOn = fullBrightness + whiteColor
-            broadcastCommandDirect(pulseOn)
-            
-            delay(120) // pulse duration
-            
-            val blackColor = DuoCoProtocol.createColorCommand(0, 0, 0)
-            broadcastCommandDirect(blackColor)
-        }
+        dispatch(RgbIntent.SendCalibrationFlash)
     }
 
     fun setDemoMode(isDemo: Boolean) {
@@ -2791,28 +2795,7 @@ class RgbControllerViewModel(
     }
 
     fun resetCalibrationSettings() {
-        prefsRepo.clearCalibrationDelayPrefs()
-        prefsRepo.clearCctCalibrationPrefs()
-        prefsRepo.clearPacingPrefs()
-        
-        deviceWriteManagers.forEach { (_, manager) ->
-            manager.currentPacingMs = 100
-        }
-        
-        _uiState.update {
-            it.copy(
-                audioSettings = it.audioSettings.copy(
-                    bluetoothDelayMs = 0,
-                    totalVisualDelayMs = BeatDetector().lookaheadMs.toInt()
-                ),
-                calibrationFlow = it.calibrationFlow.copy(calibrationDelayOffsetMs = 0),
-                connectivity = it.connectivity.copy(devicePacingMs = it.connectivity.devicePacingMs.mapValues { 100 })
-            )
-        }
-        _cctCalibrations.value = emptyMap()
-
-        prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", 0)
-        addLog("Reset Calibration Defaults: bluetooth audio delay compensation set to 0, per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared.")
+        dispatch(RgbIntent.ResetCalibrationSettings)
     }
 
     private fun stopAmbianceIfActive(restoreState: Boolean = true) {
@@ -3360,17 +3343,11 @@ class RgbControllerViewModel(
     }
 
     fun saveColorCalibration(calibration: ColorCalibration) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.insertColorCalibration(calibration)
-            addLog("Saved Color Calibration Profile for ${calibration.macAddress}")
-        }
+        dispatch(RgbIntent.SaveColorCalibration(calibration))
     }
 
     fun deleteColorCalibration(macAddress: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteColorCalibration(macAddress)
-            addLog("Deleted Color Calibration Profile for $macAddress")
-        }
+        dispatch(RgbIntent.DeleteColorCalibration(macAddress))
     }
 
     fun fit3x3Matrix(
