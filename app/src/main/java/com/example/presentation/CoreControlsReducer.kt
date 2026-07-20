@@ -1,6 +1,7 @@
 package com.example.presentation
 
 import com.example.RgbUiState
+import com.example.CoreControlState
 import com.example.RgbIntent
 import com.example.BleConnectionState
 import com.example.CctCorrectionProfile
@@ -65,6 +66,53 @@ sealed interface CoreSideEffect {
     data class DeleteDeviceAlias(val address: String) : CoreSideEffect
 }
 
+// Mirrors RgbControllerViewModel.updateControlledDevicesInMap() (lines 3000-3039): for every
+// target address, create a default ActiveDeviceState from the (already-updated) coreControl
+// state if one isn't present yet, then overlay only the fields this intent actually changed.
+// The old mapValues-based approach here only touched keys that already existed in
+// deviceStatesMap, so newly-connected auto-saved devices (isActiveControlEnabled=true by
+// default, added to targetAddresses without ever going through ToggleActiveControl) never
+// got an entry created.
+private fun applyControlledDeviceUpdates(
+    deviceStatesMap: Map<String, ActiveDeviceState>,
+    targetAddresses: List<String>,
+    coreControl: CoreControlState,
+    activeFeatureName: String? = null,
+    red: Int? = null,
+    green: Int? = null,
+    blue: Int? = null,
+    warmth: Int? = null,
+    modeIndex: Int? = null,
+    brightness: Int? = null,
+    isPowerOn: Boolean? = null
+): Map<String, ActiveDeviceState> {
+    if (targetAddresses.isEmpty()) return deviceStatesMap
+    val newMap = deviceStatesMap.toMutableMap()
+    targetAddresses.forEach { address ->
+        val existing = newMap[address] ?: ActiveDeviceState(
+            activeFeatureName = coreControl.activeFeatureName,
+            red = coreControl.red,
+            green = coreControl.green,
+            blue = coreControl.blue,
+            warmth = coreControl.warmth,
+            modeIndex = coreControl.modeIndex,
+            brightness = coreControl.brightness,
+            isPowerOn = coreControl.isPowerOn
+        )
+        newMap[address] = existing.copy(
+            activeFeatureName = activeFeatureName ?: existing.activeFeatureName,
+            red = red ?: existing.red,
+            green = green ?: existing.green,
+            blue = blue ?: existing.blue,
+            warmth = warmth ?: existing.warmth,
+            modeIndex = modeIndex ?: existing.modeIndex,
+            brightness = brightness ?: existing.brightness,
+            isPowerOn = isPowerOn ?: existing.isPowerOn
+        )
+    }
+    return newMap
+}
+
 fun coreControlsReducer(
     state: RgbUiState,
     intent: RgbIntent,
@@ -77,12 +125,16 @@ fun coreControlsReducer(
 ): Pair<RgbUiState, List<CoreSideEffect>> {
     return when (intent) {
         is RgbIntent.SetPower -> {
+            val newCoreControl = state.coreControl.copy(isPowerOn = intent.isOn)
             val newState = state.copy(
-                coreControl = state.coreControl.copy(isPowerOn = intent.isOn),
+                coreControl = newCoreControl,
                 connectivity = state.connectivity.copy(
-                    deviceStatesMap = state.connectivity.deviceStatesMap.mapValues { (address, devState) ->
-                        if (targetAddresses.contains(address)) devState.copy(isPowerOn = intent.isOn) else devState
-                    }
+                    deviceStatesMap = applyControlledDeviceUpdates(
+                        deviceStatesMap = state.connectivity.deviceStatesMap,
+                        targetAddresses = targetAddresses,
+                        coreControl = newCoreControl,
+                        isPowerOn = intent.isOn
+                    )
                 )
             )
             val effects = mutableListOf<CoreSideEffect>(
@@ -98,20 +150,26 @@ fun coreControlsReducer(
         }
 
         is RgbIntent.SetColor -> {
+            val newCoreControl = state.coreControl.copy(
+                red = intent.r,
+                green = intent.g,
+                blue = intent.b,
+                modeIndex = 0,
+                activeFeatureName = "Colour"
+            )
             val newState = state.copy(
-                coreControl = state.coreControl.copy(
-                    red = intent.r,
-                    green = intent.g,
-                    blue = intent.b,
-                    modeIndex = 0,
-                    activeFeatureName = "Colour"
-                ),
+                coreControl = newCoreControl,
                 connectivity = state.connectivity.copy(
-                    deviceStatesMap = state.connectivity.deviceStatesMap.mapValues { (address, devState) ->
-                        if (targetAddresses.contains(address)) {
-                            devState.copy(red = intent.r, green = intent.g, blue = intent.b, modeIndex = 0, activeFeatureName = "Colour")
-                        } else devState
-                    }
+                    deviceStatesMap = applyControlledDeviceUpdates(
+                        deviceStatesMap = state.connectivity.deviceStatesMap,
+                        targetAddresses = targetAddresses,
+                        coreControl = newCoreControl,
+                        activeFeatureName = "Colour",
+                        red = intent.r,
+                        green = intent.g,
+                        blue = intent.b,
+                        modeIndex = 0
+                    )
                 )
             )
             val effects = listOf(
@@ -130,12 +188,16 @@ fun coreControlsReducer(
         }
 
         is RgbIntent.SetBrightness -> {
+            val newCoreControl = state.coreControl.copy(brightness = intent.percent)
             val newState = state.copy(
-                coreControl = state.coreControl.copy(brightness = intent.percent),
+                coreControl = newCoreControl,
                 connectivity = state.connectivity.copy(
-                    deviceStatesMap = state.connectivity.deviceStatesMap.mapValues { (address, devState) ->
-                        if (targetAddresses.contains(address)) devState.copy(brightness = intent.percent) else devState
-                    }
+                    deviceStatesMap = applyControlledDeviceUpdates(
+                        deviceStatesMap = state.connectivity.deviceStatesMap,
+                        targetAddresses = targetAddresses,
+                        coreControl = newCoreControl,
+                        brightness = intent.percent
+                    )
                 )
             )
             val effects = listOf(
@@ -151,17 +213,20 @@ fun coreControlsReducer(
 
         is RgbIntent.SetMode -> {
             val modeName = customModes.find { it.byteValue == intent.modeIndex }?.name ?: "Mode"
+            val newCoreControl = state.coreControl.copy(
+                modeIndex = intent.modeIndex,
+                activeFeatureName = modeName
+            )
             val newState = state.copy(
-                coreControl = state.coreControl.copy(
-                    modeIndex = intent.modeIndex,
-                    activeFeatureName = modeName
-                ),
+                coreControl = newCoreControl,
                 connectivity = state.connectivity.copy(
-                    deviceStatesMap = state.connectivity.deviceStatesMap.mapValues { (address, devState) ->
-                        if (targetAddresses.contains(address)) {
-                            devState.copy(activeFeatureName = modeName, modeIndex = intent.modeIndex)
-                        } else devState
-                    }
+                    deviceStatesMap = applyControlledDeviceUpdates(
+                        deviceStatesMap = state.connectivity.deviceStatesMap,
+                        targetAddresses = targetAddresses,
+                        coreControl = newCoreControl,
+                        activeFeatureName = modeName,
+                        modeIndex = intent.modeIndex
+                    )
                 )
             )
             val effects = listOf(
@@ -200,28 +265,28 @@ fun coreControlsReducer(
             val sendG = profile?.let { (finalGreen * it.scaleG + it.offsetG).toInt().coerceIn(0, 255) } ?: finalGreen
             val sendB = profile?.let { (finalBlue * it.scaleB + it.offsetB).toInt().coerceIn(0, 255) } ?: finalBlue
 
+            val newCoreControl = state.coreControl.copy(
+                warmth = coercedPercent,
+                modeIndex = 0,
+                activeFeatureName = "CCT",
+                red = finalRed,
+                green = finalGreen,
+                blue = finalBlue
+            )
             val newState = state.copy(
-                coreControl = state.coreControl.copy(
-                    warmth = coercedPercent,
-                    modeIndex = 0,
-                    activeFeatureName = "CCT",
-                    red = finalRed,
-                    green = finalGreen,
-                    blue = finalBlue
-                ),
+                coreControl = newCoreControl,
                 connectivity = state.connectivity.copy(
-                    deviceStatesMap = state.connectivity.deviceStatesMap.mapValues { (address, devState) ->
-                        if (targetAddresses.contains(address)) {
-                            devState.copy(
-                                activeFeatureName = "CCT",
-                                warmth = coercedPercent,
-                                modeIndex = 0,
-                                red = finalRed,
-                                green = finalGreen,
-                                blue = finalBlue
-                            )
-                        } else devState
-                    }
+                    deviceStatesMap = applyControlledDeviceUpdates(
+                        deviceStatesMap = state.connectivity.deviceStatesMap,
+                        targetAddresses = targetAddresses,
+                        coreControl = newCoreControl,
+                        activeFeatureName = "CCT",
+                        red = finalRed,
+                        green = finalGreen,
+                        blue = finalBlue,
+                        warmth = coercedPercent,
+                        modeIndex = 0
+                    )
                 )
             )
 
@@ -271,7 +336,16 @@ fun coreControlsReducer(
             val logMsg = if (intent.isDemo) "Switched to Demo Mode" else "Switched to Real Hardware BLE Mode"
             
             if (intent.isDemo) {
-                val keys = state.connectivity.deviceConnectionStates.keys
+                // Mirrors ViewModel.disconnect() (called from setDemoMode(true)): it only acts on
+                // activeConnections.keys, a live-only registry that holds an address exactly
+                // while it's CONNECTED or CONNECTING and is removed from on every disconnect.
+                // deviceConnectionStates never removes a key (entries are only ever overwritten
+                // in place, see e.g. `+ (address to DISCONNECTED)`), so using its raw keys would
+                // keep re-targeting devices that are already DISCONNECTED forever after the first
+                // connection of the session.
+                val keys = state.connectivity.deviceConnectionStates.filterValues {
+                    it == BleConnectionState.CONNECTED || it == BleConnectionState.CONNECTING
+                }.keys
                 if (keys.isEmpty()) {
                     val newState = state.copy(
                         coreControl = state.coreControl.copy(isDemoMode = true),
@@ -387,7 +461,11 @@ fun coreControlsReducer(
         }
         
         is RgbIntent.DisconnectAll -> {
-            val keys = state.connectivity.deviceConnectionStates.keys
+            // Same activeConnections-membership mirror as SetDemoMode(true) above — only
+            // CONNECTED/CONNECTING addresses need a disconnect issued.
+            val keys = state.connectivity.deviceConnectionStates.filterValues {
+                it == BleConnectionState.CONNECTED || it == BleConnectionState.CONNECTING
+            }.keys
             if (keys.isEmpty()) {
                 val newState = state.copy(
                     connectivity = state.connectivity.copy(
