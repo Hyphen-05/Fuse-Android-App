@@ -3,7 +3,6 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -116,7 +115,6 @@ fun AmbianceScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    val pacingPrefs = remember { context.getSharedPreferences("ble_pacing_prefs", Context.MODE_PRIVATE) }
     val presetPrefs = remember { context.getSharedPreferences("ambiance_presets_prefs", Context.MODE_PRIVATE) }
 
     // Observe active capture state and colors

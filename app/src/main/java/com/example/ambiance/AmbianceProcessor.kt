@@ -30,8 +30,8 @@ class AmbianceProcessor(
             
             val prefs = context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE)
             val updateRateCapFps = prefs.getInt("update_rate_cap_fps", 20).coerceAtLeast(1)
-            val pacingPrefs = context.getSharedPreferences("ble_pacing_prefs", Context.MODE_PRIVATE)
-            val slowestDevicePacing = pacingPrefs.getInt("slowest_connected_pacing", 0)
+            val slowestDevicePacing = com.example.data.repository.AppPreferencesRepositoryImpl(context)
+                .getPacingPrefInt("slowest_connected_pacing", 0)
             
             val fpsIntervalMs = 1000 / updateRateCapFps
             val effectiveIntervalMs = max(fpsIntervalMs, slowestDevicePacing)

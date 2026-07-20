@@ -68,8 +68,9 @@ class AmbianceOutputInterpolator(private val context: Context) {
     }
 
     private fun scheduleTick() {
-        val pacingPrefs = context.getSharedPreferences("ble_pacing_prefs", Context.MODE_PRIVATE)
-        val pacingMs = pacingPrefs.getInt("slowest_connected_pacing", 100).coerceAtLeast(20)
+        val pacingMs = com.example.data.repository.AppPreferencesRepositoryImpl(context)
+            .getPacingPrefInt("slowest_connected_pacing", 100)
+            .coerceAtLeast(20)
 
         handler?.postDelayed({
             val now = android.os.SystemClock.elapsedRealtime()
