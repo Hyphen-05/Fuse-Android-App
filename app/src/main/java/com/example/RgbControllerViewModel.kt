@@ -753,7 +753,7 @@ class RgbControllerViewModel(
     // ============================================================================
 
     private fun dispatch(intent: RgbIntent) {
-        val (newState, effects) = com.example.presentation.coreControlsReducer(
+        val (coreState, coreEffects) = com.example.presentation.coreControlsReducer(
             state = _uiState.value,
             intent = intent,
             customModes = customModes.value,
@@ -763,8 +763,22 @@ class RgbControllerViewModel(
             targetAddresses = getCurrentlyControlledDeviceAddresses(),
             deviceAutomationMode = deviceAutomationMode
         )
+        val (newState, ambianceEffects) = com.example.presentation.ambianceSettingsReducer(
+            state = coreState,
+            intent = intent
+        )
         _uiState.value = newState
-        effects.forEach { executeCoreSideEffect(it) }
+        coreEffects.forEach { executeCoreSideEffect(it) }
+        ambianceEffects.forEach { executeAmbianceSideEffect(it) }
+    }
+
+    private fun executeAmbianceSideEffect(effect: com.example.presentation.AmbianceSideEffect) {
+        when (effect) {
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefFloat -> prefsRepo.putAmbiancePrefFloat(effect.key, effect.value)
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefInt -> prefsRepo.putAmbiancePrefInt(effect.key, effect.value)
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefString -> prefsRepo.putAmbiancePrefString(effect.key, effect.value)
+            com.example.presentation.AmbianceSideEffect.CancelSceneChain -> cancelSceneChain()
+        }
     }
 
     private fun executeCoreSideEffect(effect: com.example.presentation.CoreSideEffect) {
@@ -2755,45 +2769,31 @@ class RgbControllerViewModel(
     }
 
     fun setAmbianceResponseSpeed(value: Float) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceResponseSpeed = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefFloat("response_speed", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceResponseSpeed(value))
     }
 
     fun setAmbianceSmoothnessMs(value: Int) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceSmoothnessMs = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefInt("smoothness_ms", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSmoothnessMs(value))
     }
 
     fun setAmbianceSaturationBoost(value: Float) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceSaturationBoost = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefFloat("saturation_boost", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSaturationBoost(value))
     }
 
     fun setAmbianceBrightnessCompensation(value: Float) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceBrightnessCompensation = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefFloat("brightness_compensation", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceBrightnessCompensation(value))
     }
 
     fun setAmbianceUpdateRateCapFps(value: Int) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceUpdateRateCapFps = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefInt("update_rate_cap_fps", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceUpdateRateCapFps(value))
     }
 
     fun setAmbianceSceneCutSensitivity(value: Float) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceSceneCutSensitivity = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefFloat("scene_cut_sensitivity", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSceneCutSensitivity(value))
     }
 
     fun setAmbianceNoiseDeadband(value: Float) {
-        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceNoiseDeadband = value, ambiancePreset = "Custom")) }
-        prefsRepo.putAmbiancePrefFloat("noise_deadband", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceNoiseDeadband(value))
     }
 
     fun applyAmbiancePreset(
@@ -2805,27 +2805,17 @@ class RgbControllerViewModel(
         sceneCutSensitivity: Float,
         noiseDeadband: Float
     ) {
-        cancelSceneChain()
-        _uiState.update {
-            it.copy(
-                ambianceSettings = it.ambianceSettings.copy(
-                    ambianceResponseSpeed = responseSpeed,
-                    ambianceSmoothnessMs = smoothnessMs,
-                    ambianceSaturationBoost = saturationBoost,
-                    ambianceBrightnessCompensation = brightnessCompensation,
-                    ambianceSceneCutSensitivity = sceneCutSensitivity,
-                    ambianceNoiseDeadband = noiseDeadband,
-                    ambiancePreset = presetId
-                )
+        dispatch(
+            RgbIntent.ApplyAmbiancePreset(
+                presetId = presetId,
+                responseSpeed = responseSpeed,
+                smoothnessMs = smoothnessMs,
+                saturationBoost = saturationBoost,
+                brightnessCompensation = brightnessCompensation,
+                sceneCutSensitivity = sceneCutSensitivity,
+                noiseDeadband = noiseDeadband
             )
-        }
-                    prefsRepo.putAmbiancePrefFloat("response_speed", responseSpeed)
-            prefsRepo.putAmbiancePrefInt("smoothness_ms", smoothnessMs)
-            prefsRepo.putAmbiancePrefFloat("saturation_boost", saturationBoost)
-            prefsRepo.putAmbiancePrefFloat("brightness_compensation", brightnessCompensation)
-            prefsRepo.putAmbiancePrefFloat("scene_cut_sensitivity", sceneCutSensitivity)
-            prefsRepo.putAmbiancePrefFloat("noise_deadband", noiseDeadband)
-            prefsRepo.putAmbiancePrefString("ambiance_preset", presetId)
+        )
     }
 
     fun setIdleTriggerDelayMs(value: Long) {
