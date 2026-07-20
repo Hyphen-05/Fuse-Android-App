@@ -2,6 +2,7 @@ package com.example.presentation
 
 import com.example.RgbIntent
 import com.example.RgbUiState
+import com.example.core.protocol.DuoCoProtocol
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -188,6 +189,44 @@ class AmbianceSettingsReducerTest {
 
         assertNotEquals("Custom", newState.ambianceSettings.ambiancePreset)
         assertEquals("Balanced", newState.ambianceSettings.ambiancePreset)
+    }
+
+    // ========================================================================
+    // WriteAmbianceColor / SetAmbianceCaptureActive — pure BLE passthroughs
+    // routed through dispatch() instead of the getActiveInstance() escape
+    // hatch (AmbianceCaptureService/AmbianceOutputInterpolator). No
+    // RgbUiState field is touched by either intent.
+    // ========================================================================
+
+    @Test
+    fun writeAmbianceColor_producesWriteColorEffectAndLeavesStateUnchanged() {
+        val initial = RgbUiState()
+        val (newState, effects) = reduce(state = initial, intent = RgbIntent.WriteAmbianceColor(10, 20, 30))
+
+        assertEquals(initial, newState)
+        assertEquals(listOf(AmbianceSideEffect.WriteColor(10, 20, 30)), effects)
+    }
+
+    @Test
+    fun setAmbianceCaptureActive_true_producesPhoneMicToggleOnBroadcast() {
+        val initial = RgbUiState()
+        val (newState, effects) = reduce(state = initial, intent = RgbIntent.SetAmbianceCaptureActive(true))
+
+        assertEquals(initial, newState)
+        assertEquals(
+            listOf(AmbianceSideEffect.BroadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(true))),
+            effects
+        )
+    }
+
+    @Test
+    fun setAmbianceCaptureActive_false_producesPhoneMicToggleOffBroadcast() {
+        val (_, effects) = reduce(intent = RgbIntent.SetAmbianceCaptureActive(false))
+
+        assertEquals(
+            listOf(AmbianceSideEffect.BroadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(false))),
+            effects
+        )
     }
 
     // ========================================================================

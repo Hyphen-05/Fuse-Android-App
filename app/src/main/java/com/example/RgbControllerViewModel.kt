@@ -4,6 +4,8 @@ import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
 import com.example.core.calibration.CalibrationMatrixSolver
 import com.example.core.animation.ProceduralSceneParams
+import com.example.core.audio.BeatDetector
+import com.example.hardware.audio.MetronomePlayer
 import com.example.domain.repository.AppPreferencesRepository
 import com.example.domain.repository.RgbDatabaseRepository
 
@@ -29,14 +31,12 @@ import com.example.db.RgbPreset
 import com.example.db.SavedDevice
 import com.example.db.CustomMode
 import com.example.db.ColorCalibration
-import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.audiofx.Visualizer
 import android.media.MediaRecorder
 import android.media.AudioAttributes
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.projection.MediaProjectionManager
-import android.media.AudioTrack
 import android.media.AudioManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -145,518 +145,6 @@ data class ActiveDeviceState(
 // ControllerUiState (flat, 60-field) has been migrated to RgbUiState (RgbUiState.kt) —
 // see CLAUDE.md "RgbUiState shape (locked)" for the sub-state mapping.
 
-
-// Phase 4: visibility widened from `private` to `internal` so AudioDspProcessor
-// (com.example.core.audio) can reuse it — deliberately left in this file/location per the
-// Phase 4 hardware-isolation trace ("already pure/stateless-per-instance — leave it where it
-// is, just reuse it"); only the access modifier changed, no logic touched.
-internal class BeatDetector(
-    private val fluxHistorySize: Int = 64,
-    private val medianWindowMs: Long = 1000L,
-    val lookaheadMs: Long = 180L,
-    private val peakWindowMs: Long = 60L,
-    private val tempoHistoryMs: Long = 8000L,
-    private val tempoUpdateIntervalMs: Long = 1500L,
-    private val minBpm: Float = 60f,
-    private val maxBpm: Float = 200f,
-    private val preferredBpm: Float = 120f,
-    private val octaveToleranceRatio: Float = 0.85f,
-    private val transitionPenalty: Float = 100f
-) {
-    data class FluxSample(val timestampMs: Long, val flux: Float)
-
-    // (a) Why the buffer is time-based rather than count-based:
-    // Different frame cadences between callers (e.g. on_device runs at ~33-50ms intervals, whereas phone_mic
-    // runs at ~23ms intervals). A count-based ring buffer would represent vastly different durations of physical
-    // audio depending on the source. A time-based buffer guarantees a uniform physical time-span of retention.
-    private val fluxBuffer = kotlin.collections.ArrayDeque<FluxSample>()
-    private val tempoBuffer = kotlin.collections.ArrayDeque<FluxSample>()
-
-    private var prevBassMag: FloatArray? = null
-    private var prevBassReal: FloatArray? = null
-    private var prevBassImag: FloatArray? = null
-    private var prevPrevBassReal: FloatArray? = null
-    private var prevPrevBassImag: FloatArray? = null
-
-    private var prevMidMag: FloatArray? = null
-    private var prevMidReal: FloatArray? = null
-    private var prevMidImag: FloatArray? = null
-    private var prevPrevMidReal: FloatArray? = null
-    private var prevPrevMidImag: FloatArray? = null
-
-    private var prevHighMidMag: FloatArray? = null
-    private var prevHighMidReal: FloatArray? = null
-    private var prevHighMidImag: FloatArray? = null
-    private var prevPrevHighMidReal: FloatArray? = null
-    private var prevPrevHighMidImag: FloatArray? = null
-
-    private var prevHighMag: FloatArray? = null
-    private var prevHighReal: FloatArray? = null
-    private var prevHighImag: FloatArray? = null
-    private var prevPrevHighReal: FloatArray? = null
-    private var prevPrevHighImag: FloatArray? = null
-
-    private val ibiHistory = FloatArray(4) { 500f }
-    private var ibiIdx = 0
-    private var lastBeatTime = 0L
-
-    private var lastTempoUpdateTime = 0L
-    private var lockedBpm = 0f
-    private var candidateStreakCount = 0
-    private var previousCandidateBpm = 0f
-    private var lockedBpmConfidence = 0f
-    private var gridBeats = listOf<Long>()
-
-    data class BeatResult(
-        val isBeat: Boolean, 
-        val strength: Float,
-        val confidence: Float,
-        val bpm: Float,
-        val bpmConfidence: Float
-    )
-
-    private class BandResult(
-        val totalFlux: Float,
-        val curMagArr: FloatArray,
-        val curRealArr: FloatArray,
-        val curImagArr: FloatArray
-    )
-
-    private fun computeBandFlux(
-        magnitude: FloatArray,
-        realBins: FloatArray,
-        imagBins: FloatArray,
-        range: IntRange,
-        prevMagArray: FloatArray?,
-        prevRealArray: FloatArray?,
-        prevImagArray: FloatArray?,
-        prevPrevRealArray: FloatArray?,
-        prevPrevImagArray: FloatArray?,
-        phaseWeight: Float
-    ): BandResult {
-        var magFlux = 0f
-        var phaseFlux = 0f
-
-        val curMagArr = FloatArray(range.last - range.first + 1)
-        val curRealArr = FloatArray(curMagArr.size)
-        val curImagArr = FloatArray(curMagArr.size)
-
-        var i = 0
-        for (k in range) {
-            val curMag = magnitude[k]
-            val curReal = realBins[k]
-            val curImag = imagBins[k]
-
-            curMagArr[i] = curMag
-            curRealArr[i] = curReal
-            curImagArr[i] = curImag
-
-            // Magnitude Flux (log-compressed)
-            val curLogMag = kotlin.math.ln(1f + curMag)
-            val prevMag = prevMagArray?.getOrNull(i) ?: curMag
-            val prevLogMag = kotlin.math.ln(1f + prevMag)
-            val diff = curLogMag - prevLogMag
-            if (diff > 0f) magFlux += diff
-
-            // Phase Flux (complex-domain onset detection, Duxbury/Bello method)
-            if (prevRealArray != null && prevImagArray != null && prevPrevRealArray != null && prevPrevImagArray != null) {
-                val pReal = prevRealArray[i]
-                val pImag = prevImagArray[i]
-                val ppReal = prevPrevRealArray[i]
-                val ppImag = prevPrevImagArray[i]
-
-                val pPhase = kotlin.math.atan2(pImag, pReal)
-                val ppPhase = kotlin.math.atan2(ppImag, ppReal)
-
-                // Predicted phase for frame n: phi_hat = 2 * phase(n-1) - phase(n-2)
-                val phi_hat = 2f * pPhase - ppPhase
-                // Predicted magnitude for frame n: R_hat = magnitude(n-1) [constant magnitude assumption]
-                val r_hat = prevMag
-
-                // Only count deviation if actual magnitude >= predicted magnitude
-                // (bias toward energy increases)
-                if (curMag >= r_hat) {
-                    // Predicted complex value: X_hat = R_hat * (cos(phi_hat), sin(phi_hat))
-                    val x_hat_real = r_hat * kotlin.math.cos(phi_hat)
-                    val x_hat_imag = r_hat * kotlin.math.sin(phi_hat)
-
-                    // Euclidean distance |X - X_hat|
-                    val distReal = curReal - x_hat_real
-                    val distImag = curImag - x_hat_imag
-                    val distance = kotlin.math.sqrt(distReal * distReal + distImag * distImag)
-
-                    phaseFlux += distance
-                }
-            }
-            i++
-        }
-
-        val totalFlux = magFlux + phaseWeight * phaseFlux
-        return BandResult(totalFlux, curMagArr, curRealArr, curImagArr)
-    }
-
-    private fun updateTempoAndGrid(now: Long) {
-        if (tempoBuffer.size < 2) return
-
-        val startTime = tempoBuffer.first().timestampMs
-        val endTime = tempoBuffer.last().timestampMs
-        val durationMs = endTime - startTime
-        if (durationMs < 2000L) return
-
-        // a. Resample onto a uniform time grid (100Hz / 10ms steps)
-        val stepMs = 10L
-        val numSteps = (durationMs / stepMs).toInt() + 1
-        val resampled = FloatArray(numSteps)
-        
-        var bufferIdx = 0
-        for (i in 0 until numSteps) {
-            val t = startTime + i * stepMs
-            while (bufferIdx < tempoBuffer.size - 1 && tempoBuffer[bufferIdx + 1].timestampMs < t) {
-                bufferIdx++
-            }
-            if (bufferIdx >= tempoBuffer.size - 1) {
-                resampled[i] = tempoBuffer.last().flux
-            } else {
-                val s1 = tempoBuffer[bufferIdx]
-                val s2 = tempoBuffer[bufferIdx + 1]
-                if (s2.timestampMs == s1.timestampMs) {
-                    resampled[i] = s1.flux
-                } else {
-                    val fraction = (t - s1.timestampMs).toFloat() / (s2.timestampMs - s1.timestampMs)
-                    resampled[i] = s1.flux + fraction * (s2.flux - s1.flux)
-                }
-            }
-        }
-
-        // b. Autocorrelation over lag values
-        val minLag = (60000f / maxBpm / stepMs).toInt().coerceAtLeast(1)
-        val maxLag = (60000f / minBpm / stepMs).toInt().coerceAtMost(numSteps - 1)
-        
-        var zeroLagAc = 0f
-        for (i in 0 until numSteps) {
-            zeroLagAc += resampled[i] * resampled[i]
-        }
-        if (zeroLagAc < 1e-6f) return
-
-        val autocorrelations = FloatArray(maxLag + 1)
-        for (lag in minLag..maxLag) {
-            var sum = 0f
-            for (i in 0 until numSteps - lag) {
-                sum += resampled[i] * resampled[i + lag]
-            }
-            autocorrelations[lag] = sum
-        }
-
-        // c. Apply musical tempo prior & d. Find highest prior-weighted lag
-        var bestLag = minLag
-        var maxWeightedAc = -1f
-        val stdDevBpm = 30f
-        
-        for (lag in minLag..maxLag) {
-            val bpmAtLag = 60000f / (lag * stepMs)
-            val rawAc = autocorrelations[lag]
-            val diff = bpmAtLag - preferredBpm
-            val weight = kotlin.math.exp(-(diff * diff) / (2f * stdDevBpm * stdDevBpm).toDouble()).toFloat()
-            val weightedAc = rawAc * weight
-            if (weightedAc > maxWeightedAc) {
-                maxWeightedAc = weightedAc
-                bestLag = lag
-            }
-        }
-
-        val candidateRawAc = autocorrelations[bestLag]
-
-        // e. Octave Error Resolution
-        // Octave error resolution checks half and double the candidate lag. 
-        // Since autocorrelation naturally peaks at multiples of the true beat period, we might falsely lock 
-        // onto double-time or half-time. By checking if the alternative's raw strength is comparable (within octaveToleranceRatio),
-        // we can prefer the tempo that maintains continuity with the previous lockedBpm, preventing flip-flopping.
-        var resolvedLag = bestLag
-        val lagOptions = mutableListOf(bestLag)
-        
-        val halfLag = bestLag / 2
-        if (halfLag in minLag..maxLag && autocorrelations[halfLag] >= candidateRawAc * octaveToleranceRatio) {
-            lagOptions.add(halfLag)
-        }
-        val doubleLag = bestLag * 2
-        if (doubleLag in minLag..maxLag && autocorrelations[doubleLag] >= candidateRawAc * octaveToleranceRatio) {
-            lagOptions.add(doubleLag)
-        }
-
-        if (lagOptions.size > 1) {
-            val targetBpm = if (lockedBpm > 0f) lockedBpm else preferredBpm
-            resolvedLag = lagOptions.minByOrNull { lag ->
-                val bpm = 60000f / (lag * stepMs)
-                kotlin.math.abs(bpm - targetBpm)
-            } ?: bestLag
-        }
-
-        val resolvedCandidateBpm = 60000f / (resolvedLag * stepMs)
-
-        // f. Smooth the lock
-        // Why 2-cycle streak: Autocorrelation on rolling windows can be noisy. A single frame might spike at an incorrect lag.
-        // Requiring the same candidate (within 3 BPM tolerance) for 2 consecutive updates acts as a debounce, ensuring 
-        // the tempo estimate is stable before we shift our locked BPM.
-        if (lockedBpm == 0f) {
-            lockedBpm = resolvedCandidateBpm
-            lockedBpmConfidence = autocorrelations[resolvedLag] / zeroLagAc
-        } else {
-            if (kotlin.math.abs(resolvedCandidateBpm - previousCandidateBpm) < 3f) {
-                candidateStreakCount++
-                if (candidateStreakCount >= 2) {
-                    lockedBpm = lockedBpm * 0.7f + resolvedCandidateBpm * 0.3f
-                    lockedBpmConfidence = (autocorrelations[resolvedLag] / zeroLagAc) * 0.3f + lockedBpmConfidence * 0.7f
-                }
-            } else {
-                candidateStreakCount = 1
-            }
-        }
-        previousCandidateBpm = resolvedCandidateBpm
-
-        // 3. DP BEAT GRID
-        // DP Scoring tradeoff: We want beats to align with high ODF salience (peaks in flux), but we also want 
-        // rhythmic regularity. The DP score adds the ODF value (rewarding peaks) but subtracts a transition penalty 
-        // squared by the deviation from the expected period. A high penalty forces rigid tempo; a lower penalty 
-        // allows the grid to flex to capture syncopated or slightly off-beat peaks.
-        if (lockedBpm > 0f) {
-            val periodMs = 60000f / lockedBpm
-            val periodSteps = kotlin.math.round(periodMs / stepMs).toInt().coerceAtLeast(1)
-            
-            val scores = FloatArray(numSteps)
-            val backtrack = IntArray(numSteps) { -1 }
-
-            val minSearch = (periodSteps * 0.5f).toInt()
-            val maxSearch = (periodSteps * 1.5f).toInt()
-
-            for (i in 0 until numSteps) {
-                val odfVal = resampled[i]
-                var bestPrevScore = 0f
-                var bestPrevIdx = -1
-
-                for (p in minSearch..maxSearch) {
-                    val prevIdx = i - p
-                    if (prevIdx >= 0) {
-                        val deltaMs = p * stepMs
-                        val deviationSec = (deltaMs - periodMs) / 1000f
-                        val penalty = transitionPenalty * (deviationSec * deviationSec)
-                        val score = scores[prevIdx] - penalty
-                        if (bestPrevIdx == -1 || score > bestPrevScore) {
-                            bestPrevScore = score
-                            bestPrevIdx = prevIdx
-                        }
-                    }
-                }
-                
-                scores[i] = odfVal + bestPrevScore
-                backtrack[i] = bestPrevIdx
-            }
-
-            var bestEndIdx = numSteps - 1
-            var bestEndScore = -Float.MAX_VALUE
-            val searchStart = (numSteps - periodSteps).coerceAtLeast(0)
-            for (i in searchStart until numSteps) {
-                if (scores[i] > bestEndScore) {
-                    bestEndScore = scores[i]
-                    bestEndIdx = i
-                }
-            }
-
-            val beats = mutableListOf<Long>()
-            var currIdx = bestEndIdx
-            while (currIdx >= 0) {
-                beats.add(startTime + currIdx * stepMs)
-                currIdx = backtrack[currIdx]
-            }
-            gridBeats = beats.reversed()
-        }
-    }
-
-    fun process(
-        magnitude: FloatArray,
-        realBins: FloatArray,
-        imagBins: FloatArray,
-        bassRange: IntRange,
-        midRange: IntRange,
-        midWeight: Float,
-        thresholdMultiplier: Float,
-        minCooldownMs: Int,
-        maxCooldownMs: Int,
-        now: Long,
-        highMidRange: IntRange = 47..116,
-        highRange: IntRange = 117..280,
-        highMidWeight: Float = 0.5f,
-        highWeight: Float = 0.3f,
-        bassPhaseWeight: Float = 0.1f,
-        midPhaseWeight: Float = 0.5f,
-        highMidPhaseWeight: Float = 1.0f,
-        highPhaseWeight: Float = 1.5f
-    ): BeatResult {
-        val bassRes = computeBandFlux(magnitude, realBins, imagBins, bassRange, prevBassMag, prevBassReal, prevBassImag, prevPrevBassReal, prevPrevBassImag, bassPhaseWeight)
-        prevPrevBassReal = prevBassReal
-        prevPrevBassImag = prevBassImag
-        prevBassMag = bassRes.curMagArr
-        prevBassReal = bassRes.curRealArr
-        prevBassImag = bassRes.curImagArr
-
-        val midRes = computeBandFlux(magnitude, realBins, imagBins, midRange, prevMidMag, prevMidReal, prevMidImag, prevPrevMidReal, prevPrevMidImag, midPhaseWeight)
-        prevPrevMidReal = prevMidReal
-        prevPrevMidImag = prevMidImag
-        prevMidMag = midRes.curMagArr
-        prevMidReal = midRes.curRealArr
-        prevMidImag = midRes.curImagArr
-
-        val highMidRes = computeBandFlux(magnitude, realBins, imagBins, highMidRange, prevHighMidMag, prevHighMidReal, prevHighMidImag, prevPrevHighMidReal, prevPrevHighMidImag, highMidPhaseWeight)
-        prevPrevHighMidReal = prevHighMidReal
-        prevPrevHighMidImag = prevHighMidImag
-        prevHighMidMag = highMidRes.curMagArr
-        prevHighMidReal = highMidRes.curRealArr
-        prevHighMidImag = highMidRes.curImagArr
-
-        val highRes = computeBandFlux(magnitude, realBins, imagBins, highRange, prevHighMag, prevHighReal, prevHighImag, prevPrevHighReal, prevPrevHighImag, highPhaseWeight)
-        prevPrevHighReal = prevHighReal
-        prevPrevHighImag = prevHighImag
-        prevHighMag = highRes.curMagArr
-        prevHighReal = highRes.curRealArr
-        prevHighImag = highRes.curImagArr
-
-        val flux = bassRes.totalFlux + midRes.totalFlux * midWeight + highMidRes.totalFlux * highMidWeight + highRes.totalFlux * highWeight
-
-        // 1. Append the new sample to the time-based buffer
-        fluxBuffer.addLast(FluxSample(now, flux))
-        tempoBuffer.addLast(FluxSample(now, flux))
-
-        // Trim samples older than the retention window relative to 'now' (the latest sample timestamp)
-        val retentionMs = medianWindowMs + lookaheadMs + 300L
-        val cutoffTime = now - retentionMs
-        while (fluxBuffer.isNotEmpty() && fluxBuffer.first().timestampMs < cutoffTime) {
-            fluxBuffer.removeFirst()
-        }
-
-        val tempoCutoffTime = now - tempoHistoryMs
-        while (tempoBuffer.isNotEmpty() && tempoBuffer.first().timestampMs < tempoCutoffTime) {
-            tempoBuffer.removeFirst()
-        }
-
-        // Throttled execution: We run tempo estimation on a throttled cadence (e.g. 1.5s) because it's 
-        // computationally expensive (resampling + autocorrelation over 8 seconds of data) and tempo inherently 
-        // doesn't change on a frame-to-frame basis.
-        if (now - lastTempoUpdateTime >= tempoUpdateIntervalMs && tempoBuffer.size >= 10) {
-            lastTempoUpdateTime = now
-            updateTempoAndGrid(now)
-        }
-
-        // 2. Introduce the evaluation point (results now describe evalTimestamp in the past)
-        // (c) Results describe evalTimestamp, a point ~lookaheadMs in the past:
-        // This intentionally introduces a fixed detection latency (~150-200ms) to allow looking ahead
-        // into "future" flux values relative to evalTimestamp for robust peak-picking and centered threshold evaluation.
-        val evalTimestamp = now - lookaheadMs
-
-        val earliestLimit = evalTimestamp - (medianWindowMs / 2)
-        val latestLimit = evalTimestamp + lookaheadMs // i.e. now
-
-        // Check if the buffer has enough samples reaching back and forward to safely evaluate
-        val hasEarliest = fluxBuffer.any { it.timestampMs <= earliestLimit }
-        val hasLatest = fluxBuffer.any { it.timestampMs >= latestLimit }
-
-        if (!hasEarliest || !hasLatest) {
-            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
-        }
-
-        // 3. Centered median/MAD threshold evaluation
-        // (b) Why the threshold window is centered rather than causal:
-        // Causal thresholding is prone to latency-skewed detection and high false-positive rates on rising edges
-        // because the adaptive threshold is calculated solely from past frames. A centered window places the
-        // evaluation frame precisely in the middle of the statistics window, resulting in a stable reference
-        // threshold that reflects local signal conditions symmetrically.
-        val subset = fluxBuffer.filter { it.timestampMs in earliestLimit..(evalTimestamp + (medianWindowMs / 2)) }
-        if (subset.isEmpty()) {
-            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
-        }
-
-        val subsetFluxes = subset.map { it.flux }
-        val medianFlux = getMedian(subsetFluxes)
-
-        val absoluteDeviations = subsetFluxes.map { kotlin.math.abs(it - medianFlux) }
-        val mad = getMedian(absoluteDeviations)
-
-        // 1.4826 standard scale factor for normal distribution matching, with noise protection
-        val scaledMad = maxOf(mad * 1.4826f, 0.1f)
-        val threshold = maxOf(medianFlux + thresholdMultiplier * scaledMad, 0.3f)
-
-        // 4. Local peak-picking: find the sample closest to evalTimestamp
-        val evalSample = fluxBuffer.minByOrNull { kotlin.math.abs(it.timestampMs - evalTimestamp) }
-            ?: return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
-
-        // Filter samples inside the small peak window around evalTimestamp
-        val peakWindowStart = evalTimestamp - peakWindowMs
-        val peakWindowEnd = evalTimestamp + peakWindowMs
-        val peakSamples = fluxBuffer.filter { it.timestampMs in peakWindowStart..peakWindowEnd }
-
-        // Local maximum check: sample flux must be >= all others in its peak window, and strictly above threshold (with low-signal guard)
-        val isLocalMax = peakSamples.all { evalSample.flux >= it.flux }
-        val isAboveThreshold = evalSample.flux > threshold
-        val isCandidateBeat = isLocalMax && isAboveThreshold
-
-        // 5. Cooldown and IBI tracking in evalTimestamp's timeline with tempo-adaptation & collapse-prevention
-        val expectedPeriod = if (lockedBpm > 0f) 60000f / lockedBpm else ibiHistory.average().toFloat()
-        val safeMinCooldown = maxOf(minCooldownMs.toFloat(), 180f)
-        val dynamicCooldown = (expectedPeriod * 0.55f).coerceIn(safeMinCooldown, maxOf(safeMinCooldown, maxCooldownMs.toFloat()))
-        val cooldownOk = (evalTimestamp - lastBeatTime) > dynamicCooldown
-
-        var isBeat = false
-        if (isCandidateBeat && cooldownOk) {
-            isBeat = true
-            if (lastBeatTime != 0L) {
-                val ibi = (evalTimestamp - lastBeatTime).coerceIn(180L, 2000L)
-                ibiHistory[ibiIdx] = ibi.toFloat()
-                ibiIdx = (ibiIdx + 1) % ibiHistory.size
-            }
-            lastBeatTime = evalTimestamp
-        }
-
-        // 6. Strength calculation using MAD and median
-        val strength = if (scaledMad > 0.001f) {
-            ((evalSample.flux - medianFlux) / scaledMad).coerceIn(0f, 4f) / 4f
-        } else {
-            0f
-        }
-
-        var phaseAgreement = 0f
-        if (gridBeats.isNotEmpty() && lockedBpm > 0f) {
-            val periodMs = 60000f / lockedBpm
-            val nearestBeat = gridBeats.minByOrNull { kotlin.math.abs(it - evalTimestamp) }
-            if (nearestBeat != null) {
-                val deviation = kotlin.math.abs(nearestBeat - evalTimestamp).toFloat()
-                val maxDeviation = periodMs / 4f
-                phaseAgreement = if (deviation >= maxDeviation) 0f else 1f - (deviation / maxDeviation)
-            }
-        }
-
-        // CONFIDENCE SCORE
-        // Weights rationale: 
-        // peakSalience (0.5) is the primary driver because local energy bursts are the actual physical beats.
-        // bpmConfidence (0.2) scales our trust in the current rhythmic context.
-        // phaseAgreement (0.3) nudges the confidence up if the peak aligns well with our expected DP grid.
-        val confidence = if (lockedBpm == 0f) {
-            strength // peakSalience-only before lock
-        } else {
-            (strength * 0.5f) + (lockedBpmConfidence * 0.2f) + (phaseAgreement * 0.3f)
-        }
-
-        return BeatResult(isBeat, strength, confidence, lockedBpm, lockedBpmConfidence)
-    }
-
-    private fun getMedian(list: List<Float>): Float {
-        if (list.isEmpty()) return 0f
-        val sorted = list.sorted()
-        val size = sorted.size
-        return if (size % 2 == 0) {
-            (sorted[size / 2 - 1] + sorted[size / 2]) / 2f
-        } else {
-            sorted[size / 2]
-        }
-    }
-}
 
 @SuppressLint("MissingPermission")
 
@@ -923,6 +411,12 @@ class RgbControllerViewModel(
             is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefInt -> prefsRepo.putAmbiancePrefInt(effect.key, effect.value)
             is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefString -> prefsRepo.putAmbiancePrefString(effect.key, effect.value)
             com.example.presentation.AmbianceSideEffect.CancelSceneChain -> cancelSceneChain()
+            is com.example.presentation.AmbianceSideEffect.WriteColor -> {
+                if (com.example.ambiance.AmbianceCaptureState.isActive.value) {
+                    broadcastCommandDirect(DuoCoProtocol.createColorCommand(effect.r, effect.g, effect.b))
+                }
+            }
+            is com.example.presentation.AmbianceSideEffect.BroadcastCommand -> broadcastCommand(effect.command)
         }
     }
 
@@ -2637,11 +2131,11 @@ class RgbControllerViewModel(
     }
 
     fun writeAmbianceColor(r: Int, g: Int, b: Int) {
-        if (!com.example.ambiance.AmbianceCaptureState.isActive.value) {
-            return
-        }
-        val command = DuoCoProtocol.createColorCommand(r, g, b)
-        broadcastCommandDirect(command)
+        dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
+    }
+
+    fun setAmbianceCaptureActive(active: Boolean) {
+        dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
     private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true) {
@@ -3544,48 +3038,18 @@ class RgbControllerViewModel(
         )
     }
 
+    // Phase 5, part B: the per-tick DSP math (smoothing, beat heuristic, hue mapping, auto-gain,
+    // idle detection, 8-band amplitude simulation) moved verbatim to
+    // com.example.core.audio.DemoAudioDspSimulator — this is now a thin orchestrator matching
+    // startAudioEngine's shape: construct a fresh simulator per run, tick it on the same 23ms
+    // cadence, and publish each result through the same publishAudioDspResult() the real capture
+    // pipeline uses.
     private fun runAudioSimulationEngine() {
         addLog("Starting DSP audio simulation engine...")
         com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: SIMULATION started successfully")
-        val random = java.util.Random()
-        
-        var smoothedBass = 0.0f
-        var smoothedMid = 0.0f
-        var smoothedHigh = 0.0f
-        var maxObservedBass = 10.0f
-        var maxObservedMid = 10.0f
-        
-        val bassHistory = FloatArray(86)
-        var bassHistoryIdx = 0
-        var bassHistorySum = 0.0f
-        var bassHistoryCount = 0
-        var lastBeatTime = 0L
-        var beatPulsePeak = 0.0f
-        var lastBeatFlashTime = 0L
-        var currentPaletteIndex = 0
-        val palettes = arrayOf(0f, 60f, 120f, 180f, 240f, 300f)
 
-        var smoothedHue = 0.0f
-
-        val uiAmplitudes8 = FloatArray(8)
-        var silenceStartTime = 0L
-
-        // Sustained energy section-change variables
-        val energyWindowSize = 250 // ~6 seconds
-        val energyHistory = FloatArray(energyWindowSize)
-        var energyHistoryIdx = 0
-        var energyHistorySum = 0.0f
-        var energyHistorySqSum = 0.0f
-        var energyHistoryCount = 0
-
-        val shortWindowSize = 43 // ~1 second
-        val shortHistory = FloatArray(shortWindowSize)
-        var shortHistoryIdx = 0
-        var shortHistorySum = 0.0f
-        var shortHistoryCount = 0
-
+        val simulator = com.example.core.audio.DemoAudioDspSimulator()
         val intervalMs = 23L
-
         var lastSimTime = 0L
 
         while (!Thread.currentThread().isInterrupted && _uiState.value.audioSettings.isAudioSyncRunning) {
@@ -3599,241 +3063,9 @@ class RgbControllerViewModel(
             }
             lastSimTime = nowElapsed
 
-            val state = _uiState.value.audioSettings
             val startTime = System.currentTimeMillis()
-            val timeSec = startTime / 1000.0
-
-            // Simulate realistic rhythmic energy (120 BPM tempo = 500ms intervals)
-            val isBeatInstant = (startTime % 500) < 60
-            val rawBass = if (isBeatInstant) {
-                (40.0f + random.nextFloat() * 20.0f) * state.bassGain
-            } else {
-                (5.0f + random.nextFloat() * 5.0f) * state.bassGain
-            }
-
-            val rawMid = (15.0f + Math.sin(timeSec * 3.0).toFloat() * 10.0f + random.nextFloat() * 5.0f) * state.midGain
-            val rawHigh = (5.0f + Math.cos(timeSec * 5.0).toFloat() * 4.0f + random.nextFloat() * 3.0f) * state.highGain
-
-            val totalEnergy = rawBass + rawMid + rawHigh
-
-            // 1. Add totalEnergy to 6-second window for mean and variance
-            val oldEnergy = energyHistory[energyHistoryIdx]
-            energyHistory[energyHistoryIdx] = totalEnergy
-            energyHistorySum = energyHistorySum - oldEnergy + totalEnergy
-            energyHistorySqSum = energyHistorySqSum - (oldEnergy * oldEnergy) + (totalEnergy * totalEnergy)
-            energyHistoryIdx = (energyHistoryIdx + 1) % energyWindowSize
-            if (energyHistoryCount < energyWindowSize) energyHistoryCount++
-
-            val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
-            val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
-            val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
-
-            // 2. Add totalEnergy to 1-second window for detecting sustain
-            val oldShort = shortHistory[shortHistoryIdx]
-            shortHistory[shortHistoryIdx] = totalEnergy
-            shortHistorySum = shortHistorySum - oldShort + totalEnergy
-            shortHistoryIdx = (shortHistoryIdx + 1) % shortWindowSize
-            if (shortHistoryCount < shortWindowSize) shortHistoryCount++
-
-            val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
-
-            val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-            val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
-
-            val bassAlpha = if (rawBass > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
-            smoothedBass = bassAlpha * rawBass + (1f - bassAlpha) * smoothedBass
-
-            val midAlpha = if (rawMid > smoothedMid) state.audioSmoothingAttack else state.audioSmoothingDecay
-            smoothedMid = midAlpha * rawMid + (1f - midAlpha) * smoothedMid
-
-            val highAlpha = if (rawHigh > smoothedHigh) state.audioSmoothingAttack else state.audioSmoothingDecay
-            smoothedHigh = highAlpha * rawHigh + (1f - highAlpha) * smoothedHigh
-
-            val oldBass = bassHistory[bassHistoryIdx]
-            bassHistory[bassHistoryIdx] = rawBass
-            bassHistorySum = bassHistorySum - oldBass + rawBass
-            bassHistoryIdx = (bassHistoryIdx + 1) % 86
-            if (bassHistoryCount < 86) bassHistoryCount++
-            val avgBass = if (bassHistoryCount > 0) bassHistorySum / bassHistoryCount else 0.0f
-
-            val now = System.currentTimeMillis()
-            val isBeat = rawBass > avgBass * state.beatThresholdMultiplier && rawBass > state.noiseGateThreshold && (now - lastBeatTime > state.beatCooldownMs)
-            if (isBeat) {
-                lastBeatTime = now
-                if (state.isPaletteCyclingEnabled) {
-                    currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-                }
-                beatPulsePeak = 1.0f
-                lastBeatFlashTime = now
-            }
-
-            // Simulate vocal/melody sweeping dominant frequency
-            val dominantFreq = 50.0f + Math.abs(Math.sin(timeSec * 0.5) * 2000.0).toFloat() + random.nextFloat() * 100.0f
-
-            // Map dominant frequency to HSV Hue using band-range constraints
-            val bandMinF: Float
-            val bandMaxF: Float
-            val minHue: Float
-            val maxHue: Float
-            if (dominantFreq < 150.0f) {
-                bandMinF = 20.0f
-                bandMaxF = 150.0f
-                minHue = 0.0f
-                maxHue = 40.0f
-            } else if (dominantFreq < 2000.0f) {
-                bandMinF = 150.0f
-                bandMaxF = 2000.0f
-                minHue = 80.0f
-                maxHue = 160.0f
-            } else {
-                bandMinF = 2000.0f
-                bandMaxF = maxOf(2000.0f, dominantFreq, 10000.0f)
-                minHue = 200.0f
-                maxHue = 280.0f
-            }
-
-            var hue = if (state.isLogarithmicScalingEnabled) {
-                val logMin = Math.log10(bandMinF.toDouble())
-                val logMax = Math.log10(bandMaxF.toDouble())
-                val freq = dominantFreq.coerceIn(bandMinF, bandMaxF)
-                val logFreq = Math.log10(freq.toDouble())
-                (minHue + ((logFreq - logMin) / (logMax - logMin)) * (maxHue - minHue)).toFloat().coerceIn(minHue, maxHue)
-            } else {
-                val freq = dominantFreq.coerceIn(bandMinF, bandMaxF)
-                (minHue + ((freq - bandMinF) / (bandMaxF - bandMinF)) * (maxHue - minHue)).toFloat().coerceIn(minHue, maxHue)
-            }
-            
-            // Shift band-hue-range boundaries by 120 degrees if in sustained section
-            if (isSustainedSection) {
-                hue = (hue + 120.0f) % 360f
-            }
-
-            if (state.isPaletteCyclingEnabled) {
-                hue = (hue + palettes[currentPaletteIndex]) % 360f
-            }
-
-            // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
-            val targetRad = Math.toRadians(hue.toDouble())
-            val targetX = Math.cos(targetRad).toFloat()
-            val targetY = Math.sin(targetRad).toFloat()
-
-            val smoothedRad = Math.toRadians(smoothedHue.toDouble())
-            val curSmoothedX = Math.cos(smoothedRad).toFloat()
-            val curSmoothedY = Math.sin(smoothedRad).toFloat()
-
-            val nextX: Float
-            val nextY: Float
-            if (isBeat) {
-                nextX = targetX
-                nextY = targetY
-            } else {
-                val alpha = (0.10f * state.visualizerColorSpeed).coerceIn(0.01f, 1.0f)
-                nextX = alpha * targetX + (1f - alpha) * curSmoothedX
-                nextY = alpha * targetY + (1f - alpha) * curSmoothedY
-            }
-
-            val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-            smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
-
-            if (state.isAutoGainEnabled) {
-                // Aggressive dual-rate auto-gain using rawBass instead of smoothedBass to maintain snappiness
-                val decayFactorBass = if (rawBass < avgBass) 0.97f else 0.992f
-                maxObservedBass = maxOf(maxObservedBass * decayFactorBass, rawBass, 10.0f)
-                
-                val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
-                maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
-            } else {
-                maxObservedBass = 100.0f
-                maxObservedMid = 100.0f
-            }
-
-            val sat = if (state.isAutoGainEnabled) {
-                (0.4f + 0.6f * (smoothedMid / maxObservedMid)).coerceIn(0.4f, 1.0f)
-            } else {
-                (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
-            }
-            
-            val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
-            
-            var valBase: Float
-            val bassFloor = 0.8f * avgBass
-            val rangeBass = maxOf(maxObservedBass - bassFloor, 5.0f)
-            valBase = if (state.isAutoGainEnabled) {
-                ((smoothedBass - bassFloor) / rangeBass).coerceIn(0.0f, 1.0f)
-            } else {
-                (smoothedBass / 100.0f).coerceIn(0.0f, 1.0f)
-            }
-            if (smoothedBass < state.noiseGateThreshold) {
-                valBase = 0.0f
-            } else {
-                valBase = Math.pow(valBase.toDouble(), 2.0).toFloat()
-            }
-
-            var value: Float
-            if (state.visualizerPreset == "Beat Only") {
-                val elapsedMs = now - lastBeatFlashTime
-                val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
-            } else {
-                var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
-                baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                val ambientLevel = baseValVal * state.ambientCapFraction
-                val elapsedMs = now - lastBeatFlashTime
-                val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                val beatFlash = beatEnvelope * state.audioFlashStrength
-                value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-            }
-
-            val (r, g, b) = hsvToRgb(smoothedHue, sat, value)
-            latestR = r
-            latestG = g
-            latestB = b
-
-            val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
-            queueCommand(cmd)
-
-            val isBelow = totalEnergy < state.noiseGateThreshold
-            val isIdle: Boolean
-            if (isBelow) {
-                if (silenceStartTime == 0L) {
-                    silenceStartTime = startTime
-                }
-                isIdle = (startTime - silenceStartTime) > state.idleTriggerDelayMs
-            } else {
-                silenceStartTime = 0L
-                isIdle = false
-            }
-
-            val normalizedAmplitudesList = if (isIdle) {
-                val pulseVal = 0.15f + 0.10f * Math.sin(2.0 * Math.PI * timeSec / 4.0).toFloat()
-                List(8) { pulseVal.coerceIn(0.05f, 1.0f) }
-            } else if (isBelow) {
-                List(8) { 0.05f }
-            } else {
-                for (band in 0 until 8) {
-                    val baseVal = if (band in 0..1) {
-                        if (isBeatInstant) 0.8f + random.nextFloat() * 0.2f else 0.1f + random.nextFloat() * 0.1f
-                    } else if (band in 2..5) {
-                        0.2f + Math.sin(timeSec * 2.0 + band).toFloat() * 0.15f + random.nextFloat() * 0.1f
-                    } else {
-                        0.1f + Math.cos(timeSec * 4.0 + band).toFloat() * 0.1f + random.nextFloat() * 0.05f
-                    }
-                    uiAmplitudes8[band] = baseVal.coerceIn(0.05f, 1.0f)
-                }
-                uiAmplitudes8.toList()
-            }
-
-            _uiState.update {
-                it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = isIdle))
-            }
-            _telemetry.update {
-                it.copy(
-                    musicAmplitudes = normalizedAmplitudesList,
-                    visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
-                )
-            }
+            val result = simulator.process(_uiState.value.audioSettings)
+            publishAudioDspResult(result)
 
             val elapsed = System.currentTimeMillis() - startTime
             val sleepTime = intervalMs - elapsed
@@ -3847,10 +3079,6 @@ class RgbControllerViewModel(
                 Thread.yield()
             }
         }
-    }
-
-    private fun hsvToRgb(h: Float, s: Float, v: Float): Triple<Int, Int, Int> {
-        return com.example.core.color.ColorConverter.hsvToRgb(h, s, v)
     }
 
     // Phase 4: the FFT utility that used to live here moved to
@@ -3872,48 +3100,4 @@ class RgbControllerViewModel(
             audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
         } catch (e: Exception) {}
     }
-}
-
-class MetronomePlayer {
-    private val sampleRate = 44100
-    private var clickData: ShortArray? = null
-
-    init {
-        val durationMs = 50
-        val numSamples = (sampleRate * durationMs) / 1000
-        clickData = ShortArray(numSamples) { i ->
-            val t = i.toDouble() / sampleRate
-            val frequency = 1200.0 // crisp tick frequency
-            val envelope = (numSamples - i).toDouble() / numSamples
-            val value = Math.sin(2.0 * Math.PI * frequency * t) * envelope * Short.MAX_VALUE
-            value.toInt().toShort()
-        }
-    }
-
-    fun playClick() {
-        try {
-            val data = clickData ?: return
-            val track = AudioTrack(
-                AudioManager.STREAM_MUSIC,
-                sampleRate,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                data.size * 2,
-                AudioTrack.MODE_STATIC
-            )
-            track.write(data, 0, data.size)
-            track.play()
-            Thread {
-                try {
-                    Thread.sleep(120)
-                    track.stop()
-                    track.release()
-                } catch (e: Exception) {}
-            }.start()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-
 }

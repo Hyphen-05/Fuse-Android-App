@@ -222,6 +222,10 @@ sealed interface RgbIntent {
     data class UpdateOverride(val key: String, val hexString: String) : RgbIntent
     // verified signature: fun writeAmbianceColor(r: Int, g: Int, b: Int) — no address param
     data class WriteAmbianceColor(val r: Int, val g: Int, val b: Int) : RgbIntent
+    // Fires the phone-mic-toggle BLE broadcast tied to ambiance capture start/stop.
+    // AmbianceCaptureState.isActive itself stays outside RgbUiState (see AmbianceSettingsReducer) —
+    // this intent only carries the BLE side effect through dispatch(), same as WriteAmbianceColor.
+    data class SetAmbianceCaptureActive(val active: Boolean) : RgbIntent
 
     // --- Scenes & Presets ---
     data class ApplyScene(val scene: AppScene, val isReversing: Boolean = false) : RgbIntent

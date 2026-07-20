@@ -39,9 +39,11 @@ sealed interface AudioSideEffect {
     data class StartAudioEngine(val mode: String) : AudioSideEffect
 }
 
-// Mirrors RgbControllerViewModel's BeatDetector default (private class, RgbControllerViewModel.kt:217-220):
+// Mirrors BeatDetector's default lookaheadMs (com.example.core.audio.BeatDetector, moved out of
+// RgbControllerViewModel.kt in Phase 5, part B — see its constructor default there):
 // `BeatDetector().lookaheadMs` is always constructed with no args, so the effective value is always
-// this default. The class itself is private to the ViewModel file and can't be referenced here.
+// this default. Kept as a local constant here rather than importing the class, to avoid this
+// reducer depending on audio-pipeline internals for a single derived value.
 private const val BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS = 180L
 
 private data class VisualizerConfig(

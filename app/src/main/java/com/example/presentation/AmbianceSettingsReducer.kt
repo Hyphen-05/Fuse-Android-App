@@ -2,6 +2,7 @@ package com.example.presentation
 
 import com.example.RgbUiState
 import com.example.RgbIntent
+import com.example.core.protocol.DuoCoProtocol
 
 // ============================================================================
 // AMBIANCE SIDE EFFECTS — side effects triggered by ambiance settings transitions
@@ -12,6 +13,19 @@ sealed interface AmbianceSideEffect {
     data class SaveAmbiancePrefInt(val key: String, val value: Int) : AmbianceSideEffect
     data class SaveAmbiancePrefString(val key: String, val value: String) : AmbianceSideEffect
     object CancelSceneChain : AmbianceSideEffect
+    // Pure BLE passthrough for the captured-frame color (mirrors the real writeAmbianceColor()'s
+    // AmbianceCaptureState.isActive guard + broadcastCommandDirect call) — no RgbUiState field touched.
+    data class WriteColor(val r: Int, val g: Int, val b: Int) : AmbianceSideEffect
+    // Pure BLE passthrough for the capture-session phone-mic toggle (mirrors the real
+    // broadcastCommand() call previously made directly by AmbianceCaptureService).
+    data class BroadcastCommand(val command: ByteArray) : AmbianceSideEffect {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is BroadcastCommand) return false
+            return command.contentEquals(other.command)
+        }
+        override fun hashCode(): Int = command.contentHashCode()
+    }
 }
 
 // Mirrors RgbControllerViewModel's setAmbiance*() family (lines 2775-2845): each of the seven
@@ -146,6 +160,14 @@ fun ambianceSettingsReducer(
                 AmbianceSideEffect.SaveAmbiancePrefString("ambiance_preset", intent.presetId)
             )
             newState to effects
+        }
+
+        is RgbIntent.WriteAmbianceColor -> {
+            state to listOf(AmbianceSideEffect.WriteColor(intent.r, intent.g, intent.b))
+        }
+
+        is RgbIntent.SetAmbianceCaptureActive -> {
+            state to listOf(AmbianceSideEffect.BroadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(intent.active)))
         }
 
         else -> state to emptyList()
