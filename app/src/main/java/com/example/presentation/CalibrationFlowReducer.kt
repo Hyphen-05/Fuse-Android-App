@@ -47,12 +47,22 @@ sealed interface CalibrationSideEffect {
     data class SetDeviceManagerPacing(val address: String, val ms: Int) : CalibrationSideEffect
     object ResetAllDeviceManagerPacing : CalibrationSideEffect
 
-    // Metronome coroutine (StartCalibrationMode / StopCalibrationMode). Every
-    // tick internally re-fires SendFlashPulse — same effect as the direct intent.
+    // Metronome coroutine (StartCalibrationMode / StopCalibrationMode).
+    // CONTRACT: on each tick (after delaying calibrationDelayOffsetMs, mirroring
+    // source's `launch { delay(currentDelay.toLong()); sendCalibrationFlash() }`),
+    // the executor of this effect MUST re-dispatch RgbIntent.SendCalibrationFlash
+    // through the same intent-processing entry point used for direct dispatch —
+    // NOT construct SendFlashPulse (or any equivalent BLE pulse) inline. This
+    // keeps SendFlashPulse producible from exactly one place: the
+    // RgbIntent.SendCalibrationFlash branch below. Do not special-case the
+    // metronome tick with its own pulse logic; there must be nothing to drift.
     object StartMetronome : CalibrationSideEffect
     object CancelMetronome : CalibrationSideEffect
 
     // BLE pulse (white full-brightness -> 120ms -> black). No RgbUiState change.
+    // Produced ONLY by the RgbIntent.SendCalibrationFlash branch below — see the
+    // StartMetronome contract above for why the metronome tick must not produce
+    // this independently.
     object SendFlashPulse : CalibrationSideEffect
 
     // Test pattern coroutine loop (cycles RED/GREEN/BLUE/WHITE every 30ms).
@@ -155,7 +165,10 @@ fun calibrationFlowReducer(
         }
 
         is RgbIntent.SendCalibrationFlash -> {
-            // Pure IO/BLE pulse — no RgbUiState field is touched in source.
+            // Pure IO/BLE pulse — no RgbUiState field is touched in source. This is
+            // the sole branch that may emit SendFlashPulse (see contract on
+            // CalibrationSideEffect.StartMetronome) — the metronome tick must
+            // re-dispatch this intent rather than duplicating its effect.
             state to listOf(CalibrationSideEffect.SendFlashPulse)
         }
 
