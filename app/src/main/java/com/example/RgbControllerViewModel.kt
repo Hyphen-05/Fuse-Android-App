@@ -1,4 +1,4 @@
-package com.example
+﻿package com.example
 
 import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
@@ -146,7 +146,11 @@ data class ActiveDeviceState(
 // see CLAUDE.md "RgbUiState shape (locked)" for the sub-state mapping.
 
 
-private class BeatDetector(
+// Phase 4: visibility widened from `private` to `internal` so AudioDspProcessor
+// (com.example.core.audio) can reuse it — deliberately left in this file/location per the
+// Phase 4 hardware-isolation trace ("already pure/stateless-per-instance — leave it where it
+// is, just reuse it"); only the access modifier changed, no logic touched.
+internal class BeatDetector(
     private val fluxHistorySize: Int = 64,
     private val medianWindowMs: Long = 1000L,
     val lookaheadMs: Long = 180L,
@@ -3419,15 +3423,19 @@ class RgbControllerViewModel(
     }
 
     // --- MUSIC SYNC & AUDIO CAPTURE ACTIONS ---
-    private var audioRecord: AudioRecord? = null
-    private var visualizer: Visualizer? = null
-    
+    // Phase 4: hardware capture (Visualizer / AudioRecord) is isolated behind
+    // com.example.hardware.audio.AudioCaptureSource; the DSP pipeline that used to run inline
+    // here now lives in com.example.core.audio.AudioDspProcessor. This ViewModel is now the
+    // orchestrator: construct the right capture source + a fresh processor, wire callbacks that
+    // reproduce the exact _uiState/_telemetry/queueCommand writes the original inline code made.
+    private var audioCaptureSource: com.example.hardware.audio.AudioCaptureSource? = null
+    private var audioDspProcessor: com.example.core.audio.AudioDspProcessor? = null
+
     // Thread-safe state for transmission
     @Volatile private var latestR = 0
     @Volatile private var latestG = 0
     @Volatile private var latestB = 0
 
-    private var audioThread: Thread? = null
     private var transmissionThread: Thread? = null
 
     fun startMusicSync(mode: String) {
@@ -3440,34 +3448,23 @@ class RgbControllerViewModel(
 
     private fun stopMusicSyncInternal(keepServiceRunning: Boolean = false) {
         _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = false)) }
-        
-        audioThread?.interrupt()
-        audioThread = null
-        
+
         transmissionThread?.interrupt()
         transmissionThread = null
-        
-        try {
-            audioRecord?.stop()
-        } catch (e: Exception) {}
-        try {
-            audioRecord?.release()
-        } catch (e: Exception) {}
-        audioRecord = null
 
         try {
-            visualizer?.enabled = false
-            visualizer?.release()
+            audioCaptureSource?.stop()
         } catch (e: Exception) {}
-        visualizer = null
-        
+        audioCaptureSource = null
+        audioDspProcessor = null
+
         if (!keepServiceRunning) {
             try {
                 AudioCaptureService.stop(getApplication())
             } catch (e: Exception) {}
         }
-        
-        
+
+
     }
 
     fun setMusicSensitivity(value: Int) {
@@ -3478,874 +3475,79 @@ class RgbControllerViewModel(
         startAudioEngine(mode)
     }
 
+    /**
+     * Handles one DSP result the same way the original inline callback did: publish
+     * isVisualizerIdle/musicAmplitudes/visualizerHue and queue the derived RGB command.
+     */
+    private fun publishAudioDspResult(result: com.example.core.audio.AudioDspResult) {
+        latestR = result.r
+        latestG = result.g
+        latestB = result.b
+
+        val cmd = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
+        queueCommand(cmd)
+
+        _uiState.update {
+            it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = result.isIdle))
+        }
+        _telemetry.update {
+            it.copy(
+                musicAmplitudes = result.amplitudes,
+                visualizerHue = if (result.isIdle) it.visualizerHue else result.hue
+            )
+        }
+    }
+
     private fun startAudioEngine(mode: String) {
         _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = true)) }
-        
-        // 1. Audio Capture and Processing Thread
+
+        // 1. Audio Capture and Processing
         if (mode == "on_device") {
-            try {
-                val hasPermission = ContextCompat.checkSelfPermission(
-                    getApplication(),
-                    Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
+            val source = com.example.hardware.audio.VisualizerCaptureSource(getApplication())
+            val processor = com.example.core.audio.AudioDspProcessor(source.backend)
+            audioCaptureSource = source
+            audioDspProcessor = processor
 
-                if (!hasPermission) {
-                    addLog("Record Audio Permission missing. Running simulation.")
+            val started = source.start(
+                onFrame = { frame ->
+                    processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                        ?.let { publishAudioDspResult(it) }
+                },
+                onLog = { addLog(it) },
+                isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
+                onError = {
+                    audioCaptureSource = null
+                    audioDspProcessor = null
                     runAudioSimulationEngine()
-                    return
                 }
-
-                val vis = Visualizer(0)
-                com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: ON_DEVICE initialized")
-                vis.captureSize = Visualizer.getCaptureSizeRange()[1]
-                
-                // DSP State Variables
-                var smoothedBass = 0.0f
-                var smoothedMid = 0.0f
-                var smoothedHigh = 0.0f
-                var continuousHueOffset = 0.0f
-                var whiteHotFlashOffset = 1.0f
-                var beatHueOffset = 0.0f
-                var maxObservedBass = 20.0f
-                var maxObservedMid = 20.0f
-                
-                val bassHistory = FloatArray(86)
-                var bassHistoryIdx = 0
-                var bassHistorySum = 0.0f
-                var bassHistoryCount = 0
-                var lastBeatTime = 0L
-                val beatDetector = BeatDetector()
-                var beatPulsePeak = 0.0f
-                var lastBeatFlashTime = 0L
-                var currentPaletteIndex = 0
-                val palettes = arrayOf(0f, 60f, 120f, 180f, 240f, 300f)
-
-                val noiseHistory = FloatArray(86)
-                var noiseHistoryIdx = 0
-                var noiseHistoryCount = 0
-
-                val uiAmplitudes8 = FloatArray(8)
-                var maxUiObserved = 10.0f
-                val maxPerBandObserved = FloatArray(8) { 10.0f }
-                var silenceStartTime = 0L
-                
-                var smoothedHue = 0.0f
-
-                // Sustained energy section-change variables
-                val energyWindowSize = 250 // ~6 seconds
-                val energyHistory = FloatArray(energyWindowSize)
-                var energyHistoryIdx = 0
-                var energyHistorySum = 0.0f
-                var energyHistorySqSum = 0.0f
-                var energyHistoryCount = 0
-
-                val shortWindowSize = 43 // ~1 second
-                val shortHistory = FloatArray(shortWindowSize)
-                var shortHistoryIdx = 0
-                var shortHistorySum = 0.0f
-                var shortHistoryCount = 0
-
-                var lastFftTime = 0L
-
-                vis.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                        if (fft == null || !_uiState.value.audioSettings.isAudioSyncRunning) return
-                        
-                        val nowElapsed = android.os.SystemClock.elapsedRealtime()
-                        if (lastFftTime != 0L) {
-                            val interval = nowElapsed - lastFftTime
-                            com.example.DiagnosticLogger.log(
-                                "AudioCapture",
-                                "FFT capture interval: ${interval}ms, mode=on_device"
-                            )
-                        }
-                        lastFftTime = nowElapsed
-                        
-                        val len = fft.size
-                        val numBins = len / 2
-                        if (numBins < 349) return
-                        
-                        val magnitude = FloatArray(numBins)
-                        val realBins = FloatArray(numBins)
-                        val imagBins = FloatArray(numBins)
-                        magnitude[0] = Math.abs(fft[0].toInt()).toFloat()
-                        realBins[0] = fft[0].toFloat()
-                        imagBins[0] = 0.0f
-                        for (k in 1 until numBins) {
-                            val r = fft[2 * k].toFloat()
-                            val i = fft[2 * k + 1].toFloat()
-                            magnitude[k] = Math.sqrt((r * r + i * i).toDouble()).toFloat()
-                            realBins[k] = r
-                            imagBins[k] = i
-                        }
-
-                        // Calculate frame average magnitude (excluding DC, up to minOf(349, numBins))
-                        val searchLimit = minOf(349, numBins)
-                        var magnitudeSum = 0.0f
-                        var magnitudeCount = 0
-                        for (k in 1 until searchLimit) {
-                            magnitudeSum += magnitude[k]
-                            magnitudeCount++
-                        }
-                        val frameAvgMag = if (magnitudeCount > 0) magnitudeSum / magnitudeCount else 0.0f
-
-                        // Update rolling buffer
-                        noiseHistory[noiseHistoryIdx] = frameAvgMag
-                        noiseHistoryIdx = (noiseHistoryIdx + 1) % 86
-                        if (noiseHistoryCount < 86) noiseHistoryCount++
-
-                        // Calculate 10th percentile of recent magnitudes
-                        val noiseFloor = if (noiseHistoryCount > 0) {
-                            val activeHistory = noiseHistory.copyOfRange(0, noiseHistoryCount)
-                            activeHistory.sort()
-                            val idx = (noiseHistoryCount * 0.1f).toInt().coerceIn(0, noiseHistoryCount - 1)
-                            activeHistory[idx]
-                        } else {
-                            0.0f
-                        }
-
-                        // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
-                        val threshold = noiseFloor * 1.5f
-                        for (k in 0 until numBins) {
-                            if (magnitude[k] < threshold) {
-                                magnitude[k] = 0.0f
-                                realBins[k] = 0.0f
-                                imagBins[k] = 0.0f
-                            }
-                        }
-
-                        val rateHz = if (samplingRate > 0) samplingRate / 1000.0f else 44100.0f
-                        val state = _uiState.value.audioSettings
-
-                        var bassEnergy = 0.0f
-                        for (k in 1..3) bassEnergy += magnitude[k]
-                        val bassVal = (bassEnergy / 3.0f) * state.bassGain
-
-                        var midEnergy = 0.0f
-                        for (k in 4..46) midEnergy += magnitude[k]
-                        val midVal = (midEnergy / 43.0f) * state.midGain
-
-                        var highEnergy = 0.0f
-                        for (k in 47..348) highEnergy += magnitude[k]
-                        val highVal = (highEnergy / 302.0f) * state.highGain
-
-                        val totalEnergy = bassVal + midVal + highVal
-
-                        // 1. Add totalEnergy to 6-second window for mean and variance
-                        val oldEnergy = energyHistory[energyHistoryIdx]
-                        energyHistory[energyHistoryIdx] = totalEnergy
-                        energyHistorySum = energyHistorySum - oldEnergy + totalEnergy
-                        energyHistorySqSum = energyHistorySqSum - (oldEnergy * oldEnergy) + (totalEnergy * totalEnergy)
-                        energyHistoryIdx = (energyHistoryIdx + 1) % energyWindowSize
-                        if (energyHistoryCount < energyWindowSize) energyHistoryCount++
-
-                        val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
-                        val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
-                        val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
-
-                        // 2. Add totalEnergy to 1-second window for detecting sustain
-                        val oldShort = shortHistory[shortHistoryIdx]
-                        shortHistory[shortHistoryIdx] = totalEnergy
-                        shortHistorySum = shortHistorySum - oldShort + totalEnergy
-                        shortHistoryIdx = (shortHistoryIdx + 1) % shortWindowSize
-                        if (shortHistoryCount < shortWindowSize) shortHistoryCount++
-
-                        val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
-
-                        val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-                        val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
-
-                        val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
-
-                        val midAlpha = if (midVal > smoothedMid) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedMid = midAlpha * midVal + (1f - midAlpha) * smoothedMid
-
-                        val highAlpha = if (highVal > smoothedHigh) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedHigh = highAlpha * highVal + (1f - highAlpha) * smoothedHigh
-
-                        val oldBass = bassHistory[bassHistoryIdx]
-                        bassHistory[bassHistoryIdx] = bassVal
-                        bassHistorySum = bassHistorySum - oldBass + bassVal
-                        bassHistoryIdx = (bassHistoryIdx + 1) % 86
-                        if (bassHistoryCount < 86) bassHistoryCount++
-                        val avgBass = if (bassHistoryCount > 0) bassHistorySum / bassHistoryCount else 0.0f
-
-                        val now = System.currentTimeMillis()
-                        val result = beatDetector.process(
-                            magnitude = magnitude,
-                            realBins = realBins,
-                            imagBins = imagBins,
-                            bassRange = 1..8,
-                            midRange = 9..46,
-                            midWeight = state.midFluxWeight,
-                            thresholdMultiplier = state.beatThresholdMultiplier,
-                            minCooldownMs = 180,
-                            maxCooldownMs = state.beatCooldownMs,
-                            now = now
-                        )
-                        val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
-                        if (isBeat) {
-                            if (state.isPaletteCyclingEnabled) {
-                                currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-                            }
-                            beatPulsePeak = 0.6f + 0.4f * result.strength
-                            lastBeatFlashTime = now
-                            
-                            val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
-                            if (useWhiteFlash) {
-                                whiteHotFlashOffset = 0.0f
-                                continuousHueOffset = (continuousHueOffset + 15f) % 360f
-                            } else {
-                                beatHueOffset = 180.0f
-                                continuousHueOffset = (continuousHueOffset + 30f) % 360f
-                            }
-                        }
-
-                        // Calculate Energy Ratios (Hue)
-                        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
-                        beatHueOffset *= 0.85f
-
-                        val activeTotal = smoothedBass + smoothedMid + smoothedHigh
-                        val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
-                        val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
-
-                        continuousHueOffset = (continuousHueOffset + (activeTotal * 0.01f)) % 360f
-                        
-                        var hue = (continuousHueOffset + (midRatio * 60f) - (highRatio * 60f) + 360f + beatHueOffset) % 360f
-                        
-                        // Shift band-hue-range boundaries by 120 degrees if in sustained section
-                        if (isSustainedSection) {
-                            hue = (hue + 120.0f) % 360f
-                        }
-
-                        if (state.isPaletteCyclingEnabled) {
-                            hue = (hue + palettes[currentPaletteIndex]) % 360f
-                        }
-
-                        // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
-                        val targetRad = Math.toRadians(hue.toDouble())
-                        val targetX = Math.cos(targetRad).toFloat()
-                        val targetY = Math.sin(targetRad).toFloat()
-
-                        val smoothedRad = Math.toRadians(smoothedHue.toDouble())
-                        val curSmoothedX = Math.cos(smoothedRad).toFloat()
-                        val curSmoothedY = Math.sin(smoothedRad).toFloat()
-
-                        val nextX: Float
-                        val nextY: Float
-                        if (isBeat) {
-                            nextX = targetX
-                            nextY = targetY
-                        } else {
-                            val alpha = (0.10f * state.visualizerColorSpeed).coerceIn(0.01f, 1.0f)
-                            nextX = alpha * targetX + (1f - alpha) * curSmoothedX
-                            nextY = alpha * targetY + (1f - alpha) * curSmoothedY
-                        }
-
-                        val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-                        smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
-
-                        if (state.isAutoGainEnabled) {
-                            // Aggressive dual-rate auto-gain: rapid decay in low-amplitude states to boost quiet sections instantly
-                            val decayFactorBass = if (bassVal < avgBass) 0.97f else 0.992f
-                            maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
-                            
-                            val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
-                            maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
-                        } else {
-                            maxObservedBass = 100.0f
-                            maxObservedMid = 100.0f
-                        }
-
-                        val baseSat = if (state.isAutoGainEnabled) {
-                            (0.5f + 0.5f * (smoothedMid / maxObservedMid)).coerceIn(0.5f, 1.0f)
-                        } else {
-                            (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
-                        }
-                        val sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
-                        
-                        val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
-                        
-                        var valBase: Float
-                        val bassFloor = 0.8f * avgBass
-                        val rangeBass = maxOf(maxObservedBass - bassFloor, 5.0f)
-                        val bassContribution = if (state.isAutoGainEnabled) {
-                            ((smoothedBass - bassFloor) / rangeBass).coerceIn(0.0f, 1.0f)
-                        } else {
-                            (smoothedBass / 100.0f).coerceIn(0.0f, 1.0f)
-                        }
-
-                        val midFloor = 0.5f * (maxObservedMid * 0.1f)
-                        val rangeMid = maxOf(maxObservedMid - midFloor, 5.0f)
-                        val midContribution = ((smoothedMid - midFloor) / rangeMid).coerceIn(0.0f, 1.0f)
-
-                        var bc = bassContribution
-                        if (smoothedBass >= state.noiseGateThreshold) {
-                            bc = Math.pow(bc.toDouble(), 1.5).toFloat()
-                        } else {
-                            bc = 0.0f
-                        }
-                        valBase = maxOf(bc, midContribution * 0.3f)
-
-                        var value: Float
-                        if (state.visualizerPreset == "Beat Only") {
-                            val elapsedMs = now - lastBeatFlashTime
-                            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                            val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                            value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
-                        } else {
-                            var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
-                            baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                            val ambientLevel = baseValVal * state.ambientCapFraction
-                            val elapsedMs = now - lastBeatFlashTime
-                            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                            val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                            val beatFlash = beatEnvelope * state.audioFlashStrength
-                            value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-                        }
-
-                        val (r, g, b) = hsvToRgb(smoothedHue, sat, value)
-                        latestR = r
-                        latestG = g
-                        latestB = b
-
-                        val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
-                        queueCommand(cmd)
-
-                        val isBelow = totalEnergy < state.noiseGateThreshold
-                        val isIdle: Boolean
-                        if (isBelow) {
-                            if (silenceStartTime == 0L) {
-                                silenceStartTime = now
-                            }
-                            isIdle = (now - silenceStartTime) > state.idleTriggerDelayMs
-                        } else {
-                            silenceStartTime = 0L
-                            isIdle = false
-                        }
-
-                        val normalizedAmplitudesList = if (isIdle) {
-                            val timeSec = now / 1000.0
-                            val pulseVal = 0.15f + 0.10f * Math.sin(2.0 * Math.PI * timeSec / 4.0).toFloat()
-                            List(8) { pulseVal.coerceIn(0.05f, 1.0f) }
-                        } else if (isBelow) {
-                            List(8) { 0.05f }
-                        } else {
-                            val edges = intArrayOf(1, 2, 5, 10, 23, 49, 108, 234, 512)
-                            for (band in 0 until 8) {
-                                val startBin = edges[band]
-                                val endBin = minOf(edges[band + 1], numBins - 1)
-                                var peak = 0.0f
-                                for (bin in startBin until endBin) {
-                                    if (magnitude[bin] > peak) {
-                                        peak = magnitude[bin]
-                                    }
-                                }
-                                // Equal-loudness inspired weighting (boost higher bands)
-                                val weight = 1.0f + (band * 0.4f)
-                                uiAmplitudes8[band] = (if (endBin > startBin) peak else magnitude[startBin]) * weight
-                            }
-
-                            maxUiObserved = maxUiObserved * 0.98f
-                            var currentGlobalMax = 0.0f
-                            for (band in 0 until 8) {
-                                maxPerBandObserved[band] = maxPerBandObserved[band] * 0.98f
-                                maxPerBandObserved[band] = maxOf(maxPerBandObserved[band], uiAmplitudes8[band], 2.0f)
-                                currentGlobalMax = maxOf(currentGlobalMax, uiAmplitudes8[band])
-                            }
-                            maxUiObserved = maxOf(maxUiObserved, currentGlobalMax, 5.0f)
-
-                            uiAmplitudes8.mapIndexed { index, amp ->
-                                val bandNorm = amp / (maxPerBandObserved[index] + 0.001f)
-                                val globalNorm = amp / (maxUiObserved + 0.001f)
-                                // Blend between per-band normalization (70%) and global normalization (30%)
-                                val blended = (bandNorm * 0.7f) + (globalNorm * 0.3f)
-                                blended.coerceIn(0.05f, 1.0f)
-                            }
-                        }
-
-                        _uiState.update {
-                            it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = isIdle))
-                        }
-                        _telemetry.update {
-                            it.copy(
-                                musicAmplitudes = normalizedAmplitudesList,
-                                visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
-                            )
-                        }
-                    }
-                }, Visualizer.getMaxCaptureRate(), false, true)
-
-                vis.enabled = true
-                visualizer = vis
-                addLog("System Visualizer initialized successfully for on-device sync (direct FFT).")
-                return
-            } catch (e: Exception) {
-                addLog("Failed to initialize Visualizer: ${e.message}. Running simulation.")
-                runAudioSimulationEngine()
-                return
+            )
+            if (!started) {
+                audioCaptureSource = null
+                audioDspProcessor = null
             }
+            return
         }
 
-        audioThread = Thread {
-            val hasPermission = ContextCompat.checkSelfPermission(
-                getApplication(),
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
+        // 2. "phone_mic" (and any other non-"on_device" mode) — matches the original, which had
+        // no further mode branching here and fell straight into the AudioRecord backend.
+        val source = com.example.hardware.audio.AudioRecordCaptureSource(getApplication())
+        val processor = com.example.core.audio.AudioDspProcessor(source.backend)
+        audioCaptureSource = source
+        audioDspProcessor = processor
 
-            if (!hasPermission) {
-                addLog("Record Audio Permission missing or denied. Running simulation.")
+        source.start(
+            onFrame = { frame ->
+                processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                    ?.let { publishAudioDspResult(it) }
+            },
+            onLog = { addLog(it) },
+            isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
+            onError = {
+                audioCaptureSource = null
+                audioDspProcessor = null
                 runAudioSimulationEngine()
-                return@Thread
             }
-
-            val sampleRate = 44100
-            val channelConfig = AudioFormat.CHANNEL_IN_MONO
-            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-            val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            
-            if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-                addLog("AudioRecord buffer size error, starting simulation.")
-                runAudioSimulationEngine()
-                return@Thread
-            }
-
-            var record: AudioRecord? = null
-            try {
-                record = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    sampleRate,
-                    channelConfig,
-                    audioFormat,
-                    maxOf(minBufferSize, 1024 * 2)
-                )
-
-                if (record.state != AudioRecord.STATE_INITIALIZED) {
-                    addLog("Failed to initialize AudioRecord. Starting simulation.")
-                    runAudioSimulationEngine()
-                    return@Thread
-                }
-
-                audioRecord = record
-                record.startRecording()
-                addLog("AudioRecord recording started at 44.1 kHz (buffer: 1024).")
-                com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: PHONE_MIC started successfully")
-
-                val buffer = ShortArray(1024)
-                val real = FloatArray(1024)
-                val imag = FloatArray(1024)
-
-                // Precompute Hamming Window
-                val hammingWindow = FloatArray(1024) { i ->
-                    0.54f - 0.46f * Math.cos(2.0 * Math.PI * i / 1023.0).toFloat()
-                }
-
-                // DSP State Variables
-                var smoothedBass = 0.0f
-                var smoothedMid = 0.0f
-                var smoothedHigh = 0.0f
-                var continuousHueOffset = 0.0f
-                var whiteHotFlashOffset = 1.0f
-                var beatHueOffset = 0.0f
-                var maxObservedBass = 10.0f
-                var maxObservedMid = 10.0f
-                
-                // 2-second rolling bass history window (~86 frames at 23ms per frame)
-                val bassHistory = FloatArray(86)
-                var bassHistoryIdx = 0
-                var bassHistorySum = 0.0f
-                var bassHistoryCount = 0
-                var lastBeatTime = 0L
-                val beatDetector = BeatDetector()
-                var beatPulsePeak = 0.0f
-                var lastBeatFlashTime = 0L
-                var currentPaletteIndex = 0
-                val palettes = arrayOf(0f, 60f, 120f, 180f, 240f, 300f)
-
-                var smoothedHue = 0.0f
-
-                val noiseHistory = FloatArray(86)
-                var noiseHistoryIdx = 0
-                var noiseHistoryCount = 0
-
-                // UI visualizer spectrum mapping
-                val uiAmplitudes8 = FloatArray(8)
-                var maxUiObserved = 10.0f
-                val maxPerBandObserved = FloatArray(8) { 10.0f }
-                var silenceStartTime = 0L
-
-                // Sustained energy section-change variables
-                val energyWindowSize = 250 // ~6 seconds
-                val energyHistory = FloatArray(energyWindowSize)
-                var energyHistoryIdx = 0
-                var energyHistorySum = 0.0f
-                var energyHistorySqSum = 0.0f
-                var energyHistoryCount = 0
-
-                val shortWindowSize = 43 // ~1 second
-                val shortHistory = FloatArray(shortWindowSize)
-                var shortHistoryIdx = 0
-                var shortHistorySum = 0.0f
-                var shortHistoryCount = 0
-
-                var lastReadTime = 0L
-
-                while (!Thread.currentThread().isInterrupted && audioRecord != null && _uiState.value.audioSettings.isAudioSyncRunning) {
-                    val nowElapsed = android.os.SystemClock.elapsedRealtime()
-                    if (lastReadTime != 0L) {
-                        val interval = nowElapsed - lastReadTime
-                        com.example.DiagnosticLogger.log(
-                            "AudioCapture",
-                            "MIC read callback interval: ${interval}ms, mode=phone_mic"
-                        )
-                    }
-                    lastReadTime = nowElapsed
-
-                    val readResult = record.read(buffer, 0, 1024)
-                    if (readResult <= 0) {
-                        if (readResult == AudioRecord.ERROR_INVALID_OPERATION || readResult == AudioRecord.ERROR_BAD_VALUE) {
-                            break
-                        }
-                        continue
-                    }
-
-                    // Copy raw PCM data to float array and apply Hamming Window
-                    for (i in 0 until 1024) {
-                        val sample = if (i < readResult) buffer[i].toFloat() else 0.0f
-                        real[i] = sample * hammingWindow[i]
-                        imag[i] = 0.0f
-                    }
-
-                    // Compute FFT
-                    Fft.fft(real, imag)
-
-                    // Compute spectral magnitudes
-                    val magnitude = FloatArray(512)
-                    for (k in 0 until 512) {
-                        magnitude[k] = Math.sqrt((real[k] * real[k] + imag[k] * imag[k]).toDouble()).toFloat()
-                    }
-
-                    // Calculate frame average magnitude (excluding DC, up to minOf(349, 512))
-                    val searchLimit = 349
-                    var magnitudeSum = 0.0f
-                    var magnitudeCount = 0
-                    for (k in 1 until searchLimit) {
-                        magnitudeSum += magnitude[k]
-                        magnitudeCount++
-                    }
-                    val frameAvgMag = if (magnitudeCount > 0) magnitudeSum / magnitudeCount else 0.0f
-
-                    // Update rolling buffer
-                    noiseHistory[noiseHistoryIdx] = frameAvgMag
-                    noiseHistoryIdx = (noiseHistoryIdx + 1) % 86
-                    if (noiseHistoryCount < 86) noiseHistoryCount++
-
-                    // Calculate 10th percentile of recent magnitudes
-                    val noiseFloor = if (noiseHistoryCount > 0) {
-                        val activeHistory = noiseHistory.copyOfRange(0, noiseHistoryCount)
-                        activeHistory.sort()
-                        val idx = (noiseHistoryCount * 0.1f).toInt().coerceIn(0, noiseHistoryCount - 1)
-                        activeHistory[idx]
-                    } else {
-                        0.0f
-                    }
-
-                    // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
-                    val threshold = noiseFloor * 1.5f
-                    for (k in 0 until 512) {
-                        if (magnitude[k] < threshold) {
-                            magnitude[k] = 0.0f
-                            real[k] = 0.0f
-                            imag[k] = 0.0f
-                        }
-                    }
-
-                    val state = _uiState.value.audioSettings
-                    // Group frequency bins (each bin has width 44100 / 1024 ≈ 43.07 Hz)
-                    // Bass Band: 20Hz - 150Hz (bins 1 to 3)
-                    var bassEnergy = 0.0f
-                    for (k in 1..3) bassEnergy += magnitude[k]
-                    val bassVal = (bassEnergy / 3.0f) * state.bassGain
-
-                    // Mid Band: 150Hz - 2000Hz (bins 4 to 46)
-                    var midEnergy = 0.0f
-                    for (k in 4..46) midEnergy += magnitude[k]
-                    val midVal = (midEnergy / 43.0f) * state.midGain
-
-                    // High Band: 2000Hz - 15kHz (bins 47 to 348)
-                    var highEnergy = 0.0f
-                    for (k in 47..348) highEnergy += magnitude[k]
-                    val highVal = (highEnergy / 302.0f) * state.highGain
-
-                    val totalEnergy = bassVal + midVal + highVal
-
-                    // 1. Add totalEnergy to 6-second window for mean and variance
-                    val oldEnergy = energyHistory[energyHistoryIdx]
-                    energyHistory[energyHistoryIdx] = totalEnergy
-                    energyHistorySum = energyHistorySum - oldEnergy + totalEnergy
-                    energyHistorySqSum = energyHistorySqSum - (oldEnergy * oldEnergy) + (totalEnergy * totalEnergy)
-                    energyHistoryIdx = (energyHistoryIdx + 1) % energyWindowSize
-                    if (energyHistoryCount < energyWindowSize) energyHistoryCount++
-
-                    val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
-                    val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
-                    val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
-
-                    // 2. Add totalEnergy to 1-second window for detecting sustain
-                    val oldShort = shortHistory[shortHistoryIdx]
-                    shortHistory[shortHistoryIdx] = totalEnergy
-                    shortHistorySum = shortHistorySum - oldShort + totalEnergy
-                    shortHistoryIdx = (shortHistoryIdx + 1) % shortWindowSize
-                    if (shortHistoryCount < shortWindowSize) shortHistoryCount++
-
-                    val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
-
-                    val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-                    val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
-
-                    // Apply Dynamic Exponential Moving Average (EMA) Temporal Smoothing
-                    val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
-
-                    val midAlpha = if (midVal > smoothedMid) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedMid = midAlpha * midVal + (1f - midAlpha) * smoothedMid
-
-                    val highAlpha = if (highVal > smoothedHigh) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedHigh = highAlpha * highVal + (1f - highAlpha) * smoothedHigh
-
-                    // Track rolling 2-second average of bass energy
-                    val oldBass = bassHistory[bassHistoryIdx]
-                    bassHistory[bassHistoryIdx] = bassVal
-                    bassHistorySum = bassHistorySum - oldBass + bassVal
-                    bassHistoryIdx = (bassHistoryIdx + 1) % 86
-                    if (bassHistoryCount < 86) bassHistoryCount++
-                    val avgBass = if (bassHistoryCount > 0) bassHistorySum / bassHistoryCount else 0.0f
-
-                    val now = System.currentTimeMillis()
-                    val result = beatDetector.process(
-                        magnitude = magnitude,
-                        realBins = real,
-                        imagBins = imag,
-                        bassRange = 1..8,
-                        midRange = 9..46,
-                        midWeight = state.midFluxWeight,
-                        thresholdMultiplier = state.beatThresholdMultiplier,
-                        minCooldownMs = 180,
-                        maxCooldownMs = state.beatCooldownMs,
-                        now = now
-                    )
-                    val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
-                    if (isBeat) {
-                        if (state.isPaletteCyclingEnabled) {
-                            currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-                        }
-                        beatPulsePeak = 0.6f + 0.4f * result.strength
-                        lastBeatFlashTime = now
-                        val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
-                        if (useWhiteFlash) {
-                            whiteHotFlashOffset = 0.0f
-                            continuousHueOffset = (continuousHueOffset + 15f) % 360f
-                        } else {
-                            beatHueOffset = 180.0f
-                            continuousHueOffset = (continuousHueOffset + 30f) % 360f
-                        }
-                    }
-
-                    // Calculate Energy Ratios (Hue)
-                    whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
-                    beatHueOffset *= 0.85f
-
-                    val activeTotal = smoothedBass + smoothedMid + smoothedHigh
-                    val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
-                    val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
-
-                    continuousHueOffset = (continuousHueOffset + (activeTotal * 0.01f)) % 360f
-                    
-                    var hue = (continuousHueOffset + (midRatio * 60f) - (highRatio * 60f) + 360f + beatHueOffset) % 360f
-                    
-                    // Shift band-hue-range boundaries by 120 degrees if in sustained section
-                    if (isSustainedSection) {
-                        hue = (hue + 120.0f) % 360f
-                    }
-
-                    // Shift Hue based on active baseline color palette from beat registration
-                    if (state.isPaletteCyclingEnabled) {
-                        hue = (hue + palettes[currentPaletteIndex]) % 360f
-                    }
-
-                    // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
-                    val targetRad = Math.toRadians(hue.toDouble())
-                    val targetX = Math.cos(targetRad).toFloat()
-                    val targetY = Math.sin(targetRad).toFloat()
-
-                    val smoothedRad = Math.toRadians(smoothedHue.toDouble())
-                    val curSmoothedX = Math.cos(smoothedRad).toFloat()
-                    val curSmoothedY = Math.sin(smoothedRad).toFloat()
-
-                    val nextX: Float
-                    val nextY: Float
-                    if (isBeat) {
-                        nextX = targetX
-                        nextY = targetY
-                    } else {
-                        val alpha = (0.10f * state.visualizerColorSpeed).coerceIn(0.01f, 1.0f)
-                        nextX = alpha * targetX + (1f - alpha) * curSmoothedX
-                        nextY = alpha * targetY + (1f - alpha) * curSmoothedY
-                    }
-
-                    val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-                    smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
-
-                    // Normalize Saturation (Mid Band) and Value (Bass Band) using rolling max auto-gain
-                    if (state.isAutoGainEnabled) {
-                        // Aggressive dual-rate auto-gain using instant bassVal instead of smoothed to maintain snappiness
-                        val decayFactorBass = if (bassVal < avgBass) 0.97f else 0.992f
-                        maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
-                        
-                        val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
-                        maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
-                    } else {
-                        maxObservedBass = 100.0f
-                        maxObservedMid = 100.0f
-                    }
-
-                    val baseSat = if (state.isAutoGainEnabled) {
-                        (0.4f + 0.6f * (smoothedMid / maxObservedMid)).coerceIn(0.4f, 1.0f)
-                    } else {
-                        (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
-                    }
-                    val sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
-                    
-                    val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
-                    
-                    var valBase: Float
-                    val bassFloor = 0.8f * avgBass
-                    val rangeBass = maxOf(maxObservedBass - bassFloor, 5.0f)
-                    val bassContribution = if (state.isAutoGainEnabled) {
-                        ((smoothedBass - bassFloor) / rangeBass).coerceIn(0.0f, 1.0f)
-                    } else {
-                        (smoothedBass / 100.0f).coerceIn(0.0f, 1.0f)
-                    }
-
-                    val midFloor = 0.5f * (maxObservedMid * 0.1f)
-                    val rangeMid = maxOf(maxObservedMid - midFloor, 5.0f)
-                    val midContribution = ((smoothedMid - midFloor) / rangeMid).coerceIn(0.0f, 1.0f)
-
-                    var bc = bassContribution
-                    if (smoothedBass >= state.noiseGateThreshold) {
-                        bc = Math.pow(bc.toDouble(), 1.5).toFloat()
-                    } else {
-                        bc = 0.0f
-                    }
-                    valBase = maxOf(bc, midContribution * 0.3f)
-
-                    var value: Float
-                    if (state.visualizerPreset == "Beat Only") {
-                        val elapsedMs = now - lastBeatFlashTime
-                        val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                        val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                        value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
-                    } else {
-                        var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
-                        baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                        val ambientLevel = baseValVal * state.ambientCapFraction
-                        val elapsedMs = now - lastBeatFlashTime
-                        val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                        val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                        val beatFlash = beatEnvelope * state.audioFlashStrength
-                        value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-                    }
-
-                    // Convert HSV to standard RGB values
-                    val (r, g, b) = hsvToRgb(smoothedHue, sat, value)
-                    latestR = r
-                    latestG = g
-                    latestB = b
-
-                    val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
-                    queueCommand(cmd)
-
-                    val isBelow = totalEnergy < state.noiseGateThreshold
-                    val isIdle: Boolean
-                    if (isBelow) {
-                        if (silenceStartTime == 0L) {
-                            silenceStartTime = now
-                        }
-                        isIdle = (now - silenceStartTime) > state.idleTriggerDelayMs
-                    } else {
-                        silenceStartTime = 0L
-                        isIdle = false
-                    }
-
-                    val normalizedAmplitudesList = if (isIdle) {
-                        val timeSec = now / 1000.0
-                        val pulseVal = 0.15f + 0.10f * Math.sin(2.0 * Math.PI * timeSec / 4.0).toFloat()
-                        List(8) { pulseVal.coerceIn(0.05f, 1.0f) }
-                    } else if (isBelow) {
-                        List(8) { 0.05f }
-                    } else {
-                        val edges = intArrayOf(1, 2, 5, 10, 23, 49, 108, 234, 512)
-                        for (band in 0 until 8) {
-                            val startBin = edges[band]
-                            val endBin = minOf(edges[band + 1], 511)
-                            var peak = 0.0f
-                            for (bin in startBin until endBin) {
-                                if (magnitude[bin] > peak) {
-                                    peak = magnitude[bin]
-                                }
-                            }
-                            // Equal-loudness inspired weighting (boost higher bands)
-                            val weight = 1.0f + (band * 0.4f)
-                            uiAmplitudes8[band] = (if (endBin > startBin) peak else magnitude[startBin]) * weight
-                        }
-
-                        maxUiObserved = maxUiObserved * 0.98f
-                        var currentGlobalMax = 0.0f
-                        for (band in 0 until 8) {
-                            maxPerBandObserved[band] = maxPerBandObserved[band] * 0.98f
-                            maxPerBandObserved[band] = maxOf(maxPerBandObserved[band], uiAmplitudes8[band], 2.0f)
-                            currentGlobalMax = maxOf(currentGlobalMax, uiAmplitudes8[band])
-                        }
-                        maxUiObserved = maxOf(maxUiObserved, currentGlobalMax, 5.0f)
-
-                        uiAmplitudes8.mapIndexed { index, amp ->
-                            val bandNorm = amp / (maxPerBandObserved[index] + 0.001f)
-                            val globalNorm = amp / (maxUiObserved + 0.001f)
-                            // Blend between per-band normalization (70%) and global normalization (30%)
-                            val blended = (bandNorm * 0.7f) + (globalNorm * 0.3f)
-                            blended.coerceIn(0.05f, 1.0f)
-                        }
-                    }
-
-                    _uiState.update {
-                        it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = isIdle))
-                    }
-                    _telemetry.update {
-                        it.copy(
-                            musicAmplitudes = normalizedAmplitudesList,
-                            visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                addLog("Audio capture thread error: ${e.message}")
-                runAudioSimulationEngine()
-            } finally {
-                try {
-                    record?.stop()
-                } catch (e: Exception) {}
-                try {
-                    record?.release()
-                } catch (e: Exception) {}
-            }
-        }.apply {
-            name = "AudioCaptureThread"
-            priority = Thread.MAX_PRIORITY - 1
-            start()
-        }
+        )
     }
 
     private fun runAudioSimulationEngine() {
@@ -4657,64 +3859,9 @@ class RgbControllerViewModel(
         return com.example.core.color.ColorConverter.hsvToRgb(h, s, v)
     }
 
-    // In-place Radix-2 Cooley-Tukey Fast Fourier Transform
-    private object Fft {
-        fun fft(real: FloatArray, imag: FloatArray) {
-            val n = real.size
-            if (n == 0) return
-            
-            // Bit-reversal permutation
-            var j = 0
-            for (i in 0 until n) {
-                if (i < j) {
-                    val tempR = real[i]
-                    real[i] = real[j]
-                    real[j] = tempR
-                    
-                    val tempI = imag[i]
-                    imag[i] = imag[j]
-                    imag[j] = tempI
-                }
-                var m = n shr 1
-                while (m >= 1 && j >= m) {
-                    j -= m
-                    m = m shr 1
-                }
-                j += m
-            }
-            
-            // Cooley-Tukey decimation-in-time
-            var len = 2
-            while (len <= n) {
-                val ang = -2.0 * Math.PI / len
-                val wlenR = Math.cos(ang).toFloat()
-                val wlenI = Math.sin(ang).toFloat()
-                for (i in 0 until n step len) {
-                    var wR = 1.0f
-                    var wI = 0.0f
-                    val halfLen = len shr 1
-                    for (k in 0 until halfLen) {
-                        val uR = real[i + k]
-                        val uI = imag[i + k]
-                        
-                        val tR = real[i + k + halfLen] * wR - imag[i + k + halfLen] * wI
-                        val tI = real[i + k + halfLen] * wI + imag[i + k + halfLen] * wR
-                        
-                        real[i + k] = uR + tR
-                        imag[i + k] = uI + tI
-                        
-                        real[i + k + halfLen] = uR - tR
-                        imag[i + k + halfLen] = uI - tI
-                        
-                        val nextWR = wR * wlenR - wI * wlenI
-                        wI = wR * wlenI + wI * wlenR
-                        wR = nextWR
-                    }
-                }
-                len = len shl 1
-            }
-        }
-    }
+    // Phase 4: the FFT utility that used to live here moved to
+    // com.example.hardware.audio.Fft (internal object, algorithm unchanged) — its only caller,
+    // the AudioRecord capture loop, now lives in AudioRecordCaptureSource.
 
     override fun onCleared() {
         if (instance === this) {
