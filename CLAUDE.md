@@ -114,7 +114,8 @@ Uses screen capture (`MediaProjection`), **not** the physical camera. The camera
 - `CoreControlsReducerTest.kt` covers the Core Controls + Connectivity + Device management reducer (`CoreControlsReducer.kt`). 43 tests, all 21 intents.
 - `AmbianceSettingsReducerTest.kt` covers the Ambiance & Camera Sync reducer (`AmbianceSettingsReducer.kt`). 13 tests, all 8 intents.
 - `AudioSettingsReducerTest.kt` covers the Audio Settings reducer (`AudioSettingsReducer.kt`). 39 tests, all 23 intents, including regression tests for the selective `"Custom"`-preset-reset quirk and the `totalVisualDelayMs` derivation.
-- Run via `./gradlew :app:testDebugUnitTest`. Reducer logic and its tests are opened as **separate PRs** (reducer first, tests based on the reducer branch) — follow this precedent for future reducer slices (calibration flow tests next).
+- `CalibrationFlowReducerTest.kt` covers the Calibration & Tuning reducer (`CalibrationFlowReducer.kt`). 23 tests, all 13 intents, including regression tests for the unconditional-restart quirk, the two-pref-key write in `SaveCalibrationAndExit`, the standalone `bluetooth_delay_ms` reset write, the dual pacing-reset paths, the no-live-manager no-op in `SetDevicePacing`, and the SendFlashPulse single-producer contract (see the `StartMetronome` contract in `CalibrationFlowReducer.kt`).
+- Run via `./gradlew :app:testDebugUnitTest`. Reducer logic and its tests are opened as **separate PRs** (reducer first, tests based on the reducer branch) — follow this precedent for future reducer slices.
 
 ## Git/GitHub notes
 
