@@ -528,12 +528,14 @@ class AudioSettingsReducerTest {
     }
 
     @Test
-    fun resetAudioPipelineSettings_doesNotPersistMidFluxWeight() {
-        // Preserved quirk: mid_flux_weight is reset in state but never written to prefs here,
-        // mirroring RgbControllerViewModel.resetAudioPipelineSettings() exactly.
+    fun resetAudioPipelineSettings_persistsMidFluxWeight() {
+        // RgbControllerViewModel.resetAudioPipelineSettings() (line 2938) does persist
+        // mid_flux_weight to prefs, unlike several other reset fields modeled elsewhere as
+        // state-only. A prior source-diff pass missed this write; verified directly against
+        // the real ViewModel method during Stage 4 wiring.
         val (_, effects) = reduce(intent = RgbIntent.ResetAudioPipelineSettings)
 
-        assertFalse(effects.any { it is AudioSideEffect.SaveAudioPrefFloat && it.key == "mid_flux_weight" })
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.25f)))
     }
 
     // ========================================================================
