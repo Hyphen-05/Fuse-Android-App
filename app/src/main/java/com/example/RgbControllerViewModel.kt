@@ -14,11 +14,8 @@ import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
-import android.bluetooth.BluetoothGattCallback
-import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.Handler
@@ -152,7 +149,9 @@ class RgbControllerViewModel(
     private val application: android.content.Context,
     private val prefsRepo: com.example.domain.repository.AppPreferencesRepository,
     private val repository: com.example.domain.repository.RgbDatabaseRepository,
-    private val connectionManager: com.example.domain.ConnectionManager
+    private val connectionManager: com.example.domain.ConnectionManager,
+    private val bleScanTransport: com.example.hardware.ble.BleScanTransport,
+    private val bleGattTransport: com.example.hardware.ble.BleGattTransport
 ) : androidx.lifecycle.ViewModel() {
 
     private fun getApplication(): android.app.Application = application as android.app.Application
@@ -163,13 +162,10 @@ class RgbControllerViewModel(
 
         fun getActiveInstance(): RgbControllerViewModel? = instance
 
-        // Static maps to survive Activity/ViewModel recreation and prevent GC disconnects
-        val activeConnections = ConcurrentHashMap<String, BluetoothGatt>()
-        val writeCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
-        val retryAttempts = ConcurrentHashMap<String, Int>()
+        // Scene-orchestration exclusion set — NOT BLE transport, stays here. The raw BLE connection
+        // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
+        // connectionScope) moved to com.example.hardware.ble.AndroidBleGattTransport (Phase 6).
         val activeExcludedMacs = ConcurrentHashMap.newKeySet<String>()
-        val deviceWriteManagers = ConcurrentHashMap<String, RgbControllerViewModel.DeviceWriteManager>()
-        private val connectionScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
     }
 
         private val deviceStateStore = DeviceStateStore(application)
@@ -275,7 +271,7 @@ class RgbControllerViewModel(
             state = audioState,
             intent = intent,
             savedCalibrationDelayMs = savedCalibrationDelayMs,
-            connectedManagerAddresses = deviceWriteManagers.keys
+            connectedManagerAddresses = bleGattTransport.deviceWriteManagerAddresses()
         )
         _uiState.value = newState
         coreEffects.forEach { executeCoreSideEffect(it) }
@@ -316,10 +312,10 @@ class RgbControllerViewModel(
                 }
             }
             is com.example.presentation.CalibrationSideEffect.SetDeviceManagerPacing -> {
-                deviceWriteManagers[effect.address]?.currentPacingMs = effect.ms
+                bleGattTransport.setPacing(effect.address, effect.ms)
             }
             com.example.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
-                deviceWriteManagers.forEach { (_, manager) -> manager.currentPacingMs = 100 }
+                bleGattTransport.resetAllPacing(100)
             }
             // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
             // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
@@ -369,7 +365,7 @@ class RgbControllerViewModel(
                             android.graphics.Color.green(c),
                             android.graphics.Color.blue(c)
                         )
-                        deviceWriteManagers[effect.address]?.updateCommand(cmd)
+                        bleGattTransport.writeCommand(effect.address, cmd)
                         idx++
                         delay(30)
                     }
@@ -614,189 +610,6 @@ class RgbControllerViewModel(
         return result
     }
 
-    inner class DeviceWriteManager(
-        val address: String,
-        val gatt: BluetoothGatt,
-        val charac: BluetoothGattCharacteristic
-    ) {
-        private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
-        @Volatile var isWriting = false
-        @Volatile var lastWriteTime = 0L
-        val writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-        var currentPacingMs = prefsRepo.getPacingPrefInt(address, 50)
-        
-        private var framesSent = 0
-        private var lastFpsTime = System.currentTimeMillis()
-        @Volatile private var pendingJob: kotlinx.coroutines.Job? = null
-        
-        private var consecutiveWatchdogTriggers = 0
-        private var lastQueueLogTime = 0L
-
-        fun updateCommand(command: ByteArray) {
-            val processed = processCommandWithCalibration(address, command)
-            
-            val type = if (processed.size >= 3) processed[2] else null
-            if (type != null) {
-                val iterator = commandQueue.iterator()
-                while (iterator.hasNext()) {
-                    val existing = iterator.next()
-                    if (existing.size >= 3 && existing[2] == type) {
-                        iterator.remove()
-                    }
-                }
-            }
-            
-            val qSizeBefore = commandQueue.size
-            // Fallback limit just in case
-            if (commandQueue.size > 20) {
-                commandQueue.poll()
-                com.example.DiagnosticLogger.log(
-                    "DeviceWriteManager",
-                    "Backpressure triggered (Queue size > 20)! Polled/dropped command. address=$address. (${getDiagAttribution(address)})"
-                )
-            }
-            commandQueue.offer(processed)
-            val qSizeAfter = commandQueue.size
-            com.example.DiagnosticLogger.log(
-                "DeviceWriteManager",
-                "Write enqueued: address=$address, cmdHex=${processed.joinToString("") { String.format("%02X", it) }}, queueSizeBefore=$qSizeBefore, queueSizeAfter=$qSizeAfter. (${getDiagAttribution(address)})"
-            )
-            
-            val now = System.currentTimeMillis()
-            if (now - lastQueueLogTime >= 1000L) {
-                Log.d("BleWriteQueue", "Queue size for $address: ${commandQueue.size}")
-                lastQueueLogTime = now
-            }
-
-            tryWrite()
-        }
-
-        fun onWriteCompleted() {
-            com.example.DiagnosticLogger.log(
-                "DeviceWriteManager",
-                "onWriteCompleted callback received for $address. (${getDiagAttribution(address)})"
-            )
-            consecutiveWatchdogTriggers = 0
-            lastWriteTime = System.currentTimeMillis()
-            isWriting = false
-            framesSent++
-            val now = System.currentTimeMillis()
-            if (now - lastFpsTime >= 1000L) {
-                val fps = framesSent
-                framesSent = 0
-                lastFpsTime = now
-                _telemetry.update { s ->
-                    s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps))
-                }
-            }
-            tryWrite()
-        }
-
-        @Synchronized
-        private fun tryWrite() {
-            if (isWriting) return
-            val cmd = commandQueue.peek() ?: return
-            
-            val now = System.currentTimeMillis()
-            val elapsed = now - lastWriteTime
-            
-            if (currentPacingMs > 0) {
-                if (elapsed < currentPacingMs) {
-                    if (pendingJob == null || pendingJob?.isActive != true) {
-                        pendingJob = connectionScope.launch(Dispatchers.IO) {
-                            delay(currentPacingMs - elapsed)
-                            pendingJob = null
-                            tryWrite()
-                        }
-                    }
-                    return
-                }
-            }
-            
-            isWriting = true
-            val cmdToWrite = commandQueue.poll()
-            if (cmdToWrite == null) {
-                isWriting = false
-                return
-            }
-            val currentWriteTime = System.currentTimeMillis()
-            lastWriteTime = currentWriteTime
-            
-            charac.writeType = writeType
-            try {
-                val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeCharacteristic(charac, cmdToWrite, writeType) == android.bluetooth.BluetoothStatusCodes.SUCCESS
-                } else {
-                    @Suppress("DEPRECATION")
-                    charac.value = cmdToWrite
-                    @Suppress("DEPRECATION")
-                    gatt.writeCharacteristic(charac)
-                }
-                
-                if (!success) {
-                    Log.w("BleWriteQueue", "writeCharacteristic() returned false for $address")
-                    com.example.DiagnosticLogger.log(
-                        "DeviceWriteManager",
-                        "writeCharacteristic() returned false (write failure) for $address. (${getDiagAttribution(address)})"
-                    )
-                } else {
-                    com.example.DiagnosticLogger.log(
-                        "DeviceWriteManager",
-                        "writeCharacteristic() initiated (write success) for $address. (${getDiagAttribution(address)})"
-                    )
-                }
-            } catch (e: Exception) {
-                isWriting = false
-                com.example.DiagnosticLogger.log(
-                    "DeviceWriteManager",
-                    "writeCharacteristic() Exception for $address: ${android.util.Log.getStackTraceString(e)}. (${getDiagAttribution(address)})"
-                )
-                return
-            }
-            
-            connectionScope.launch(Dispatchers.IO) {
-                com.example.DiagnosticLogger.log(
-                    "BleWriteWatchdog",
-                    "Watchdog check tick scheduled for device $address (currentWriteTime=$currentWriteTime). (${getDiagAttribution(address)})"
-                )
-                delay(2000)
-                com.example.DiagnosticLogger.log(
-                    "BleWriteWatchdog",
-                    "Watchdog check tick running for device $address: isWriting=$isWriting, lastWriteTime=$lastWriteTime, expectedWriteTime=$currentWriteTime, consecutiveWatchdogTriggers=$consecutiveWatchdogTriggers. (${getDiagAttribution(address)})"
-                )
-                if (isWriting && lastWriteTime == currentWriteTime) {
-                    Log.w("BleWriteWatchdog", "Watchdog fired for device $address at timestamp $currentWriteTime — forcing reset")
-                    com.example.DiagnosticLogger.log(
-                        "BleWriteWatchdog",
-                        "Watchdog FIRED for device $address at timestamp $currentWriteTime — forcing reset. (${getDiagAttribution(address)})"
-                    )
-                    isWriting = false
-                    consecutiveWatchdogTriggers++
-                    
-                    if (consecutiveWatchdogTriggers >= 3) {
-                        Log.e("BleWriteWatchdog", "device $address appears frozen — forcing reconnect")
-                        com.example.DiagnosticLogger.log(
-                            "BleWriteWatchdog",
-                            "device $address appears frozen (consecutiveTriggers=$consecutiveWatchdogTriggers) — forcing reconnect. (${getDiagAttribution(address)})"
-                        )
-                        consecutiveWatchdogTriggers = 0
-                        try {
-                            gatt.disconnect()
-                        } catch (e: Exception) {
-                            Log.e("BleWriteWatchdog", "Exception forcing disconnect on frozen device", e)
-                            com.example.DiagnosticLogger.log(
-                                "BleWriteWatchdog",
-                                "Exception forcing disconnect on frozen device $address: ${android.util.Log.getStackTraceString(e)}"
-                            )
-                        }
-                    } else {
-                        tryWrite()
-                    }
-                }
-            }
-        }
-    }
-
     private val sceneRunners = ConcurrentHashMap<String, SceneAnimationRunner>()
 
     private val testPatternJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
@@ -999,9 +812,29 @@ class RgbControllerViewModel(
 
     init {
         instance = this
+
+        // Point the long-lived BLE transport's live callbacks/hooks at this ViewModel. Because the
+        // transport is a singleton that survives ViewModel recreation, re-registering here (rather
+        // than the callback hunting for getActiveInstance()) is what keeps its GATT callbacks and
+        // its DeviceWriteManagers wired to the current VM — closing that escape hatch on this path.
+        bleGattTransport.registerCallbacks(
+            onConnectionStateChange = { address, status, newState -> handleConnectionStateChange(address, status, newState) },
+            onServicesDiscovered = { address, status -> handleServicesDiscovered(address, status) },
+            onCharacteristicWrite = { address, status -> handleCharacteristicWrite(address, status) },
+            onLog = { message -> addLog(message) }
+        )
+        bleGattTransport.registerWriteHooks(
+            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, 50) },
+            calibrate = { address, command -> processCommandWithCalibration(address, command) },
+            onFpsUpdate = { address, fps ->
+                _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
+            },
+            diagAttribution = { address -> getDiagAttribution(address) }
+        )
+
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
-        
+
         savedPresets = repository.allPresets.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -1334,19 +1167,15 @@ class RgbControllerViewModel(
         loadCctCalibrations()
 
         // Restore/re-register DeviceWriteManagers for existing active connections to survive Activity/ViewModel recreation
-        activeConnections.forEach { (address, gatt) ->
-            val charac = writeCharacteristics[address]
-            if (charac != null) {
-                val manager = DeviceWriteManager(address, gatt, charac)
-                deviceWriteManagers[address] = manager
-                addLog("Restored DeviceWriteManager for existing active connection: $address")
-            }
+        bleGattTransport.restoreWriteManagers { address ->
+            addLog("Restored DeviceWriteManager for existing active connection: $address")
         }
 
         // Sync initial UI state with existing active BLE connections
-        if (activeConnections.isNotEmpty()) {
-            val initialStates = activeConnections.keys.associateWith { BleConnectionState.CONNECTED }
-            val firstConnectedAddress = activeConnections.keys.first()
+        val activeAddresses = bleGattTransport.activeConnectionAddresses()
+        if (activeAddresses.isNotEmpty()) {
+            val initialStates = activeAddresses.associateWith { BleConnectionState.CONNECTED }
+            val firstConnectedAddress = activeAddresses.first()
             _uiState.update { s ->
                 s.copy(
                     connectivity = s.connectivity.copy(
@@ -1357,7 +1186,7 @@ class RgbControllerViewModel(
                     )
                 )
             }
-            addLog("Synchronized UI state with ${activeConnections.size} active connection(s).")
+            addLog("Synchronized UI state with ${activeAddresses.size} active connection(s).")
         }
 
         viewModelScope.launch {
@@ -1577,27 +1406,16 @@ class RgbControllerViewModel(
     }
 
     // --- SCANNING ---
+    // The ScanCallback + BluetoothLeScanner now live in com.example.hardware.ble.AndroidBleScanTransport
+    // (Phase 6). This ViewModel supplies the onResult/onFailed lambdas via bleScanTransport.startScan.
 
-    private val scanCallback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            super.onScanResult(callbackType, result)
-            result?.let { handleScanResult(it) }
-        }
-
-        override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            super.onBatchScanResults(results)
-            results?.forEach { handleScanResult(it) }
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            super.onScanFailed(errorCode)
-            addLog("Scan failed with error code: $errorCode")
-            _uiState.update {
-                it.copy(
-                    connectivity = it.connectivity.copy(isScanning = false),
-                    coreControl = it.coreControl.copy(errorMessage = "Scan failed: error $errorCode")
-                )
-            }
+    private fun onScanFailedHardware(errorCode: Int) {
+        addLog("Scan failed with error code: $errorCode")
+        _uiState.update {
+            it.copy(
+                connectivity = it.connectivity.copy(isScanning = false),
+                coreControl = it.coreControl.copy(errorMessage = "Scan failed: error $errorCode")
+            )
         }
     }
 
@@ -1640,7 +1458,7 @@ class RgbControllerViewModel(
         // Auto connect if saved and enabled
         val saved = savedDevices.value.find { it.macAddress == address }
         if (saved != null && saved.isAutoConnectEnabled && !connectionManager.isManuallyDisconnected(address)) {
-            val isConnected = activeConnections.containsKey(address) ||
+            val isConnected = bleGattTransport.isConnected(address) ||
                               _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
             val isConnecting = _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTING
             if (!isConnected && !isConnecting) {
@@ -1677,32 +1495,33 @@ class RgbControllerViewModel(
     }
 
     private fun startBleScanHardware() {
-        val adapter = bluetoothAdapter
-        if (adapter == null || !adapter.isEnabled) {
-            _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Bluetooth is disabled or unavailable")) }
-            addLog("Bluetooth must be enabled to scan.")
-            return
-        }
-
-        try {
-            val scanner = adapter.bluetoothLeScanner
-            if (scanner == null) {
+        val result = bleScanTransport.startScan(
+            onResult = { handleScanResult(it) },
+            onFailed = { errorCode -> onScanFailedHardware(errorCode) }
+        )
+        when (result) {
+            com.example.hardware.ble.ScanStartResult.STARTED -> {
+                handler.postDelayed(scanTimeoutRunnable, 12000) // Scan for 12s
+            }
+            com.example.hardware.ble.ScanStartResult.ADAPTER_UNAVAILABLE -> {
+                _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Bluetooth is disabled or unavailable")) }
+                addLog("Bluetooth must be enabled to scan.")
+            }
+            com.example.hardware.ble.ScanStartResult.SCANNER_UNAVAILABLE -> {
                 _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "BLE Scanner unavailable")) }
                 addLog("BLE scanner failed to initialize.")
-                return
             }
-            scanner.startScan(scanCallback)
-            handler.postDelayed(scanTimeoutRunnable, 12000) // Scan for 12s
-        } catch (e: SecurityException) {
-            _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Missing Bluetooth Permissions")) }
-            addLog("SecurityException: Permissions not granted.")
+            com.example.hardware.ble.ScanStartResult.PERMISSION_DENIED -> {
+                _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Missing Bluetooth Permissions")) }
+                addLog("SecurityException: Permissions not granted.")
+            }
         }
     }
 
     private fun stopBleScanHardware() {
         handler.removeCallbacks(scanTimeoutRunnable)
         try {
-            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+            bleScanTransport.stopScan()
         } catch (e: SecurityException) {
             addLog("SecurityException during stopScan.")
         }
@@ -1719,7 +1538,7 @@ class RgbControllerViewModel(
         // Auto connect if saved and enabled (Demo mode)
         val saved = savedDevices.value.find { it.macAddress == address }
         if (saved != null && saved.isAutoConnectEnabled && !connectionManager.isManuallyDisconnected(address)) {
-            val isConnected = activeConnections.containsKey(address) ||
+            val isConnected = bleGattTransport.isConnected(address) ||
                               _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
             val isConnecting = _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTING
             if (!isConnected && !isConnecting) {
@@ -1769,11 +1588,8 @@ class RgbControllerViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val device = adapter.getRemoteDevice(address)
                 connectionManager.connect(address)
-
-                val gatt = device.connectGatt(getApplication(), false, gattCallback)
-                activeConnections[address] = gatt
+                bleGattTransport.connect(getApplication(), address)
             } catch (e: SecurityException) {
                 _uiState.update { s ->
                     s.copy(
@@ -1812,9 +1628,7 @@ class RgbControllerViewModel(
             "disconnectDevice called: address=$address (${getDiagAttribution(address)})"
         )
         connectionManager.disconnect(address, manual = true)
-        val gatt = activeConnections.remove(address)
-        writeCharacteristics.remove(address)
-        deviceWriteManagers.remove(address)
+        val gatt = bleGattTransport.removeConnection(address)
 
         if (_uiState.value.coreControl.isDemoMode) {
             viewModelScope.launch {
@@ -1828,8 +1642,7 @@ class RgbControllerViewModel(
         try {
             viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    gatt?.disconnect()
-                    gatt?.close()
+                    bleGattTransport.rawDisconnectAndClose(gatt)
                 } catch (e: SecurityException) {
                     addLog("SecurityException inside IO disconnect coroutine of $address.")
                 }
@@ -1845,68 +1658,30 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.DisconnectAll)
     }
 
-    private val gattCallback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-            val activeVm = getActiveInstance() ?: this@RgbControllerViewModel
-            activeVm.handleConnectionStateChange(gatt, status, newState)
-        }
+    // The BluetoothGattCallback + connect/disconnect GATT plumbing now live in
+    // com.example.hardware.ble.AndroidBleGattTransport (Phase 6). The transport invokes the
+    // callbacks below (registered in init) — no getActiveInstance() self-reference hunt needed,
+    // since the transport is a singleton that always calls the currently-registered VM. The
+    // exponential-backoff/retry decision logic and all _uiState updates stay here.
 
-        override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-            val activeVm = getActiveInstance() ?: this@RgbControllerViewModel
-            activeVm.handleServicesDiscovered(gatt, status)
-        }
-
-        override fun onCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
-            val activeVm = getActiveInstance() ?: this@RgbControllerViewModel
-            activeVm.handleCharacteristicWrite(gatt, characteristic, status)
-        }
-
-        override fun onCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
-            val activeVm = getActiveInstance() ?: this@RgbControllerViewModel
-            activeVm.handleCharacteristicRead(gatt, characteristic, status)
-        }
-
-        override fun onCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
-            val activeVm = getActiveInstance() ?: this@RgbControllerViewModel
-            activeVm.handleCharacteristicChanged(gatt, characteristic)
-        }
-    }
-
-    fun handleConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
-        val address = gatt?.device?.address ?: return
-        
+    fun handleConnectionStateChange(address: String, status: Int, newState: Int) {
         com.example.DiagnosticLogger.log(
             "BLE",
             "handleConnectionStateChange: address=$address, status=$status, newState=$newState (${getDiagAttribution(address)})"
         )
-        
+
         if (newState == BluetoothProfile.STATE_CONNECTED) {
             addLog("Connected to $address! Discovering services...")
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTING))
-            activeConnections[address] = gatt
-            retryAttempts.remove(address)
+            bleGattTransport.onConnected(address)
             connectionManager.setConnected(address)
 
-            try {
-                gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-                gatt.requestMtu(512)
-            } catch (e: SecurityException) {
-                addLog("SecurityException requesting priority or MTU for $address: ${e.message}")
-            } catch (e: Exception) {
-                addLog("Error requesting priority or MTU for $address: ${e.message}")
-            }
-
-            try {
-                gatt.discoverServices()
-            } catch (e: SecurityException) {
-                addLog("SecurityException: Service discovery denied for $address.")
-            }
+            bleGattTransport.requestHighPriorityAndMtu(address)
+            bleGattTransport.discoverServices(address)
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             addLog("Disconnected from GATT ($address).")
-            val wasActive = activeConnections.containsKey(address)
-            activeConnections.remove(address)
-            writeCharacteristics.remove(address)
-            deviceWriteManagers.remove(address)
+            val wasActive = bleGattTransport.isConnected(address)
+            bleGattTransport.removeConnection(address)
 
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 
@@ -1915,9 +1690,9 @@ class RgbControllerViewModel(
                 connectionManager.disconnect(address, manual = false)
                 val saved = savedDevices.value.find { it.macAddress == address }
                 if (saved != null && saved.isAutoConnectEnabled) {
-                    val attempt = retryAttempts.getOrDefault(address, 0)
+                    val attempt = bleGattTransport.getRetryAttempt(address)
                     if (attempt < 5) {
-                        retryAttempts[address] = attempt + 1
+                        bleGattTransport.setRetryAttempt(address, attempt + 1)
                         val delayMs = (1000L * Math.pow(2.0, attempt.toDouble())).toLong()
                         addLog("Unexpected drop for $address. Retrying in ${delayMs / 1000}s (Attempt ${attempt + 1})...")
                         com.example.DiagnosticLogger.log(
@@ -1926,7 +1701,7 @@ class RgbControllerViewModel(
                         )
                         viewModelScope.launch {
                             delay(delayMs)
-                            if (!activeConnections.containsKey(address) && savedDevices.value.find { it.macAddress == address }?.isAutoConnectEnabled == true) {
+                            if (!bleGattTransport.isConnected(address) && savedDevices.value.find { it.macAddress == address }?.isAutoConnectEnabled == true) {
                                 connectDevice(address)
                             }
                         }
@@ -1942,45 +1717,36 @@ class RgbControllerViewModel(
         }
     }
 
-    fun handleServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-        val address = gatt?.device?.address ?: return
+    fun handleServicesDiscovered(address: String, status: Int) {
         com.example.DiagnosticLogger.log(
             "BLE",
             "handleServicesDiscovered: address=$address, status=$status. (${getDiagAttribution(address)})"
         )
-        if (status == BluetoothGatt.GATT_SUCCESS && gatt != null) {
+        if (status == BluetoothGatt.GATT_SUCCESS) {
             addLog("Services discovered for $address.")
-            findDuoCoCharacteristicForGatt(gatt)
+            when (val reg = bleGattTransport.registerDuoCoCharacteristic(address)) {
+                is com.example.hardware.ble.CharacteristicRegistration.Registered -> onDuoCoCharacteristicRegistered(reg)
+                is com.example.hardware.ble.CharacteristicRegistration.NotFound -> onDuoCoCharacteristicNotFound(reg.address)
+            }
         } else {
             addLog("Service discovery failed for $address with status $status")
         }
     }
 
-    fun handleCharacteristicWrite(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
-        val address = gatt?.device?.address ?: return
+    fun handleCharacteristicWrite(address: String, status: Int) {
         com.example.DiagnosticLogger.log(
             "BLE",
             "handleCharacteristicWrite callback: address=$address, status=$status. (${getDiagAttribution(address)})"
         )
-        deviceWriteManagers[address]?.onWriteCompleted()
+        bleGattTransport.notifyWriteCompleted(address)
     }
 
-    fun handleCharacteristicRead(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?, status: Int) {
-        // Handled or ignored
-    }
+    // Mirrors the former registerCharacteristic() _uiState/addLog side of the write-ready path;
+    // the map writes + DeviceWriteManager construction now live in AndroidBleGattTransport.
+    private fun onDuoCoCharacteristicRegistered(reg: com.example.hardware.ble.CharacteristicRegistration.Registered) {
+        val address = reg.address
+        addLog("Found write characteristic for $address: ${reg.charUuid} (Ack Supported: ${reg.ackSupported})")
 
-    fun handleCharacteristicChanged(gatt: BluetoothGatt?, characteristic: BluetoothGattCharacteristic?) {
-        // Handled or ignored
-    }
-
-    private fun registerCharacteristic(gatt: BluetoothGatt, charac: BluetoothGattCharacteristic) {
-        val address = gatt.device.address
-        writeCharacteristics[address] = charac
-        val manager = DeviceWriteManager(address, gatt, charac)
-        deviceWriteManagers[address] = manager
-        
-        addLog("Found write characteristic for $address: ${charac.uuid} (Ack Supported: ${manager.writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT})")
-        
         _uiState.update { state ->
             state.copy(
                 connectivity = state.connectivity.copy(
@@ -1988,57 +1754,24 @@ class RgbControllerViewModel(
                     connectionState = BleConnectionState.CONNECTED,
                     connectedDeviceAddress = address,
                     connectedDeviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias ?: state.connectivity.scannedDevices.find { it.address == address }?.name ?: "Unknown Device",
-                    devicePacingMs = state.connectivity.devicePacingMs + (address to manager.currentPacingMs)
+                    devicePacingMs = state.connectivity.devicePacingMs + (address to reg.pacingMs)
                 )
             )
         }
     }
 
-    private fun findDuoCoCharacteristicForGatt(gatt: BluetoothGatt) {
-        val address = gatt.device.address
-        var found = false
-        for (service in gatt.services) {
-            val charac = service.getCharacteristic(DuoCoProtocol.CHARACTERISTIC_UUID)
-            if (charac != null) {
-                registerCharacteristic(gatt, charac)
-                found = true
-                break
-            }
-        }
-        if (!found) {
-            for (service in gatt.services) {
-                for (charac in service.characteristics) {
-                    if (charac.uuid == DuoCoProtocol.CHARACTERISTIC_UUID) {
-                        registerCharacteristic(gatt, charac)
-                        found = true
-                        break
-                    }
-                }
-                if (found) break
-            }
-        }
-
-        if (!found) {
-            addLog("Warning: DuoCo characteristic not found for $address. Commands may not work.")
-            _uiState.update { state ->
-                state.copy(
-                    connectivity = state.connectivity.copy(
-                        deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
-                        connectionState = BleConnectionState.CONNECTED,
-                        connectedDeviceAddress = address
-                    )
+    // Mirrors the former findDuoCoCharacteristicForGatt() not-found branch.
+    private fun onDuoCoCharacteristicNotFound(address: String) {
+        addLog("Warning: DuoCo characteristic not found for $address. Commands may not work.")
+        _uiState.update { state ->
+            state.copy(
+                connectivity = state.connectivity.copy(
+                    deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
+                    connectionState = BleConnectionState.CONNECTED,
+                    connectedDeviceAddress = address
                 )
-            }
+            )
         }
-    }
-
-    private fun syncPhysicalBulbOfDevice(gatt: BluetoothGatt) {
-        val state = _uiState.value
-        val powerCmd = DuoCoProtocol.createPowerCommand(state.coreControl.isPowerOn)
-        val colorCmd = DuoCoProtocol.createColorCommand(state.coreControl.red, state.coreControl.green, state.coreControl.blue)
-        val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.coreControl.brightness)
-        val batched = powerCmd + colorCmd + brightnessCmd
-        deviceWriteManagers[gatt.device.address]?.updateCommand(batched)
     }
 
     // --- COMMAND TRANSMISSION & OUTBOUND QUEUE ---
@@ -2064,7 +1797,7 @@ class RgbControllerViewModel(
             val hexStr = finalCmd.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
             Log.d("ColorCalibration", "Simulated transmit to $address: $hexStr")
         } else {
-            deviceWriteManagers[address]?.updateCommand(command)
+            bleGattTransport.writeCommand(address, command)
         }
     }
 
@@ -2082,7 +1815,7 @@ class RgbControllerViewModel(
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
                 }
             } else {
-                deviceWriteManagers[address]?.updateCommand(command)
+                bleGattTransport.writeCommand(address, command)
             }
         }
     }
@@ -2117,7 +1850,7 @@ class RgbControllerViewModel(
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
                 }
             } else {
-                deviceWriteManagers[address]?.updateCommand(command)
+                bleGattTransport.writeCommand(address, command)
             }
         }
     }

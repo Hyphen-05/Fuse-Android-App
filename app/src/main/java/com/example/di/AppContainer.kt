@@ -7,6 +7,10 @@ import com.example.db.AppDatabase
 import com.example.domain.ConnectionManager
 import com.example.domain.repository.AppPreferencesRepository
 import com.example.domain.repository.RgbDatabaseRepository
+import com.example.hardware.ble.AndroidBleGattTransport
+import com.example.hardware.ble.AndroidBleScanTransport
+import com.example.hardware.ble.BleGattTransport
+import com.example.hardware.ble.BleScanTransport
 
 class AppContainer(private val context: Context) {
     val appPreferencesRepository: AppPreferencesRepository by lazy {
@@ -23,5 +27,15 @@ class AppContainer(private val context: Context) {
 
     val connectionManager: ConnectionManager by lazy {
         ConnectionManager()
+    }
+
+    // Long-lived BLE hardware transports — singletons so the raw GATT/scan state and the
+    // DeviceWriteManagers survive Activity/ViewModel recreation (Phase 6, part BLE).
+    val bleScanTransport: BleScanTransport by lazy {
+        AndroidBleScanTransport(context)
+    }
+
+    val bleGattTransport: BleGattTransport by lazy {
+        AndroidBleGattTransport(context)
     }
 }
