@@ -2063,13 +2063,6 @@ fun MainScreen() {
 
 }
 
-fun validateHex(hex: String): Boolean {
-    val clean = hex.replace(" ", "").replace(":", "").replace("-", "")
-    if (clean.isEmpty()) return false
-    if (clean.length % 2 != 0) return false
-    return clean.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
-}
-
 @Composable
 fun ExpressiveNavigationBar(
     selectedTab: Int,

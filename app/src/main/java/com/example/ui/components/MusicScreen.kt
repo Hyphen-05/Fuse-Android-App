@@ -33,7 +33,6 @@ import com.example.AudioCaptureService
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionManager
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts

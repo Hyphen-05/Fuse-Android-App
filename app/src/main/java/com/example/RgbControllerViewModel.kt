@@ -2659,12 +2659,6 @@ class RgbControllerViewModel(
         broadcastCommand(batched)
     }
 
-    private fun delayMs(ms: Long) {
-        viewModelScope.launch {
-            delay(ms)
-        }
-    }
-
 
     // --- CONTROL INTERFACES ---
 
