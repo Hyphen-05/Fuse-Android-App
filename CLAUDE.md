@@ -41,7 +41,7 @@ Two "god files" are mid-refactor into this structure:
 RgbUiState:
   connectivity: ConnectivityState
   coreControl: CoreControlState       // includes errorMessage, protocolBytes
-  audioSettings: AudioSettingsState   // includes musicMode
+  audioSettings: AudioSettingsState   // 27 fields, includes musicMode
   ambianceSettings: AmbianceSettingsState  // ambiancePreset non-null, "Balanced" default
   calibrationFlow: CalibrationFlowState
 ```
@@ -72,6 +72,14 @@ Deliberately **out of scope** for this reducer — verified, not overlooked:
 - `WriteAmbianceColor` is a pure BLE passthrough (no `RgbUiState` field touched, fires per captured frame) — belongs with Commands/Protocol, not settings.
 - `CoreSideEffect.StopAmbiance` already exists and is already wired into `CoreControlsReducer`, fired from `SetPower`/`SetColor`/etc. — not new work.
 
+`AudioSettingsReducer.kt` (`app/src/main/java/com/example/presentation/AudioSettingsReducer.kt`) handles the Audio Settings intent group. **Written, compiles clean, tested; not yet wired into the ViewModel.** Ported against the real `setVisualizerPreset()`, `startMusicSync()`/`stopMusicSync()`, and the sensitivity/threshold/gain setters in `RgbControllerViewModel.kt` (lines 2677-2962, 3901-3975, 4009-4013). Source-diffed line-by-line against all 23 intent handlers, including the 8-preset × 16-field value table (byte-identical) — no discrepancies found. Test coverage: 39 JUnit tests in `AudioSettingsReducerTest.kt`, covering all 23 intents.
+
+**How this works:**
+
+1. `SetVisualizerPreset` writes the 16-field-per-preset value table (`visualizerConfigFor()`) verbatim, plus `activeFeatureName` — recomputed from `getVisualizerPresetName()`/current mode, mirroring source, even though the recompute is a no-op unless `musicMode` is `phone_mic`/`on_device`.
+2. `StartMusicSync`/`StopMusicSync` model the real hardware/scene-runner work (`stopMusicSyncInternal`, `startAudioEngine`, per-address `saveDeviceState`/scene-runner release, `deviceAutomationMode` restore-or-clear) as `AudioSideEffect` cases for the ViewModel to execute — same pattern as `CoreSideEffect`. `startMusicSync` branches on `mode`: phone-mic/on-device modes route to `AudioSideEffect.StartAudioEngine`; the eight onboard BLE modes (`energetic_1/2`, `rhythm_1/2`, `spectrum_1/2`, `rolling_1/2`) route to three direct `BroadcastCommand` effects (toggle, style, sensitivity) instead.
+3. Preserved faithfully, not "fixed": `setBeatThresholdMultiplier` and the smoothing/gamma/flash/brightness/speed/idle-delay group reset `visualizerPreset` to `"Custom"`; `setBeatCooldownMs`, the gain setters, `setAutoGainEnabled`, `setPaletteCyclingEnabled`, and `setLogarithmicScalingEnabled` do **not** — this inconsistency exists in the source and is reproduced exactly. `setBluetoothDelayMs` derives `totalVisualDelayMs = bluetoothDelayMs + BeatDetector().lookaheadMs` inline; since `BeatDetector` is a private class in `RgbControllerViewModel.kt` always constructed with no args, the reducer replicates it as a local constant (`BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS = 180L`) rather than referencing the class directly.
+
 ## Hardware constraint (permanent, confirmed)
 
 Every pixel-count change on a DuoCo device causes a visible firmware-level LED flash. This is unavoidable at the firmware level — design animations around it (e.g. deliberate stepped changes) rather than trying to eliminate it.
@@ -95,7 +103,8 @@ Uses screen capture (`MediaProjection`), **not** the physical camera. The camera
 
 - `CoreControlsReducerTest.kt` covers the Core Controls + Connectivity + Device management reducer (`CoreControlsReducer.kt`). 43 tests, all 21 intents.
 - `AmbianceSettingsReducerTest.kt` covers the Ambiance & Camera Sync reducer (`AmbianceSettingsReducer.kt`). 13 tests, all 8 intents.
-- Run either via `./gradlew :app:testDebugUnitTest`. Reducer logic and its tests are opened as **separate PRs** (reducer first, tests based on the reducer branch) — follow this precedent for future reducer slices (audio settings, calibration flow).
+- `AudioSettingsReducerTest.kt` covers the Audio Settings reducer (`AudioSettingsReducer.kt`). 39 tests, all 23 intents, including regression tests for the selective `"Custom"`-preset-reset quirk and the `totalVisualDelayMs` derivation.
+- Run via `./gradlew :app:testDebugUnitTest`. Reducer logic and its tests are opened as **separate PRs** (reducer first, tests based on the reducer branch) — follow this precedent for future reducer slices (calibration flow next).
 
 ## Git/GitHub notes
 
