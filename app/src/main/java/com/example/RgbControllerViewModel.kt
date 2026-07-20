@@ -748,8 +748,123 @@ class RgbControllerViewModel(
     private val _cctCalibrations = MutableStateFlow<Map<String, CctCorrectionProfile>>(emptyMap())
     val cctCalibrations: StateFlow<Map<String, CctCorrectionProfile>> = _cctCalibrations.asStateFlow()
 
+    // ============================================================================
+    // MVI DISPATCH — Core Controls + Connectivity & Scanning + Device management
+    // ============================================================================
 
+    private fun dispatch(intent: RgbIntent) {
+        val (newState, effects) = com.example.presentation.coreControlsReducer(
+            state = _uiState.value,
+            intent = intent,
+            customModes = customModes.value,
+            savedDevices = savedDevices.value,
+            cctCalibrations = _cctCalibrations.value,
+            isAmbianceActive = com.example.ambiance.AmbianceCaptureState.isActive.value,
+            targetAddresses = getCurrentlyControlledDeviceAddresses(),
+            deviceAutomationMode = deviceAutomationMode
+        )
+        _uiState.value = newState
+        effects.forEach { executeCoreSideEffect(it) }
+    }
 
+    private fun executeCoreSideEffect(effect: com.example.presentation.CoreSideEffect) {
+        when (effect) {
+            is com.example.presentation.CoreSideEffect.SavePrefBoolean -> prefsRepo.putAppStatePrefBoolean(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.SavePrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.SavePrefString -> prefsRepo.putAppStatePrefString(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.Log -> addLog(effect.message)
+            is com.example.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes)
+            is com.example.presentation.CoreSideEffect.SendCommandToDeviceDirect -> sendCommandToDeviceDirect(effect.address, effect.command)
+            is com.example.presentation.CoreSideEffect.ConnectDevice -> connectDeviceHardware(effect.address)
+            is com.example.presentation.CoreSideEffect.DisconnectDevice -> {
+                _uiState.update { s ->
+                    s.copy(connectivity = s.connectivity.copy(
+                        deviceConnectionStates = s.connectivity.deviceConnectionStates + (effect.address to BleConnectionState.DISCONNECTING)
+                    ))
+                }
+                disconnectDeviceHardware(effect.address)
+            }
+            is com.example.presentation.CoreSideEffect.StopMusicSync -> stopMusicSync(effect.restoreState)
+            is com.example.presentation.CoreSideEffect.StopAmbiance -> stopAmbianceIfActive(effect.restoreState)
+            com.example.presentation.CoreSideEffect.CancelSceneChain -> cancelSceneChain()
+            com.example.presentation.CoreSideEffect.ClearExclusionsIfNotApplyingScene -> clearExclusionsIfNotApplyingScene()
+            com.example.presentation.CoreSideEffect.StartBleScan -> startBleScanHardware()
+            com.example.presentation.CoreSideEffect.StopBleScan -> stopBleScanHardware()
+            com.example.presentation.CoreSideEffect.SimulateScan -> simulateScanHardware()
+            com.example.presentation.CoreSideEffect.CheckActiveAudioRoute -> checkActiveAudioRouteHardware()
+            is com.example.presentation.CoreSideEffect.AutoSaveDeviceIfNew -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing == null) {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = effect.autoConnect,
+                                isActiveControlEnabled = effect.activeControl
+                            )
+                        )
+                        addLog("Saved connected device ${effect.name} to database.")
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.ToggleAutoConnect -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing != null) {
+                        repository.updateAutoConnect(effect.address, effect.enabled)
+                    } else {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = effect.enabled,
+                                isActiveControlEnabled = true
+                            )
+                        )
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.UpdateActiveControl -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing != null) {
+                        repository.updateActiveControl(effect.address, effect.enabled)
+                    } else {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = true,
+                                isActiveControlEnabled = effect.enabled
+                            )
+                        )
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.SaveDeviceState -> saveDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.CoreSideEffect.RestoreDeviceState -> restoreDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.CoreSideEffect.DeleteSavedDevice -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteSavedDevice(effect.address)
+                }
+            }
+            is com.example.presentation.CoreSideEffect.SaveDeviceAlias -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.saveDeviceAlias(effect.address, effect.customName)
+                    val existingSaved = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existingSaved != null) {
+                        repository.insertSavedDevice(existingSaved.copy(customName = effect.customName))
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.DeleteDeviceAlias -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteDeviceAlias(effect.address)
+                }
+            }
+        }
+    }
 
     fun getCalibrationMatrices(calibration: ColorCalibration): Map<Float, FloatArray> {
         val map = mutableMapOf<Float, FloatArray>()
@@ -1187,7 +1302,7 @@ class RgbControllerViewModel(
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val scanTimeoutRunnable = Runnable { stopScanning() }
+    private val scanTimeoutRunnable = Runnable { dispatch(RgbIntent.StopScanning) }
 
     private fun saveDeviceState(macAddress: String, mode: AutomationType) {
         if (deviceAutomationMode[macAddress] == null) {
@@ -1742,6 +1857,10 @@ class RgbControllerViewModel(
     }
 
     fun checkActiveAudioRoute() {
+        dispatch(RgbIntent.CheckActiveAudioRoute)
+    }
+
+    private fun checkActiveAudioRouteHardware() {
         val audioManager = getApplication().getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         val hasBluetoothAudio = devices.any {
@@ -1909,11 +2028,7 @@ class RgbControllerViewModel(
     }
 
     fun setDemoMode(isDemo: Boolean) {
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = isDemo)) }
-        addLog(if (isDemo) "Switched to Demo Mode" else "Switched to Real Hardware BLE Mode")
-        if (isDemo) {
-            disconnect()
-        }
+        dispatch(RgbIntent.SetDemoMode(isDemo))
     }
 
     // --- SCANNING ---
@@ -1991,32 +2106,32 @@ class RgbControllerViewModel(
     }
 
     fun startScanning() {
-        val state = _uiState.value
-        if (state.connectivity.isScanning) return
+        dispatch(RgbIntent.StartScanning)
+    }
 
-        _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = true), coreControl = it.coreControl.copy(errorMessage = null)) }
-        addLog("Scan started...")
+    fun stopScanning() {
+        dispatch(RgbIntent.StopScanning)
+    }
 
-        if (state.coreControl.isDemoMode) {
-            // Simulate scanned devices
-            viewModelScope.launch {
-                delay(400)
-                addSimulatedDevice("00:1A:7D:DA:71:11", "ELK-BLEDOM", -52, true)
-                delay(300)
-                addSimulatedDevice("AA:BB:CC:11:22:33", "Smart LED Bulb", -65, true)
-                delay(500)
-                addSimulatedDevice("FC:45:96:22:88:99", "Generic Light Strips", -80, false)
-                delay(300)
-                addSimulatedDevice("44:23:AA:55:12:90", "LED DMX Controller", -45, true)
+    private fun simulateScanHardware() {
+        viewModelScope.launch {
+            delay(400)
+            addSimulatedDevice("00:1A:7D:DA:71:11", "ELK-BLEDOM", -52, true)
+            delay(300)
+            addSimulatedDevice("AA:BB:CC:11:22:33", "Smart LED Bulb", -65, true)
+            delay(500)
+            addSimulatedDevice("FC:45:96:22:88:99", "Generic Light Strips", -80, false)
+            delay(300)
+            addSimulatedDevice("44:23:AA:55:12:90", "LED DMX Controller", -45, true)
 
-                delay(10000) // scan for 10 seconds in demo
-                if (_uiState.value.connectivity.isScanning) {
-                    stopScanning()
-                }
+            delay(10000) // scan for 10 seconds in demo
+            if (_uiState.value.connectivity.isScanning) {
+                dispatch(RgbIntent.StopScanning)
             }
-            return
         }
+    }
 
+    private fun startBleScanHardware() {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Bluetooth is disabled or unavailable")) }
@@ -2039,18 +2154,12 @@ class RgbControllerViewModel(
         }
     }
 
-    fun stopScanning() {
-        if (!_uiState.value.connectivity.isScanning) return
-        _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false)) }
+    private fun stopBleScanHardware() {
         handler.removeCallbacks(scanTimeoutRunnable)
-        addLog("Scan stopped.")
-
-        if (!_uiState.value.coreControl.isDemoMode) {
-            try {
-                bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
-            } catch (e: SecurityException) {
-                addLog("SecurityException during stopScan.")
-            }
+        try {
+            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (e: SecurityException) {
+            addLog("SecurityException during stopScan.")
         }
     }
 
@@ -2083,54 +2192,23 @@ class RgbControllerViewModel(
     // --- CONNECTION ---
 
     fun connectDevice(address: String) {
+        dispatch(RgbIntent.ConnectDevice(address))
+    }
+
+    private fun connectDeviceHardware(address: String) {
         connectionManager.connect(address)
         val state = _uiState.value
-        val deviceToConnect = state.connectivity.scannedDevices.find { it.address == address }
-        val displayName = deviceToConnect?.alias ?: deviceToConnect?.name ?: "Unknown Device"
 
         com.example.DiagnosticLogger.log(
             "BLE",
             "connectDevice attempt: address=$address (${getDiagAttribution(address)})"
         )
 
-        _uiState.update { s ->
-            s.copy(
-                connectivity = s.connectivity.copy(
-                    deviceConnectionStates = s.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTING),
-                    connectedDeviceAddress = address,
-                    connectedDeviceName = displayName
-                )
-            )
-        }
-        addLog("Connecting to $displayName ($address)...")
-
-        // Auto-save device to SavedDevices in Room when connecting
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing == null) {
-                repository.insertSavedDevice(
-                    SavedDevice(
-                        macAddress = address,
-                        customName = displayName,
-                        isAutoConnectEnabled = true,
-                        isActiveControlEnabled = true
-                    )
-                )
-                addLog("Saved connected device $displayName to database.")
-            }
-        }
-
         if (state.coreControl.isDemoMode) {
+            val displayName = state.connectivity.connectedDeviceName ?: "Unknown Device"
             viewModelScope.launch {
                 delay(1200) // Simulating connection lag
-                _uiState.update { s ->
-                    s.copy(
-                        connectivity = s.connectivity.copy(
-                            deviceConnectionStates = s.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
-                            connectionState = BleConnectionState.CONNECTED
-                        )
-                    )
-                }
+                dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTED))
                 addLog("Connected (Simulated) to $displayName!")
             }
             return
@@ -2180,6 +2258,10 @@ class RgbControllerViewModel(
     }
 
     fun disconnectDevice(address: String) {
+        dispatch(RgbIntent.DisconnectDevice(address))
+    }
+
+    private fun disconnectDeviceHardware(address: String) {
         com.example.DiagnosticLogger.log(
             "BLE",
             "disconnectDevice called: address=$address (${getDiagAttribution(address)})"
@@ -2189,31 +2271,10 @@ class RgbControllerViewModel(
         writeCharacteristics.remove(address)
         deviceWriteManagers.remove(address)
 
-        _uiState.update { state ->
-            state.copy(
-                connectivity = state.connectivity.copy(
-                    deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTING)
-                )
-            )
-        }
-
         if (_uiState.value.coreControl.isDemoMode) {
             viewModelScope.launch {
                 delay(300)
-                _uiState.update { state ->
-                    val updatedStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                    val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                    val activeAddr = stillConnected.keys.firstOrNull()
-                    val activeName = activeAddr?.let { addr -> state.connectivity.scannedDevices.find { it.address == addr }?.name }
-                    state.copy(
-                        connectivity = state.connectivity.copy(
-                            deviceConnectionStates = updatedStates,
-                            connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                            connectedDeviceAddress = activeAddr,
-                            connectedDeviceName = activeName
-                        )
-                    )
-                }
+                dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
                 addLog("Disconnected (Simulated) from $address.")
             }
             return
@@ -2228,20 +2289,7 @@ class RgbControllerViewModel(
                     addLog("SecurityException inside IO disconnect coroutine of $address.")
                 }
             }
-            _uiState.update { state ->
-                val updatedStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                val activeAddr = stillConnected.keys.firstOrNull()
-                val activeName = activeAddr?.let { addr -> state.connectivity.scannedDevices.find { it.address == addr }?.name }
-                state.copy(
-                    connectivity = state.connectivity.copy(
-                        deviceConnectionStates = updatedStates,
-                        connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                        connectedDeviceAddress = activeAddr,
-                        connectedDeviceName = activeName
-                    )
-                )
-            }
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
             addLog("Disconnected $address.")
         } catch (e: SecurityException) {
             addLog("SecurityException during disconnect of $address.")
@@ -2249,21 +2297,7 @@ class RgbControllerViewModel(
     }
 
     fun disconnect() {
-        val keys = activeConnections.keys.toList()
-        if (keys.isEmpty()) {
-            _uiState.update {
-                it.copy(
-                    connectivity = it.connectivity.copy(
-                        connectionState = BleConnectionState.DISCONNECTED,
-                        connectedDeviceAddress = null,
-                        connectedDeviceName = null,
-                        deviceConnectionStates = emptyMap()
-                    )
-                )
-            }
-            return
-        }
-        keys.forEach { disconnectDevice(it) }
+        dispatch(RgbIntent.DisconnectAll)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -2303,13 +2337,7 @@ class RgbControllerViewModel(
         
         if (newState == BluetoothProfile.STATE_CONNECTED) {
             addLog("Connected to $address! Discovering services...")
-            _uiState.update { state ->
-                state.copy(
-                    connectivity = state.connectivity.copy(
-                        deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTING)
-                    )
-                )
-            }
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTING))
             activeConnections[address] = gatt
             retryAttempts.remove(address)
             connectionManager.setConnected(address)
@@ -2334,21 +2362,8 @@ class RgbControllerViewModel(
             activeConnections.remove(address)
             writeCharacteristics.remove(address)
             deviceWriteManagers.remove(address)
-            
-            _uiState.update { state ->
-                val updatedStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                val activeAddr = stillConnected.keys.firstOrNull()
-                val activeName = activeAddr?.let { addr -> state.connectivity.scannedDevices.find { it.address == addr }?.name }
-                state.copy(
-                    connectivity = state.connectivity.copy(
-                        deviceConnectionStates = updatedStates,
-                        connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                        connectedDeviceAddress = activeAddr,
-                        connectedDeviceName = activeName
-                    )
-                )
-            }
+
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 
             // Exponential backoff retry logic if unexpected drop
             if (wasActive && !connectionManager.isManuallyDisconnected(address)) {
@@ -2563,15 +2578,11 @@ class RgbControllerViewModel(
     }
 
     fun setActiveFeatureName(name: String) {
-        cancelSceneChain()
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(activeFeatureName = name)) }
-        prefsRepo.putAppStatePrefString("active_feature_name", name)
-        clearExclusionsIfNotApplyingScene()
+        dispatch(RgbIntent.SetActiveFeatureName(name))
     }
 
     fun setShowFpsTracker(enabled: Boolean) {
-        prefsRepo.putAppStatePrefBoolean("show_fps_tracker", enabled)
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(showFpsTracker = enabled)) }
+        dispatch(RgbIntent.SetShowFpsTracker(enabled))
     }
 
     fun writeAmbianceColor(r: Int, g: Int, b: Int) {
@@ -2976,142 +2987,28 @@ class RgbControllerViewModel(
         }
     }
 
-    private fun updateControlledDevicesInMap(
-        activeFeatureName: String? = null,
-        red: Int? = null,
-        green: Int? = null,
-        blue: Int? = null,
-        warmth: Int? = null,
-        modeIndex: Int? = null,
-        brightness: Int? = null,
-        isPowerOn: Boolean? = null
-    ) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
-        if (targetAddresses.isEmpty()) return
-        
-        _uiState.update { current ->
-            val newMap = current.connectivity.deviceStatesMap.toMutableMap()
-            targetAddresses.forEach { address ->
-                val existing = newMap[address] ?: ActiveDeviceState(
-                    activeFeatureName = current.coreControl.activeFeatureName,
-                    red = current.coreControl.red,
-                    green = current.coreControl.green,
-                    blue = current.coreControl.blue,
-                    warmth = current.coreControl.warmth,
-                    modeIndex = current.coreControl.modeIndex,
-                    brightness = current.coreControl.brightness,
-                    isPowerOn = current.coreControl.isPowerOn
-                )
-                newMap[address] = existing.copy(
-                    activeFeatureName = activeFeatureName ?: existing.activeFeatureName,
-                    red = red ?: existing.red,
-                    green = green ?: existing.green,
-                    blue = blue ?: existing.blue,
-                    warmth = warmth ?: existing.warmth,
-                    modeIndex = modeIndex ?: existing.modeIndex,
-                    brightness = brightness ?: existing.brightness,
-                    isPowerOn = isPowerOn ?: existing.isPowerOn
-                )
-            }
-            current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
-        }
-    }
-
     fun setPower(isOn: Boolean) {
-        cancelSceneChain()
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(isPowerOn = isOn)) }
-        prefsRepo.putAppStatePrefBoolean("power_on", isOn)
-        if (!isOn) {
-            stopMusicSync()
-            stopAmbianceIfActive()
-        }
-        sendCommand(DuoCoProtocol.createPowerCommand(isOn), "Power $isOn")
-        updateControlledDevicesInMap(isPowerOn = isOn)
+        dispatch(RgbIntent.SetPower(isOn))
     }
 
     fun setColor(r: Int, g: Int, b: Int) {
-        cancelSceneChain()
-        clearExclusionsIfNotApplyingScene()
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(red = r, green = g, blue = b, modeIndex = 0, activeFeatureName = "Colour")) }
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-                    prefsRepo.putAppStatePrefInt("red", r)
-            prefsRepo.putAppStatePrefInt("green", g)
-            prefsRepo.putAppStatePrefInt("blue", b)
-            prefsRepo.putAppStatePrefInt("mode_index", 0)
-            prefsRepo.putAppStatePrefString("active_feature_name", "Colour")
-        sendCommand(DuoCoProtocol.createColorCommand(r, g, b), "Color R:$r G:$g B:$b")
-        updateControlledDevicesInMap(activeFeatureName = "Colour", red = r, green = g, blue = b, modeIndex = 0)
+        dispatch(RgbIntent.SetColor(r, g, b))
     }
 
     fun setBrightness(percent: Int) {
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(brightness = percent)) }
-        prefsRepo.putAppStatePrefInt("brightness", percent)
-        sendCommand(DuoCoProtocol.createBrightnessCommand(percent), "Brightness $percent%", cancelRunningScenes = false)
-        updateControlledDevicesInMap(brightness = percent)
+        dispatch(RgbIntent.SetBrightness(percent))
     }
 
     fun setMode(modeIndex: Int) {
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-        cancelSceneChain()
-        val modeName = customModes.value.find { it.byteValue == modeIndex }?.name ?: "Mode"
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(modeIndex = modeIndex, activeFeatureName = modeName)) }
-        prefsRepo.putAppStatePrefString("active_feature_name", modeName)
-        prefsRepo.putAppStatePrefInt("mode_index", modeIndex)
-        sendCommand(DuoCoProtocol.createModeCommand(modeIndex), "Mode $modeIndex")
-        updateControlledDevicesInMap(activeFeatureName = modeName, modeIndex = modeIndex)
+        dispatch(RgbIntent.SetMode(modeIndex))
     }
 
     fun setModeSpeed(speed: Int) {
-        cancelSceneChain()
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(modeSpeed = speed)) }
-        prefsRepo.putAppStatePrefInt("mode_speed", speed)
-        sendCommand(DuoCoProtocol.createModeSpeedCommand(speed), "Mode Speed $speed%")
+        dispatch(RgbIntent.SetModeSpeed(speed))
     }
 
     fun setWarmth(percent: Int) {
-        cancelSceneChain()
-        clearExclusionsIfNotApplyingScene()
-        val coercedPercent = percent.coerceIn(0, 100)
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(warmth = coercedPercent, modeIndex = 0, activeFeatureName = "CCT")) }
-
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-        // Map UI slider (0-100) non-linearly to mired/Kelvin to compensate for diminishing human visual returns closer to cool (high Kelvin).
-        // 0% -> 500 mired -> 2000K
-        // 100% -> 100 mired -> 10000K
-        prefsRepo.putAppStatePrefString("active_feature_name", "CCT")
-        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(coercedPercent)
-
-        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-        val finalRed = rgb[0]
-        val finalGreen = rgb[1]
-        val finalBlue = rgb[2]
-
-        _uiState.update { it.copy(coreControl = it.coreControl.copy(red = finalRed, green = finalGreen, blue = finalBlue)) }
-                    prefsRepo.putAppStatePrefInt("warmth", coercedPercent)
-            prefsRepo.putAppStatePrefInt("mode_index", 0)
-            prefsRepo.putAppStatePrefString("active_feature_name", "Colour")
-            prefsRepo.putAppStatePrefInt("red", finalRed)
-            prefsRepo.putAppStatePrefInt("green", finalGreen)
-            prefsRepo.putAppStatePrefInt("blue", finalBlue)
-
-        // Apply CCT Correction Profile if available for the connected device
-        val address = _uiState.value.connectivity.connectedDeviceAddress
-        val profile = address?.let { _cctCalibrations.value[it] }
-
-        val (sendR, sendG, sendB) = if (profile != null) {
-            val cr = (finalRed * profile.scaleR + profile.offsetR).toInt().coerceIn(0, 255)
-            val cg = (finalGreen * profile.scaleG + profile.offsetG).toInt().coerceIn(0, 255)
-            val cb = (finalBlue * profile.scaleB + profile.offsetB).toInt().coerceIn(0, 255)
-            Triple(cr, cg, cb)
-        } else {
-            Triple(finalRed, finalGreen, finalBlue)
-        }
-
-        sendCommand(DuoCoProtocol.createColorCommand(sendR, sendG, sendB), "Warmth R:$sendR G:$sendG B:$sendB (Original R:$finalRed G:$finalGreen B:$finalBlue)")
-        updateControlledDevicesInMap(activeFeatureName = "CCT", red = finalRed, green = finalGreen, blue = finalBlue, warmth = coercedPercent, modeIndex = 0)
+        dispatch(RgbIntent.SetWarmth(percent))
     }
 
 
@@ -3666,187 +3563,23 @@ class RgbControllerViewModel(
     }
 
     fun saveDeviceAlias(address: String, customName: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.saveDeviceAlias(address, customName)
-            addLog("Saved Alias '$customName' for address: $address")
-            
-            // Also update SavedDevice custom name if it exists in Device Center
-            val existingSaved = savedDevices.value.find { it.macAddress == address }
-            if (existingSaved != null) {
-                repository.insertSavedDevice(existingSaved.copy(customName = customName))
-            }
-            
-            // If we are currently connected to this address, update the connected device name
-            if (_uiState.value.connectivity.connectedDeviceAddress == address) {
-                _uiState.update { it.copy(connectivity = it.connectivity.copy(connectedDeviceName = customName)) }
-            }
-
-            // Refresh scanned device aliases
-            _uiState.update { state ->
-                val list = state.connectivity.scannedDevices.map {
-                    if (it.address == address) it.copy(alias = customName) else it
-                }
-                state.copy(connectivity = state.connectivity.copy(scannedDevices = list))
-            }
-        }
+        dispatch(RgbIntent.SaveDeviceAlias(address, customName))
     }
 
     fun deleteDeviceAlias(address: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteDeviceAlias(address)
-            addLog("Deleted Alias for address: $address")
-
-            // If connected, revert to scan name or unknown
-            if (_uiState.value.connectivity.connectedDeviceAddress == address) {
-                val origName = _uiState.value.connectivity.scannedDevices.find { it.address == address }?.name ?: "Unknown Device"
-                _uiState.update { it.copy(connectivity = it.connectivity.copy(connectedDeviceName = origName)) }
-            }
-
-            // Revert scanned list aliases
-            _uiState.update { state ->
-                val list = state.connectivity.scannedDevices.map {
-                    if (it.address == address) it.copy(alias = null) else it
-                }
-                state.copy(connectivity = state.connectivity.copy(scannedDevices = list))
-            }
-        }
+        dispatch(RgbIntent.DeleteDeviceAlias(address))
     }
 
     fun toggleAutoConnect(address: String, name: String, enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing != null) {
-                repository.updateAutoConnect(address, enabled)
-                addLog("Updated Auto-Connect for ${existing.customName} to $enabled")
-            } else {
-                val device = SavedDevice(
-                    macAddress = address,
-                    customName = name,
-                    isAutoConnectEnabled = enabled,
-                    isActiveControlEnabled = true
-                )
-                repository.insertSavedDevice(device)
-                addLog("Saved device $name with Auto-Connect = $enabled")
-            }
-        }
+        dispatch(RgbIntent.ToggleAutoConnect(address, name, enabled))
     }
 
     fun toggleActiveControl(address: String, name: String, enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing != null) {
-                repository.updateActiveControl(address, enabled)
-                addLog("Updated Active Control for ${existing.customName} to $enabled")
-            } else {
-                val device = SavedDevice(
-                    macAddress = address,
-                    customName = name,
-                    isAutoConnectEnabled = true,
-                    isActiveControlEnabled = enabled
-                )
-                repository.insertSavedDevice(device)
-                addLog("Saved device $name with Active Control = $enabled")
-            }
-
-            // Handle mid-automation additions/removals
-            if (enabled) {
-                val s = _uiState.value
-                val musicActive = s.audioSettings.musicMode != null
-                val ambianceActive = com.example.ambiance.AmbianceCaptureState.isActive.value
-                val currentFeatureName = if (musicActive) {
-                    s.coreControl.activeFeatureName
-                } else if (ambianceActive) {
-                    "Ambiance - ${s.ambianceSettings.ambiancePreset ?: "Balanced"}"
-                } else {
-                    s.coreControl.activeFeatureName
-                }
-
-                var devState = s.connectivity.deviceStatesMap[address]
-                if (devState == null || devState.activeFeatureName != currentFeatureName) {
-                    val baseState = devState ?: ActiveDeviceState(
-                        red = s.coreControl.red,
-                        green = s.coreControl.green,
-                        blue = s.coreControl.blue,
-                        warmth = s.coreControl.warmth,
-                        modeIndex = s.coreControl.modeIndex,
-                        brightness = s.coreControl.brightness,
-                        isPowerOn = s.coreControl.isPowerOn
-                    )
-                    val newState = baseState.copy(activeFeatureName = currentFeatureName)
-                    _uiState.update { current ->
-                        val newMap = current.connectivity.deviceStatesMap.toMutableMap()
-                        newMap[address] = newState
-                        current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
-                    }
-                    devState = newState
-                }
-                
-                // Now send the stored state to the physical device
-                val powerCmd = DuoCoProtocol.createPowerCommand(devState.isPowerOn)
-                val brightnessCmd = DuoCoProtocol.createBrightnessCommand(devState.brightness)
-                sendCommandToDeviceDirect(address, powerCmd)
-                sendCommandToDeviceDirect(address, brightnessCmd)
-                
-                when {
-                    devState.activeFeatureName == "Colour" -> {
-                        val colorCmd = DuoCoProtocol.createColorCommand(devState.red, devState.green, devState.blue)
-                        sendCommandToDeviceDirect(address, colorCmd)
-                    }
-                    devState.activeFeatureName == "CCT" -> {
-                        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(devState.warmth)
-                        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-                        val colorCmd = DuoCoProtocol.createColorCommand(rgb[0], rgb[1], rgb[2])
-                        sendCommandToDeviceDirect(address, colorCmd)
-                    }
-                    devState.activeFeatureName.startsWith("Audio") || devState.activeFeatureName.startsWith("Ambiance") -> {
-                        // Automated states are handled by their respective controllers
-                    }
-                    else -> {
-                        // Mode
-                        val modeCmd = DuoCoProtocol.createModeCommand(devState.modeIndex)
-                        sendCommandToDeviceDirect(address, modeCmd)
-                    }
-                }
-
-                if (musicActive) {
-                    saveDeviceState(address, AutomationType.AUDIO)
-                } else if (ambianceActive) {
-                    saveDeviceState(address, AutomationType.AMBIANCE)
-                }
-            } else {
-                _uiState.update { current ->
-                    if (!current.connectivity.deviceStatesMap.containsKey(address)) {
-                        val newMap = current.connectivity.deviceStatesMap.toMutableMap()
-                        newMap[address] = ActiveDeviceState(
-                            activeFeatureName = current.coreControl.activeFeatureName,
-                            red = current.coreControl.red,
-                            green = current.coreControl.green,
-                            blue = current.coreControl.blue,
-                            warmth = current.coreControl.warmth,
-                            modeIndex = current.coreControl.modeIndex,
-                            brightness = current.coreControl.brightness,
-                            isPowerOn = current.coreControl.isPowerOn
-                        )
-                        current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
-                    } else {
-                        current
-                    }
-                }
-
-                val activeMode = deviceAutomationMode[address]
-                if (activeMode != null) {
-                    restoreDeviceState(address, activeMode)
-                }
-            }
-        }
+        dispatch(RgbIntent.ToggleActiveControl(address, name, enabled))
     }
 
     fun deleteSavedDevice(address: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteSavedDevice(address)
-            addLog("Removed device from Saved Center: $address")
-            disconnectDevice(address)
-        }
+        dispatch(RgbIntent.DeleteSavedDevice(address))
     }
 
     fun updateCustomMode(customMode: CustomMode) {
