@@ -21,7 +21,6 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.RgbControllerViewModel
-import com.example.DuoCoProtocol
 
 class AmbianceCaptureService : Service() {
 
@@ -73,8 +72,7 @@ class AmbianceCaptureService : Service() {
             projectionCallback = callback
             mp.registerCallback(callback, Handler(Looper.getMainLooper()))
 
-            val vm = RgbControllerViewModel.getActiveInstance()
-            vm?.broadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(true))
+            RgbControllerViewModel.getActiveInstance()?.setAmbianceCaptureActive(true)
 
             setupCapture()
             AmbianceCaptureState.setIsActive(true)
@@ -161,8 +159,7 @@ class AmbianceCaptureService : Service() {
         processor?.clear()
         processor = null
 
-        val vm = RgbControllerViewModel.getActiveInstance()
-        vm?.broadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(false))
+        RgbControllerViewModel.getActiveInstance()?.setAmbianceCaptureActive(false)
 
         AmbianceCaptureState.setIsActive(false)
         AmbianceCaptureState.updateZoneColors(emptyList())
