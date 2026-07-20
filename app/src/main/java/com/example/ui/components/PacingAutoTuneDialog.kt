@@ -21,9 +21,11 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.BleConnectionState
 import com.example.DuoCoProtocol
 import com.example.RgbControllerViewModel
+import com.example.core.pacing.PacingAutoTuneEngine
+import com.example.core.pacing.TuningAction
+import com.example.core.pacing.TuningPhase
+import com.example.core.pacing.TuningResult
 import kotlinx.coroutines.*
-
-data class TuningResult(val interval: Int, val isSuccess: Boolean, val reason: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -296,215 +298,114 @@ fun PacingAutoTuneContent(
         if (!isTuning) return@LaunchedEffect
 
         val originalPacing = viewModel.uiState.value.connectivity.devicePacingMs[address] ?: 100
+        val engine = PacingAutoTuneEngine()
         try {
             viewModel.broadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(true))
             delay(300)
             withContext(Dispatchers.IO) {
-                val testBuffer = mutableListOf<TuningResult>()
-                
-                suspend fun runBurst(interval: Int): Pair<Boolean, String> {
+
+                suspend fun runBurstIo(interval: Int): TuningResult {
                     viewModel.setDevicePacing(address, interval)
                     delay(200)
-                    
-                    val burstSize = 30
-                    
-                    for (i in 0 until burstSize) {
-                        if (!isActive) return false to "Cancelled"
+
+                    for (i in 0 until PacingAutoTuneEngine.BURST_SIZE) {
+                        if (!isActive) return TuningResult(interval, false, "Cancelled")
                         val cmd = DuoCoProtocol.createMusicColorCommand((i * 8) % 255, (i * 16) % 255, (i * 24) % 255)
                         viewModel.queueCommand(cmd)
                         delay(if (interval == 0) 1L else interval.toLong())
                     }
-                    
+
                     delay(800) // Let queue drain
-                    
+
                     val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
-                    if (!isConnected) return false to "Disconnected"
-                    
                     val currentFps = viewModel.telemetry.value.deviceAchievedFps[address] ?: 0
-                    val targetFps = if (interval == 0) 100 else 1000 / interval
-                    val minAcceptableFps = (targetFps * 0.6).toInt().coerceAtMost(30)
-                    
-                    val success = currentFps >= minAcceptableFps || (currentFps >= 20 && interval <= 20)
-                    val reason = if (success) "Stable (~$currentFps fps)" else "Bottlenecked (~$currentFps fps)"
-                    
-                    return success to reason
+                    return engine.evaluateBurst(interval, isConnected, currentFps)
                 }
 
-                suspend fun runStress(interval: Int, onProgress: (Float) -> Unit): Pair<Boolean, String> {
+                suspend fun runStressIo(interval: Int, onProgress: (Float) -> Unit): TuningResult {
                     viewModel.setDevicePacing(address, interval)
                     delay(200)
-                    
-                    val stressDurationMs = 120_000L // 2 mins
+
                     val startTime = System.currentTimeMillis()
                     var elapsed = 0L
-                    
+
                     var i = 0
-                    while (elapsed < stressDurationMs) {
-                        if (!isActive) return false to "Cancelled"
-                        
+                    while (elapsed < PacingAutoTuneEngine.STRESS_DURATION_MS) {
+                        if (!isActive) return TuningResult(interval, false, "Cancelled")
+
                         val cmd = DuoCoProtocol.createMusicColorCommand((i * 8) % 255, (i * 16) % 255, (i * 24) % 255)
                         viewModel.queueCommand(cmd)
                         delay(if (interval == 0) 1L else interval.toLong())
-                        
+
                         elapsed = System.currentTimeMillis() - startTime
-                        if (i % 20 == 0) {
-                            onProgress(elapsed.toFloat() / stressDurationMs)
+                        if (i % PacingAutoTuneEngine.STRESS_PROGRESS_CHECK_EVERY == 0) {
+                            onProgress(elapsed.toFloat() / PacingAutoTuneEngine.STRESS_DURATION_MS)
                             val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
-                            if (!isConnected) return false to "Disconnected"
+                            if (!isConnected) return TuningResult(interval, false, "Disconnected")
                         }
                         i++
                     }
-                    
+
                     delay(1000)
                     val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
-                    if (!isConnected) return false to "Disconnected at end"
-                    
-                    return true to "Stress Passed"
+                    return engine.evaluateStress(interval, isConnected)
                 }
 
-                var bestPacing = -1
-                
-                if (isStressTestOnly) {
-                    withContext(Dispatchers.Main) { phase = "STRESS TEST ONLY" }
-                    val candidate = originalPacing
+                suspend fun runStressWithStatusTicker(interval: Int): TuningResult {
                     var stressProgress = 0f
-                    
                     val stressJob = launch {
                         while (isActive) {
                             withContext(Dispatchers.Main) {
-                                statusText = "Stress testing ${candidate}ms... (${(stressProgress * 120).toInt()}s / 120s)"
+                                statusText = "Stress testing ${interval}ms... (${(stressProgress * 120).toInt()}s / 120s)"
                                 progress = stressProgress
                             }
                             delay(500)
                         }
                     }
-                    
-                    val (stressSuccess, stressReason) = runStress(candidate) { p -> stressProgress = p }
+                    val result = runStressIo(interval) { p -> stressProgress = p }
                     stressJob.cancel()
-                    
-                    testBuffer.add(TuningResult(candidate, stressSuccess, "Stress: $stressReason"))
-                    withContext(Dispatchers.Main) { results = testBuffer.toList() }
-                    
-                    if (stressSuccess) {
-                        bestPacing = candidate
-                    }
-                } else {
-                    withContext(Dispatchers.Main) { phase = "BURST PHASE" }
-
-                    val intervalsToTest = listOf(100, 80, 50, 30, 20, 10, 5, 0)
-                    var failedInterval = -1
-
-                    for ((index, interval) in intervalsToTest.withIndex()) {
-                        if (!isActive) break
-                        withContext(Dispatchers.Main) {
-                            statusText = "Burst testing ${interval}ms..."
-                            progress = index.toFloat() / intervalsToTest.size
-                        }
-                        
-                        val (success, reason) = runBurst(interval)
-                        testBuffer.add(TuningResult(interval, success, "Burst: $reason"))
-                        withContext(Dispatchers.Main) { results = testBuffer.toList() }
-                        
-                        if (!success) {
-                            failedInterval = interval
-                            break
-                        }
-                    }
-
-                    if (isActive) {
-                        if (failedInterval != -1) {
-                            // Start incrementing from the failed interval
-                            var candidate = failedInterval + 1
-                            withContext(Dispatchers.Main) { phase = "FINE-TUNING" }
-                            
-                            while (isActive) {
-                                withContext(Dispatchers.Main) {
-                                    statusText = "Fine-tuning at ${candidate}ms..."
-                                    progress = 0f
-                                }
-                                
-                                val (burstSuccess, burstReason) = runBurst(candidate)
-                                testBuffer.add(TuningResult(candidate, burstSuccess, "Burst: $burstReason"))
-                                withContext(Dispatchers.Main) { results = testBuffer.toList() }
-                                
-                                if (burstSuccess) {
-                                    // It passed the burst test, now run stress test
-                                    withContext(Dispatchers.Main) { phase = "STRESS TEST" }
-                                    var stressProgress = 0f
-                                    
-                                    val stressJob = launch {
-                                        while (isActive) {
-                                            withContext(Dispatchers.Main) {
-                                                statusText = "Stress testing ${candidate}ms... (${(stressProgress * 120).toInt()}s / 120s)"
-                                                progress = stressProgress
-                                            }
-                                            delay(500)
-                                        }
-                                    }
-                                    
-                                    val (stressSuccess, stressReason) = runStress(candidate) { p -> stressProgress = p }
-                                    stressJob.cancel()
-                                    
-                                    testBuffer.add(TuningResult(candidate, stressSuccess, "Stress: $stressReason"))
-                                    withContext(Dispatchers.Main) { results = testBuffer.toList() }
-                                    
-                                    if (stressSuccess) {
-                                        bestPacing = candidate
-                                        break
-                                    }
-                                    withContext(Dispatchers.Main) { phase = "FINE-TUNING" }
-                                }
-                                candidate++
-                                if (candidate > 500) break
-                            }
-                        } else {
-                            // All burst tests passed (even 0ms). Do stress test on 0ms.
-                            var candidate = 0
-                            withContext(Dispatchers.Main) { phase = "STRESS TEST" }
-                            
-                            while (isActive) {
-                                var stressProgress = 0f
-                                val stressJob = launch {
-                                    while (isActive) {
-                                        withContext(Dispatchers.Main) {
-                                            statusText = "Stress testing ${candidate}ms... (${(stressProgress * 120).toInt()}s / 120s)"
-                                            progress = stressProgress
-                                        }
-                                        delay(500)
-                                    }
-                                }
-                                
-                                val (stressSuccess, stressReason) = runStress(candidate) { p -> stressProgress = p }
-                                stressJob.cancel()
-                                
-                                testBuffer.add(TuningResult(candidate, stressSuccess, "Stress: $stressReason"))
-                                withContext(Dispatchers.Main) { results = testBuffer.toList() }
-                                
-                                if (stressSuccess) {
-                                    bestPacing = candidate
-                                    break
-                                }
-                                candidate++
-                                if (candidate > 500) break
-                            }
-                        }
-                    }
+                    return result
                 }
 
-                if (isActive) {
-                    withContext(Dispatchers.Main) {
-                        if (bestPacing != -1) {
-                            finalPacing = bestPacing
-                            statusText = "Tuning complete. Optimal pacing: ${bestPacing}ms."
-                            phase = "COMPLETE"
-                        } else {
-                            finalPacing = originalPacing
-                            statusText = "Tuning failed. Kept original ${originalPacing}ms."
-                            phase = "FAILED"
+                var action: TuningAction = engine.start(originalPacing, isStressTestOnly)
+
+                while (isActive) {
+                    when (val currentAction = action) {
+                        is TuningAction.RunBurst -> {
+                            withContext(Dispatchers.Main) {
+                                phase = phaseLabel(engine.phase)
+                                statusText = if (engine.phase == TuningPhase.FINE_TUNING) {
+                                    "Fine-tuning at ${currentAction.interval}ms..."
+                                } else {
+                                    "Burst testing ${currentAction.interval}ms..."
+                                }
+                                progress = engine.burstProgress
+                            }
+                            val burstResult = runBurstIo(currentAction.interval)
+                            action = engine.onBurstResult(burstResult)
+                            withContext(Dispatchers.Main) { results = engine.results }
                         }
-                        progress = 1f
-                        isComplete = true
-                        isTuning = false
+                        is TuningAction.RunStress -> {
+                            withContext(Dispatchers.Main) { phase = phaseLabel(engine.phase) }
+                            val stressResult = runStressWithStatusTicker(currentAction.interval)
+                            action = engine.onStressResult(stressResult)
+                            withContext(Dispatchers.Main) { results = engine.results }
+                        }
+                        is TuningAction.Finished -> {
+                            withContext(Dispatchers.Main) {
+                                finalPacing = currentAction.pacingMs
+                                statusText = if (currentAction.succeeded) {
+                                    "Tuning complete. Optimal pacing: ${currentAction.pacingMs}ms."
+                                } else {
+                                    "Tuning failed. Kept original ${currentAction.pacingMs}ms."
+                                }
+                                phase = phaseLabel(engine.phase)
+                                progress = 1f
+                                isComplete = true
+                                isTuning = false
+                            }
+                            return@withContext
+                        }
                     }
                 }
             }
@@ -513,4 +414,16 @@ fun PacingAutoTuneContent(
             viewModel.broadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(false))
         }
     }
+}
+
+/** Maps [TuningPhase] to the literal on-screen phase labels the original inline code used. */
+private fun phaseLabel(phase: TuningPhase): String = when (phase) {
+    TuningPhase.IDLE -> "IDLE"
+    TuningPhase.BURST_PHASE -> "BURST PHASE"
+    TuningPhase.FINE_TUNING -> "FINE-TUNING"
+    TuningPhase.STRESS_TEST -> "STRESS TEST"
+    TuningPhase.STRESS_TEST_ONLY -> "STRESS TEST ONLY"
+    TuningPhase.COMPLETE -> "COMPLETE"
+    TuningPhase.FAILED -> "FAILED"
+    TuningPhase.CANCELLED -> "CANCELLED"
 }
