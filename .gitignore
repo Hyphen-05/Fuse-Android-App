@@ -30,6 +30,7 @@ captures/
 .env
 .env.local
 debug.keystore
+debug.keystore.base64
 
 # Log files
 *.log
