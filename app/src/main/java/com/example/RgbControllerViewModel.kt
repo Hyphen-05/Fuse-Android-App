@@ -923,6 +923,12 @@ class RgbControllerViewModel(
             is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefInt -> prefsRepo.putAmbiancePrefInt(effect.key, effect.value)
             is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefString -> prefsRepo.putAmbiancePrefString(effect.key, effect.value)
             com.example.presentation.AmbianceSideEffect.CancelSceneChain -> cancelSceneChain()
+            is com.example.presentation.AmbianceSideEffect.WriteColor -> {
+                if (com.example.ambiance.AmbianceCaptureState.isActive.value) {
+                    broadcastCommandDirect(DuoCoProtocol.createColorCommand(effect.r, effect.g, effect.b))
+                }
+            }
+            is com.example.presentation.AmbianceSideEffect.BroadcastCommand -> broadcastCommand(effect.command)
         }
     }
 
@@ -2637,11 +2643,11 @@ class RgbControllerViewModel(
     }
 
     fun writeAmbianceColor(r: Int, g: Int, b: Int) {
-        if (!com.example.ambiance.AmbianceCaptureState.isActive.value) {
-            return
-        }
-        val command = DuoCoProtocol.createColorCommand(r, g, b)
-        broadcastCommandDirect(command)
+        dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
+    }
+
+    fun setAmbianceCaptureActive(active: Boolean) {
+        dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
     private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true) {
