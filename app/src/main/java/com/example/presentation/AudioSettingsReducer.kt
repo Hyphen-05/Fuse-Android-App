@@ -498,6 +498,7 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("visualizer_color_speed", 1.0f),
                 AudioSideEffect.SaveAudioPrefFloat("beat_flash_decay_ms", 200f),
                 AudioSideEffect.SaveAudioPrefFloat("ambient_cap_fraction", 0.40f),
+                AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.25f),
                 AudioSideEffect.SaveAudioPrefLong("idle_trigger_delay_ms", 2500L)
             )
             newState to effects
