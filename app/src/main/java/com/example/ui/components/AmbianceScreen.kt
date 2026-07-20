@@ -221,12 +221,12 @@ fun AmbianceScreen(
     var t by remember { mutableStateOf(0f) }
 
     // Coroutine loop for continuous drifting (controlled inversely by smoothnessMs)
-    LaunchedEffect(isAppResumed, uiState.ambianceSmoothnessMs) {
+    LaunchedEffect(isAppResumed, uiState.ambianceSettings.ambianceSmoothnessMs) {
         if (!isAppResumed) return@LaunchedEffect
         
         // Map smoothnessMs (real range 0..350) to animation duration range of 2s to 10s
         // Lower smoothnessMs = faster animation, higher smoothnessMs = slower animation
-        val durationMs = 2000f + ((uiState.ambianceSmoothnessMs.toFloat() - 0f) / 350f).coerceIn(0f, 1f) * 8000f
+        val durationMs = 2000f + ((uiState.ambianceSettings.ambianceSmoothnessMs.toFloat() - 0f) / 350f).coerceIn(0f, 1f) * 8000f
         
         val startTime = System.nanoTime()
         val startT = t
@@ -240,7 +240,7 @@ fun AmbianceScreen(
 
     // Motion character (continuous drift vs settle-and-jump): tied to noiseDeadband
     // Map noiseDeadband (real range 0.0f..0.5f) to deadband factor
-    val deadbandFactor = ((uiState.ambianceNoiseDeadband - 0.0f) / 0.5f).coerceIn(0f, 1f)
+    val deadbandFactor = ((uiState.ambianceSettings.ambianceNoiseDeadband - 0.0f) / 0.5f).coerceIn(0f, 1f)
     val steps = 4f
     val stepFraction = (t * steps) % 1f
     val transitionStart = 0.8f
@@ -257,12 +257,12 @@ fun AmbianceScreen(
     val flourishAnim = remember { androidx.compose.animation.core.Animatable(0f) }
 
     // Loop for randomized scene cut flourishes tied to scene_cut_sensitivity
-    LaunchedEffect(isAppResumed, uiState.ambianceSceneCutSensitivity) {
+    LaunchedEffect(isAppResumed, uiState.ambianceSettings.ambianceSceneCutSensitivity) {
         if (!isAppResumed) return@LaunchedEffect
         
         // Map sceneCutSensitivity (real range 10.0f..150.0f) to average interval:
         // higher sensitivity = more frequent = smaller delay (3s at 150, 15s at 10)
-        val avgDelayMs = 15000f - ((uiState.ambianceSceneCutSensitivity - 10f) / 140f).coerceIn(0f, 1f) * 12000f
+        val avgDelayMs = 15000f - ((uiState.ambianceSettings.ambianceSceneCutSensitivity - 10f) / 140f).coerceIn(0f, 1f) * 12000f
         
         while (true) {
             val delayMs = (avgDelayMs * (0.5f + Math.random().toFloat())).toLong().coerceAtLeast(1000L)
@@ -282,18 +282,18 @@ fun AmbianceScreen(
 
     // Determine the 3-4 color stops dynamically from the active preset's or custom settings' actual parameters
     val presetColors = remember(
-        uiState.ambianceSmoothnessMs,
-        uiState.ambianceNoiseDeadband,
-        uiState.ambianceResponseSpeed,
-        uiState.ambianceSaturationBoost,
-        uiState.ambianceBrightnessCompensation
+        uiState.ambianceSettings.ambianceSmoothnessMs,
+        uiState.ambianceSettings.ambianceNoiseDeadband,
+        uiState.ambianceSettings.ambianceResponseSpeed,
+        uiState.ambianceSettings.ambianceSaturationBoost,
+        uiState.ambianceSettings.ambianceBrightnessCompensation
     ) {
         derivePaletteFromParameters(
-            smoothnessMs = uiState.ambianceSmoothnessMs,
-            noiseDeadband = uiState.ambianceNoiseDeadband,
-            responseSpeed = uiState.ambianceResponseSpeed,
-            saturationBoost = uiState.ambianceSaturationBoost,
-            brightnessCompensation = uiState.ambianceBrightnessCompensation
+            smoothnessMs = uiState.ambianceSettings.ambianceSmoothnessMs,
+            noiseDeadband = uiState.ambianceSettings.ambianceNoiseDeadband,
+            responseSpeed = uiState.ambianceSettings.ambianceResponseSpeed,
+            saturationBoost = uiState.ambianceSettings.ambianceSaturationBoost,
+            brightnessCompensation = uiState.ambianceSettings.ambianceBrightnessCompensation
         )
     }
 
@@ -413,7 +413,7 @@ fun AmbianceScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     rowPresets.forEach { preset ->
-                        val isActivePreset = uiState.ambiancePreset == preset.name
+                        val isActivePreset = uiState.ambianceSettings.ambiancePreset == preset.name
                         val presetInteraction = remember(preset.id) { MutableInteractionSource() }
                         Card(
                             modifier = Modifier
@@ -476,7 +476,7 @@ fun AmbianceScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 customPresets.forEach { customPreset ->
-                    val isActivePreset = uiState.ambiancePreset == customPreset.name
+                    val isActivePreset = uiState.ambianceSettings.ambiancePreset == customPreset.name
                     val itemInteraction = remember(customPreset.id) { MutableInteractionSource() }
 
                     Card(

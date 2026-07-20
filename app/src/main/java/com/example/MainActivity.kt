@@ -189,6 +189,7 @@ fun MainScreen() {
     val viewModel: RgbControllerViewModel = viewModel(factory = factory)
     val aiSceneGeneratorViewModel: com.example.ui.components.AiSceneGeneratorViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val telemetry by viewModel.telemetry.collectAsState()
     val presets by viewModel.savedPresets.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
     val customModes by viewModel.customModes.collectAsState()
@@ -257,7 +258,7 @@ fun MainScreen() {
     LaunchedEffect(Unit) {
         checkPermissions()
         // Auto-scan on load if we have permissions and real mode is active
-        if (permissionsGranted && !uiState.isDemoMode) {
+        if (permissionsGranted && !uiState.coreControl.isDemoMode) {
             viewModel.startScanning()
         }
     }
@@ -280,18 +281,18 @@ fun MainScreen() {
     }
 
     var liveFps by remember { mutableStateOf(32) }
-    if (uiState.showFpsTracker && uiState.isPowerOn) {
-        LaunchedEffect(uiState.activeFeatureName, uiState.deviceAchievedFps) {
-            val connectedDevices = uiState.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+    if (uiState.coreControl.showFpsTracker && uiState.coreControl.isPowerOn) {
+        LaunchedEffect(uiState.coreControl.activeFeatureName, telemetry.deviceAchievedFps) {
+            val connectedDevices = uiState.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
             val achievedFps = if (connectedDevices.isNotEmpty()) {
-                uiState.deviceAchievedFps.values.maxOrNull() ?: 0
+                telemetry.deviceAchievedFps.values.maxOrNull() ?: 0
             } else 0
 
             if (achievedFps > 0) {
                 liveFps = achievedFps
             } else {
-                val baseFps = when (uiState.activeFeatureName) {
-                    "Ambiance" -> uiState.ambianceUpdateRateCapFps
+                val baseFps = when (uiState.coreControl.activeFeatureName) {
+                    "Ambiance" -> uiState.ambianceSettings.ambianceUpdateRateCapFps
                     "Music" -> 45
                     "Modes" -> 35
                     "Colour", "CCT" -> 32
@@ -325,42 +326,42 @@ fun MainScreen() {
     )
 
     // Parse active color to display
-    val activeComposeColor = Color(uiState.red, uiState.green, uiState.blue)
+    val activeComposeColor = Color(uiState.coreControl.red, uiState.coreControl.green, uiState.coreControl.blue)
 
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
 
     val topBarColor by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.primaryContainer else surfaceContainer,
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.primaryContainer else surfaceContainer,
         animationSpec = tween(durationMillis = 300),
         label = "topBarColor"
     )
 
     val glowColor by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
         animationSpec = tween(durationMillis = 300),
         label = "glowColor"
     )
 
     val topBarTitleColor by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
         animationSpec = tween(durationMillis = 300),
         label = "topBarTitleColor"
     )
 
     val topBarSubtitleColor by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(durationMillis = 300),
         label = "topBarSubtitleColor"
     )
 
     val powerButtonBgColor by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
         animationSpec = tween(durationMillis = 300),
         label = "powerButtonBgColor"
     )
 
     val powerButtonIconTint by animateColorAsState(
-        targetValue = if (uiState.isPowerOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(durationMillis = 300),
         label = "powerButtonIconTint"
     )
@@ -397,12 +398,12 @@ fun MainScreen() {
                             ),
                             color = topBarTitleColor
                         )
-                        val subtitleText = remember(uiState.isPowerOn, uiState.activeFeatureName, uiState.showFpsTracker, liveFps) {
-                            if (uiState.isPowerOn) {
-                                if (uiState.showFpsTracker) {
-                                    "Active • ${uiState.activeFeatureName} • $liveFps Fps"
+                        val subtitleText = remember(uiState.coreControl.isPowerOn, uiState.coreControl.activeFeatureName, uiState.coreControl.showFpsTracker, liveFps) {
+                            if (uiState.coreControl.isPowerOn) {
+                                if (uiState.coreControl.showFpsTracker) {
+                                    "Active • ${uiState.coreControl.activeFeatureName} • $liveFps Fps"
                                 } else {
-                                    "Active • ${uiState.activeFeatureName}"
+                                    "Active • ${uiState.coreControl.activeFeatureName}"
                                 }
                             } else {
                                 "Standby"
@@ -424,7 +425,7 @@ fun MainScreen() {
                     ) {
                         val powerInteractionSource = remember { MutableInteractionSource() }
                         IconButton(
-                            onClick = { viewModel.setPower(!uiState.isPowerOn) },
+                            onClick = { viewModel.setPower(!uiState.coreControl.isPowerOn) },
                             interactionSource = powerInteractionSource,
                             modifier = Modifier
                                 .clip(CircleShape)
@@ -666,12 +667,12 @@ fun MainScreen() {
                 }
 
                 if (showCreateSceneDialogFromHome) {
-                    val currentGlobalMode = if (!uiState.isPowerOn) "Power Off"
+                    val currentGlobalMode = if (!uiState.coreControl.isPowerOn) "Power Off"
                         else when {
-                            uiState.activeFeatureName == "Colour" -> "Colour"
-                            uiState.activeFeatureName == "CCT" -> "CCT"
-                            uiState.activeFeatureName.startsWith("Audio") || uiState.activeFeatureName.startsWith("LED Visualiser") -> "Audio"
-                            uiState.activeFeatureName.startsWith("Ambiance") -> "Ambiance"
+                            uiState.coreControl.activeFeatureName == "Colour" -> "Colour"
+                            uiState.coreControl.activeFeatureName == "CCT" -> "CCT"
+                            uiState.coreControl.activeFeatureName.startsWith("Audio") || uiState.coreControl.activeFeatureName.startsWith("LED Visualiser") -> "Audio"
+                            uiState.coreControl.activeFeatureName.startsWith("Ambiance") -> "Ambiance"
                             else -> "HardwareMode"
                         }
                     com.example.ui.components.SceneCreationDialog(
@@ -799,7 +800,7 @@ fun MainScreen() {
                     if (selectedTab == 0) {
 
                     // --- Permissions Alert Card (when in Real Mode & no permissions) ---
-                    if (!permissionsGranted && !uiState.isDemoMode) {
+                    if (!permissionsGranted && !uiState.coreControl.isDemoMode) {
                         item {
                         Card(
                             colors = CardDefaults.cardColors(
@@ -868,7 +869,7 @@ fun MainScreen() {
                 }
 
                 // --- Connected Device Tiles ---
-                val connectedAddresses = uiState.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys.toList()
+                val connectedAddresses = uiState.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys.toList()
                 if (connectedAddresses.isEmpty()) {
                     item {
                         Card(
@@ -954,9 +955,9 @@ fun MainScreen() {
 
 
                 // --- Control Deck (Only displayed when CONNECTED) ---
-                if (uiState.connectionState == BleConnectionState.CONNECTED) {
+                if (uiState.connectivity.connectionState == BleConnectionState.CONNECTED) {
                     // CCT Warmth Slider Card (in place of power status card)
-                    if (uiState.isPowerOn) {
+                    if (uiState.coreControl.isPowerOn) {
                     item {
                         Card(
                             modifier = Modifier
@@ -972,7 +973,7 @@ fun MainScreen() {
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
                             ) {
-                                val warmthPercentage = uiState.warmth
+                                val warmthPercentage = uiState.coreControl.warmth
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1029,7 +1030,7 @@ fun MainScreen() {
 
                     }
                     // Brightness Slider Card (below power card)
-                    if (uiState.isPowerOn) {
+                    if (uiState.coreControl.isPowerOn) {
                         item {
                             Card(
                                 modifier = Modifier
@@ -1058,7 +1059,7 @@ fun MainScreen() {
                                             )
                                         )
                                         Text(
-                                            text = "${uiState.brightness}%",
+                                            text = "${uiState.coreControl.brightness}%",
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold,
 
@@ -1068,7 +1069,7 @@ fun MainScreen() {
                                     }
 
                                     ExpressiveSlider(
-                                        value = uiState.brightness,
+                                        value = uiState.coreControl.brightness,
                                         onValueChange = { viewModel.setBrightness(it) },
                                         labelPrefix = "Brightness",
                                         activeColor = MaterialTheme.colorScheme.primary,
@@ -1385,7 +1386,7 @@ fun MainScreen() {
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (uiState.isScanning) {
+                            if (uiState.connectivity.isScanning) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1406,7 +1407,7 @@ fun MainScreen() {
                                 Button(
                                     onClick = {
                                         checkPermissions()
-                                        if (!permissionsGranted && !uiState.isDemoMode) {
+                                        if (!permissionsGranted && !uiState.coreControl.isDemoMode) {
                                             permissionLauncher.launch(requiredPermissions.toTypedArray())
                                         } else {
                                             viewModel.startScanning()
@@ -1431,7 +1432,7 @@ fun MainScreen() {
                             )
                         )
 
-                        if (savedDevices.isEmpty() && uiState.isDbLoaded) {
+                        if (savedDevices.isEmpty() && uiState.coreControl.isDbLoaded) {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(
@@ -1462,7 +1463,7 @@ fun MainScreen() {
                             }
                         } else {
                             savedDevices.forEach { saved ->
-                                val connState = uiState.deviceConnectionStates[saved.macAddress] ?: BleConnectionState.DISCONNECTED
+                                val connState = uiState.connectivity.deviceConnectionStates[saved.macAddress] ?: BleConnectionState.DISCONNECTED
                                 val isConnected = connState == BleConnectionState.CONNECTED
                                 val isConnecting = connState == BleConnectionState.CONNECTING
 
@@ -1669,11 +1670,11 @@ fun MainScreen() {
                             )
                         )
 
-                        val unsavedScannedDevices = uiState.scannedDevices.filter { scanned ->
+                        val unsavedScannedDevices = uiState.connectivity.scannedDevices.filter { scanned ->
                             savedDevices.none { it.macAddress == scanned.address }
                         }
 
-                        if (unsavedScannedDevices.isEmpty() && uiState.isDbLoaded) {
+                        if (unsavedScannedDevices.isEmpty() && uiState.coreControl.isDbLoaded) {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(
@@ -1759,7 +1760,7 @@ fun MainScreen() {
                                         Spacer(modifier = Modifier.width(8.dp))
 
                                         val connectDiscoveredInteractionSource = remember(device.address) { MutableInteractionSource() }
-                                        val deviceConnState = uiState.deviceConnectionStates[device.address] ?: BleConnectionState.DISCONNECTED
+                                        val deviceConnState = uiState.connectivity.deviceConnectionStates[device.address] ?: BleConnectionState.DISCONNECTED
                                         val isDeviceConnecting = deviceConnState == BleConnectionState.CONNECTING
                                         Button(
                                             onClick = { viewModel.connectDevice(device.address) },
@@ -1787,21 +1788,21 @@ fun MainScreen() {
                 }
 
                 if (selectedTab == 3) {
-                    SettingsTabContent(uiState, viewModel)
+                    SettingsTabContent(uiState, telemetry, viewModel)
                 }
                     
             }
 
             // Expressive connection loading overlay using soft breathing/pulsing circle animations (Material You style)
-            val anyDeviceConnected = uiState.connectionState == BleConnectionState.CONNECTED ||
-                uiState.deviceConnectionStates.values.any { it == BleConnectionState.CONNECTED }
+            val anyDeviceConnected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED ||
+                uiState.connectivity.deviceConnectionStates.values.any { it == BleConnectionState.CONNECTED }
 
             val isConnecting = !anyDeviceConnected && savedDevices.any { saved ->
                 val connState = connectionStates[saved.macAddress]
                 val isManuallyDisconnected = connState is com.example.domain.ConnectionState.Disconnected && connState.isManual
                 saved.isAutoConnectEnabled && 
                 !isManuallyDisconnected &&
-                uiState.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTED
+                uiState.connectivity.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTED
             }
 
             AnimatedVisibility(
@@ -1930,7 +1931,7 @@ fun MainScreen() {
     }
 
     // --- Audio Delay Calibration Dialog ---
-    if (uiState.isCalibrationModeActive) {
+    if (uiState.calibrationFlow.isCalibrationModeActive) {
         AlertDialog(
             onDismissRequest = { viewModel.stopCalibrationMode() },
             title = {
@@ -1973,12 +1974,12 @@ fun MainScreen() {
                             )
                             Column {
                                 Text(
-                                    text = uiState.detectedAudioDeviceName ?: "System Default Audio Output",
+                                    text = uiState.audioSettings.detectedAudioDeviceName ?: "System Default Audio Output",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (uiState.activeAudioDeviceIdentifier != null) "Hardware Profile Connected" else "Internal Output Target",
+                                    text = if (uiState.audioSettings.activeAudioDeviceIdentifier != null) "Hardware Profile Connected" else "Internal Output Target",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1997,7 +1998,7 @@ fun MainScreen() {
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = "${uiState.calibrationDelayOffsetMs} ms",
+                                text = "${uiState.calibrationFlow.calibrationDelayOffsetMs} ms",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -2005,7 +2006,7 @@ fun MainScreen() {
                             )
                         }
                         HapticBouncySlider(
-                            value = uiState.calibrationDelayOffsetMs.toFloat(),
+                            value = uiState.calibrationFlow.calibrationDelayOffsetMs.toFloat(),
                             onValueChange = { viewModel.updateCalibrationSliderValue(it.toInt()) },
                             valueRange = 0f..500f,
                             steps = 99, // 5ms step size (500 / 5 = 100 values)
@@ -2367,13 +2368,13 @@ fun ExpressiveConnectionLoadingIndicator() {
 fun DeviceTile(
     address: String,
     viewModel: com.example.RgbControllerViewModel,
-    uiState: com.example.ControllerUiState,
+    uiState: com.example.RgbUiState,
     savedDevices: List<com.example.db.SavedDevice>,
     activeComposeColor: Color,
     modifier: Modifier = Modifier
 ) {
     val savedDev = savedDevices.find { it.macAddress == address }
-    val scannedDev = uiState.scannedDevices.find { it.address == address }
+    val scannedDev = uiState.connectivity.scannedDevices.find { it.address == address }
     val displayName = savedDev?.customName ?: scannedDev?.alias ?: scannedDev?.name ?: "DuoCo Light"
     val isActiveControlled = savedDev?.isActiveControlEnabled ?: true
     val hapticFeedback = LocalHapticFeedback.current
@@ -2385,15 +2386,15 @@ fun DeviceTile(
         }.getOrElse { HapticFeedbackType.TextHandleMove }
     }
 
-    val deviceState = uiState.deviceStatesMap[address] ?: com.example.ActiveDeviceState(
-        activeFeatureName = uiState.activeFeatureName,
-        red = uiState.red,
-        green = uiState.green,
-        blue = uiState.blue,
-        warmth = uiState.warmth,
-        modeIndex = uiState.modeIndex,
-        brightness = uiState.brightness,
-        isPowerOn = uiState.isPowerOn
+    val deviceState = uiState.connectivity.deviceStatesMap[address] ?: com.example.ActiveDeviceState(
+        activeFeatureName = uiState.coreControl.activeFeatureName,
+        red = uiState.coreControl.red,
+        green = uiState.coreControl.green,
+        blue = uiState.coreControl.blue,
+        warmth = uiState.coreControl.warmth,
+        modeIndex = uiState.coreControl.modeIndex,
+        brightness = uiState.coreControl.brightness,
+        isPowerOn = uiState.coreControl.isPowerOn
     )
     val deviceColor = Color(deviceState.red, deviceState.green, deviceState.blue)
 

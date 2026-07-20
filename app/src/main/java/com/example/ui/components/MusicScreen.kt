@@ -54,6 +54,7 @@ fun MusicScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val telemetry by viewModel.telemetry.collectAsState()
     val context = LocalContext.current
 
     var pendingMode by remember { mutableStateOf<String?>(null) }
@@ -132,7 +133,7 @@ fun MusicScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Bottom
             ) {
-                val amplitudes = uiState.musicAmplitudes
+                val amplitudes = telemetry.musicAmplitudes
                 var previousAmplitudes by remember { mutableStateOf<List<Float>>(emptyList()) }
                 var currentAmplitudes by remember { mutableStateOf<List<Float>>(emptyList()) }
                 var lastUpdateTime by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -185,13 +186,13 @@ fun MusicScreen(
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        val shouldShowIdleWave = uiState.isVisualizerIdle || !uiState.isAudioSyncRunning
+                        val shouldShowIdleWave = uiState.audioSettings.isVisualizerIdle || !uiState.audioSettings.isAudioSyncRunning
                         for (i in 0 until barCount) {
                             val ampValue = resampledAmplitudes[i]
                             VisualizerBar(
                                 ampValue = ampValue,
-                                isIdle = uiState.isVisualizerIdle,
-                                visualizerHue = uiState.visualizerHue,
+                                isIdle = uiState.audioSettings.isVisualizerIdle,
+                                visualizerHue = telemetry.visualizerHue,
                                 showIdleWave = shouldShowIdleWave,
                                 barIndex = i
                             )
@@ -225,7 +226,7 @@ fun MusicScreen(
                         )
                     }
                     Text(
-                        text = "${uiState.musicSensitivity}%",
+                        text = "${uiState.audioSettings.musicSensitivity}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.ExtraBold
@@ -234,7 +235,7 @@ fun MusicScreen(
                 }
                 
                 HapticBouncySlider(
-                    value = uiState.musicSensitivity.toFloat(),
+                    value = uiState.audioSettings.musicSensitivity.toFloat(),
                     onValueChange = { viewModel.setMusicSensitivity(it.toInt()) },
                     valueRange = 0f..100f,
                     totalSteps = 100,
@@ -248,8 +249,8 @@ fun MusicScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            val isPhoneActive = uiState.musicMode == "phone_mic"
-            val isOnDeviceActive = uiState.musicMode == "on_device"
+            val isPhoneActive = uiState.audioSettings.musicMode == "phone_mic"
+            val isOnDeviceActive = uiState.audioSettings.musicMode == "on_device"
 
             val phoneMicInteractionSource = remember { MutableInteractionSource() }
             val onDeviceInteractionSource = remember { MutableInteractionSource() }
@@ -397,7 +398,7 @@ fun MusicScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     rowPresets.forEach { preset ->
-                        val isActive = (uiState.musicMode == "phone_mic" || uiState.musicMode == "on_device") && uiState.visualizerPreset == preset.id
+                        val isActive = (uiState.audioSettings.musicMode == "phone_mic" || uiState.audioSettings.musicMode == "on_device") && uiState.audioSettings.visualizerPreset == preset.id
                         val presetInteractionSource = remember(preset.id) { MutableInteractionSource() }
                         Card(
                             modifier = Modifier
@@ -486,7 +487,7 @@ fun MusicScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     rowPresets.forEach { preset ->
-                        val isActive = uiState.musicMode == preset.id
+                        val isActive = uiState.audioSettings.musicMode == preset.id
                         val ledInteractionSource = remember(preset.id) { MutableInteractionSource() }
                         Card(
                             modifier = Modifier

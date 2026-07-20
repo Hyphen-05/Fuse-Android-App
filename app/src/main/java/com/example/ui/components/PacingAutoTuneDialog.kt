@@ -250,7 +250,7 @@ fun PacingAutoTuneContent(
                     Text("Start Auto-Tune")
                 }
                 
-                val currentSetMs = viewModel.uiState.value.devicePacingMs[address] ?: 100
+                val currentSetMs = viewModel.uiState.value.connectivity.devicePacingMs[address] ?: 100
                 OutlinedButton(
                     onClick = { 
                         isStressTestOnly = true
@@ -295,7 +295,7 @@ fun PacingAutoTuneContent(
     LaunchedEffect(isTuning) {
         if (!isTuning) return@LaunchedEffect
 
-        val originalPacing = viewModel.uiState.value.devicePacingMs[address] ?: 100
+        val originalPacing = viewModel.uiState.value.connectivity.devicePacingMs[address] ?: 100
         try {
             viewModel.broadcastCommand(DuoCoProtocol.createPhoneMicToggleCommand(true))
             delay(300)
@@ -317,10 +317,10 @@ fun PacingAutoTuneContent(
                     
                     delay(800) // Let queue drain
                     
-                    val isConnected = viewModel.uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED
+                    val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
                     if (!isConnected) return false to "Disconnected"
                     
-                    val currentFps = viewModel.uiState.value.deviceAchievedFps[address] ?: 0
+                    val currentFps = viewModel.telemetry.value.deviceAchievedFps[address] ?: 0
                     val targetFps = if (interval == 0) 100 else 1000 / interval
                     val minAcceptableFps = (targetFps * 0.6).toInt().coerceAtMost(30)
                     
@@ -349,14 +349,14 @@ fun PacingAutoTuneContent(
                         elapsed = System.currentTimeMillis() - startTime
                         if (i % 20 == 0) {
                             onProgress(elapsed.toFloat() / stressDurationMs)
-                            val isConnected = viewModel.uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED
+                            val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
                             if (!isConnected) return false to "Disconnected"
                         }
                         i++
                     }
                     
                     delay(1000)
-                    val isConnected = viewModel.uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED
+                    val isConnected = viewModel.uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
                     if (!isConnected) return false to "Disconnected at end"
                     
                     return true to "Stress Passed"
