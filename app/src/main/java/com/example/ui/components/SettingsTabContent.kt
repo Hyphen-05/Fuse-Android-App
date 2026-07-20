@@ -30,7 +30,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
-import com.example.ControllerUiState
+import com.example.RgbUiState
+import com.example.TelemetryState
 import com.example.RgbControllerViewModel
 import com.example.BleConnectionState
 import kotlinx.coroutines.Dispatchers
@@ -125,8 +126,8 @@ fun ExpandableCategoryCard(
     }
 }
 
-fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbControllerViewModel) {
-    if (state.showCalibrationPrompt && state.detectedAudioDeviceName != null) {
+fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryState, viewModel: RgbControllerViewModel) {
+    if (state.calibrationFlow.showCalibrationPrompt && state.audioSettings.detectedAudioDeviceName != null) {
         item {
             val calibratePromptInteractionSource = remember { MutableInteractionSource() }
             Card(
@@ -152,7 +153,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                         )
                     }
                     Text(
-                        text = "We noticed you're outputting audio to '${state.detectedAudioDeviceName}'. Bluetooth output latency, combined with internal beat-detection latency, causes the lights to flash out of sync. Calibrate to fix this.",
+                        text = "We noticed you're outputting audio to '${state.audioSettings.detectedAudioDeviceName}'. Bluetooth output latency, combined with internal beat-detection latency, causes the lights to flash out of sync. Calibrate to fix this.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Button(
@@ -184,13 +185,13 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
 
     item {
         val context = LocalContext.current
-        val responseSpeed = state.ambianceResponseSpeed
-        val smoothnessMs = state.ambianceSmoothnessMs
-        val saturationBoost = state.ambianceSaturationBoost
-        val brightnessCompensation = state.ambianceBrightnessCompensation
-        val updateRateCapFps = state.ambianceUpdateRateCapFps
-        val sceneCutSensitivity = state.ambianceSceneCutSensitivity
-        val noiseDeadband = state.ambianceNoiseDeadband
+        val responseSpeed = state.ambianceSettings.ambianceResponseSpeed
+        val smoothnessMs = state.ambianceSettings.ambianceSmoothnessMs
+        val saturationBoost = state.ambianceSettings.ambianceSaturationBoost
+        val brightnessCompensation = state.ambianceSettings.ambianceBrightnessCompensation
+        val updateRateCapFps = state.ambianceSettings.ambianceUpdateRateCapFps
+        val sceneCutSensitivity = state.ambianceSettings.ambianceSceneCutSensitivity
+        val noiseDeadband = state.ambianceSettings.ambianceNoiseDeadband
 
         var showSavePresetDialog by remember { mutableStateOf(false) }
         var presetNameToSave by remember { mutableStateOf("") }
@@ -342,13 +343,13 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                 // 5. Update Rate Cap
-                val connectedDevices = state.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+                val connectedDevices = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
                 val pacingPrefs = remember { context.getSharedPreferences("ble_pacing_prefs", Context.MODE_PRIVATE) }
                 val slowestDevicePacing = if (connectedDevices.isEmpty()) {
                     0
                 } else {
                     connectedDevices.keys.mapNotNull { address ->
-                        state.devicePacingMs[address] ?: pacingPrefs.getInt(address, 100)
+                        state.connectivity.devicePacingMs[address] ?: pacingPrefs.getInt(address, 100)
                     }.maxOrNull() ?: 0
                 }
                 val maxFps = if (slowestDevicePacing <= 0) 20 else (1000 / slowestDevicePacing).coerceIn(1, 60)
@@ -600,7 +601,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
             initiallyExpanded = false
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                BLEPacingCard(state, viewModel)
+                BLEPacingCard(state, telemetry, viewModel)
                 
                 val calibrateSliderInteractionSource = remember { MutableInteractionSource() }
                 ExpandableCategoryCard(
@@ -620,7 +621,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${state.bluetoothDelayMs} ms",
+                                text = "${state.audioSettings.bluetoothDelayMs} ms",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.secondary
                             )
@@ -636,7 +637,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             HapticBouncySlider(
-                                value = state.bluetoothDelayMs.toFloat(),
+                                value = state.audioSettings.bluetoothDelayMs.toFloat(),
                                 onValueChange = { viewModel.setBluetoothDelayMs(it.toInt()) },
                                 valueRange = 0f..1000f,
                                 totalSteps = 1000,
@@ -710,7 +711,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.2f", state.audioSmoothingAttack),
+                                text = String.format("%.2f", state.audioSettings.audioSmoothingAttack),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -721,7 +722,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.audioSmoothingAttack,
+                            value = state.audioSettings.audioSmoothingAttack,
                             onValueChange = { viewModel.setAudioSmoothingAttack(it) },
                             valueRange = 0.05f..1.00f,
                             totalSteps = 95,
@@ -740,7 +741,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.3f", state.audioSmoothingDecay),
+                                text = String.format("%.3f", state.audioSettings.audioSmoothingDecay),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -751,7 +752,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.audioSmoothingDecay,
+                            value = state.audioSettings.audioSmoothingDecay,
                             onValueChange = { viewModel.setAudioSmoothingDecay(it) },
                             valueRange = 0.005f..0.500f,
                             totalSteps = 495,
@@ -777,7 +778,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.3f", state.noiseGateThreshold),
+                                text = String.format("%.3f", state.audioSettings.noiseGateThreshold),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.tertiary
                             )
@@ -788,7 +789,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.noiseGateThreshold,
+                            value = state.audioSettings.noiseGateThreshold,
                             onValueChange = { viewModel.setNoiseGateThreshold(it) },
                             valueRange = 0.001f..0.100f,
                             totalSteps = 99,
@@ -814,13 +815,13 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.1fx", state.bassGain),
+                                text = String.format("%.1fx", state.audioSettings.bassGain),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                         HapticBouncySlider(
-                            value = state.bassGain,
+                            value = state.audioSettings.bassGain,
                             onValueChange = { viewModel.setBassGain(it) },
                             valueRange = 0.5f..5.0f,
                             totalSteps = 45,
@@ -839,13 +840,13 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.1fx", state.midGain),
+                                text = String.format("%.1fx", state.audioSettings.midGain),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                         HapticBouncySlider(
-                            value = state.midGain,
+                            value = state.audioSettings.midGain,
                             onValueChange = { viewModel.setMidGain(it) },
                             valueRange = 0.5f..5.0f,
                             totalSteps = 45,
@@ -864,13 +865,13 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.1fx", state.highGain),
+                                text = String.format("%.1fx", state.audioSettings.highGain),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                         HapticBouncySlider(
-                            value = state.highGain,
+                            value = state.audioSettings.highGain,
                             onValueChange = { viewModel.setHighGain(it) },
                             valueRange = 0.5f..5.0f,
                             totalSteps = 45,
@@ -904,7 +905,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 )
                             }
                             Switch(
-                                checked = state.isAutoGainEnabled,
+                                checked = state.audioSettings.isAutoGainEnabled,
                                 onCheckedChange = { viewModel.setAutoGainEnabled(it) },
                                 modifier = Modifier.testTag("auto_gain_switch")
                             )
@@ -928,7 +929,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 )
                             }
                             Switch(
-                                checked = state.isPaletteCyclingEnabled,
+                                checked = state.audioSettings.isPaletteCyclingEnabled,
                                 onCheckedChange = { viewModel.setPaletteCyclingEnabled(it) },
                                 modifier = Modifier.testTag("palette_cycling_switch")
                             )
@@ -952,7 +953,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 )
                             }
                             Switch(
-                                checked = state.isLogarithmicScalingEnabled,
+                                checked = state.audioSettings.isLogarithmicScalingEnabled,
                                 onCheckedChange = { viewModel.setLogarithmicScalingEnabled(it) },
                                 modifier = Modifier.testTag("log_scale_switch")
                             )
@@ -977,7 +978,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.2f", state.audioGammaExponent),
+                                text = String.format("%.2f", state.audioSettings.audioGammaExponent),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -988,7 +989,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.audioGammaExponent,
+                            value = state.audioSettings.audioGammaExponent,
                             onValueChange = { viewModel.setAudioGammaExponent(it) },
                             valueRange = 0.10f..2.50f,
                             totalSteps = 240,
@@ -1007,7 +1008,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.2f", state.visualizerMinBrightness),
+                                text = String.format("%.2f", state.audioSettings.visualizerMinBrightness),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -1018,7 +1019,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.visualizerMinBrightness,
+                            value = state.audioSettings.visualizerMinBrightness,
                             onValueChange = { viewModel.setVisualizerMinBrightness(it) },
                             valueRange = 0.00f..1.00f,
                             totalSteps = 100,
@@ -1039,7 +1040,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.2f", state.audioFlashStrength),
+                                text = String.format("%.2f", state.audioSettings.audioFlashStrength),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -1050,7 +1051,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.audioFlashStrength,
+                            value = state.audioSettings.audioFlashStrength,
                             onValueChange = { viewModel.setAudioFlashStrength(it) },
                             valueRange = 0.00f..1.00f,
                             totalSteps = 100,
@@ -1071,7 +1072,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = String.format("%.2fx", state.visualizerColorSpeed),
+                                text = String.format("%.2fx", state.audioSettings.visualizerColorSpeed),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -1082,7 +1083,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         HapticBouncySlider(
-                            value = state.visualizerColorSpeed,
+                            value = state.audioSettings.visualizerColorSpeed,
                             onValueChange = { viewModel.setVisualizerColorSpeed(it) },
                             valueRange = 0.10f..5.00f,
                             totalSteps = 490,
@@ -1143,7 +1144,7 @@ fun LazyListScope.SettingsTabContent(state: ControllerUiState, viewModel: RgbCon
                     )
                 }
                 Switch(
-                    checked = state.showFpsTracker,
+                    checked = state.coreControl.showFpsTracker,
                     onCheckedChange = { viewModel.setShowFpsTracker(it) },
                     modifier = Modifier.testTag("fps_tracker_switch")
                 )
