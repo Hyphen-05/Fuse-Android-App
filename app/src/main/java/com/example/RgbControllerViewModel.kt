@@ -152,8 +152,9 @@ class RgbControllerViewModel(
     private val application: android.content.Context,
     private val prefsRepo: com.example.domain.repository.AppPreferencesRepository,
     private val repository: com.example.domain.repository.RgbDatabaseRepository,
-    private val connectionManager: com.example.domain.ConnectionManager
-) : androidx.lifecycle.ViewModel() {
+    private val connectionManager: com.example.domain.ConnectionManager,
+    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink
+) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener {
 
     private fun getApplication(): android.app.Application = application as android.app.Application
 
@@ -999,6 +1000,7 @@ class RgbControllerViewModel(
 
     init {
         instance = this
+        ambianceCommandSink.listener = this
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
         
@@ -2130,11 +2132,11 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetShowFpsTracker(enabled))
     }
 
-    fun writeAmbianceColor(r: Int, g: Int, b: Int) {
+    override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
     }
 
-    fun setAmbianceCaptureActive(active: Boolean) {
+    override fun setAmbianceCaptureActive(active: Boolean) {
         dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
@@ -3088,6 +3090,9 @@ class RgbControllerViewModel(
     override fun onCleared() {
         if (instance === this) {
             instance = null
+        }
+        if (ambianceCommandSink.listener === this) {
+            ambianceCommandSink.listener = null
         }
         super.onCleared()
         stopMusicSyncInternal()

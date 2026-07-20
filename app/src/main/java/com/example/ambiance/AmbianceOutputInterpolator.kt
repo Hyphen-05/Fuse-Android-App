@@ -3,11 +3,14 @@ package com.example.ambiance
 import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
-import com.example.RgbControllerViewModel
+import com.example.domain.AmbianceCommandSink
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-class AmbianceOutputInterpolator(private val context: Context) {
+class AmbianceOutputInterpolator(
+    private val context: Context,
+    private val ambianceCommandSink: AmbianceCommandSink
+) {
 
     private var currentLinR: Double = 0.0
     private var currentLinG: Double = 0.0
@@ -109,7 +112,7 @@ class AmbianceOutputInterpolator(private val context: Context) {
         val currentSrgb = Triple(r, g, b)
 
         if (currentSrgb != lastWrittenSrgb) {
-            RgbControllerViewModel.getActiveInstance()?.writeAmbianceColor(r, g, b)
+            ambianceCommandSink.listener?.writeAmbianceColor(r, g, b)
             lastWrittenSrgb = currentSrgb
         }
     }

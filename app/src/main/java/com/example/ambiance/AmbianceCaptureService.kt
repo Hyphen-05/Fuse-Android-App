@@ -20,7 +20,8 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.example.RgbControllerViewModel
+import com.example.RgbControllerApplication
+import com.example.domain.AmbianceCommandSink
 
 class AmbianceCaptureService : Service() {
 
@@ -33,6 +34,13 @@ class AmbianceCaptureService : Service() {
 
     private var processor: AmbianceProcessor? = null
     private var outputInterpolator: AmbianceOutputInterpolator? = null
+
+    private val ambianceCommandSink: AmbianceCommandSink
+        get() = (application as RgbControllerApplication).container.ambianceCommandSink
+
+    private fun setAmbianceCaptureActive(active: Boolean) {
+        ambianceCommandSink.listener?.setAmbianceCaptureActive(active)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -72,7 +80,7 @@ class AmbianceCaptureService : Service() {
             projectionCallback = callback
             mp.registerCallback(callback, Handler(Looper.getMainLooper()))
 
-            RgbControllerViewModel.getActiveInstance()?.setAmbianceCaptureActive(true)
+            setAmbianceCaptureActive(true)
 
             setupCapture()
             AmbianceCaptureState.setIsActive(true)
@@ -111,7 +119,7 @@ class AmbianceCaptureService : Service() {
         handlerThread = HandlerThread("AmbianceCaptureThread").apply { start() }
         handler = Handler(handlerThread!!.looper)
 
-        outputInterpolator = AmbianceOutputInterpolator(this)
+        outputInterpolator = AmbianceOutputInterpolator(this, ambianceCommandSink)
         outputInterpolator?.start()
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
@@ -159,7 +167,7 @@ class AmbianceCaptureService : Service() {
         processor?.clear()
         processor = null
 
-        RgbControllerViewModel.getActiveInstance()?.setAmbianceCaptureActive(false)
+        setAmbianceCaptureActive(false)
 
         AmbianceCaptureState.setIsActive(false)
         AmbianceCaptureState.updateZoneColors(emptyList())
