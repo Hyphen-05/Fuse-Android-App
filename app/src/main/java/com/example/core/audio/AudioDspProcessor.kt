@@ -1,7 +1,6 @@
 package com.example.core.audio
 
 import com.example.AudioSettingsState
-import com.example.BeatDetector
 import com.example.core.color.ColorConverter
 import com.example.hardware.audio.AudioBackend
 import com.example.hardware.audio.AudioCaptureFrame

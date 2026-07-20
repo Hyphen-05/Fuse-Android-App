@@ -13,7 +13,7 @@ enum class AudioBackend { AUDIO_RECORD, VISUALIZER }
  * smoothing, beat detection, etc.) applied yet — that happens in AudioDspProcessor.process().
  *
  * Deviation from the original spec shape: the spec's sketch only had `magnitudes: FloatArray`.
- * The real pipeline (see BeatDetector.process in RgbControllerViewModel.kt) needs the real/imag
+ * The real pipeline (see BeatDetector.process in com.example.core.audio.BeatDetector) needs the real/imag
  * FFT bins too (for phase-flux beat detection), so those are carried here rather than only the
  * derived magnitude array.
  */
