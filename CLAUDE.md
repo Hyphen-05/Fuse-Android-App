@@ -52,16 +52,25 @@ RgbUiState:
 
 ### Current reducer status
 
-`CoreControlsReducer.kt` (`app/src/main/java/com/example/presentation/CoreControlsReducer.kt`) handles the Connectivity & Scanning / Device management / Core Controls intent groups. It is **on the `refactor-checkpoint` branch but not yet merged to main** (PR not yet opened — pending review).
+`CoreControlsReducer.kt` (`app/src/main/java/com/example/presentation/CoreControlsReducer.kt`) handles the Connectivity & Scanning / Device management / Core Controls intent groups. It has been **fixed, tested, and merged into `refactor-checkpoint`** at commit `8aef9dd` (PR not yet opened against main). Test coverage: 43 JUnit tests in `CoreControlsReducerTest.kt`, covering all 21 intents plus regression tests for both fixes described below.
 
-**Two known bugs, not yet fixed — do not treat this reducer as verified-correct until these are resolved:**
+**How this works:**
 
-1. `SetPower`/`SetColor`/`SetBrightness`/`SetMode`/`SetWarmth` update `deviceStatesMap` via `mapValues`, which only touches keys that already exist. The source ViewModel's `updateControlledDevicesInMap()` creates missing entries for every target address. Result: newly-connected auto-saved devices never get a `deviceStatesMap` entry from these five intents.
-2. `SetDemoMode(true)` and `DisconnectAll` key off `deviceConnectionStates` (a map that never shrinks) instead of the source's `activeConnections` (a live-only registry). After the first device connects, the "already disconnected" fast path never fires again, causing repeated disconnect-effect emission for stale/already-disconnected addresses.
+1. `SetPower`/`SetColor`/`SetBrightness`/`SetMode`/`SetWarmth` update `deviceStatesMap` via `applyControlledDeviceUpdates()`, which mirrors `RgbControllerViewModel.updateControlledDevicesInMap()`: it creates missing entries for every target address rather than only touching keys that already exist, so newly-connected auto-saved devices correctly get a `deviceStatesMap` entry from these five intents.
+2. `SetDemoMode(true)` and `DisconnectAll` key off `activeConnections` (a live-only registry), mirroring the source ViewModel, rather than `deviceConnectionStates` (a map that never shrinks) — so the "already disconnected" fast path continues to fire correctly after the first device connects, avoiding repeated disconnect-effect emission for stale/already-disconnected addresses.
 
-When fixing these, reference the real `updateControlledDevicesInMap()` and `activeConnections` implementations in `RgbControllerViewModel.kt` directly — don't infer intended behavior from the reducer's existing (buggy) pattern.
+If touching this code further, reference the real `updateControlledDevicesInMap()` and `activeConnections` implementations in `RgbControllerViewModel.kt` directly — don't infer intended behavior from the reducer alone.
 
 A pre-existing bug in `setWarmth` (writes `"CCT"` to a pref key, then immediately overwrites it with `"Colour"`) has been **intentionally preserved** in the reducer as behavior parity — this is not a bug to fix during the refactor.
+
+`AmbianceSettingsReducer.kt` (`app/src/main/java/com/example/presentation/AmbianceSettingsReducer.kt`) handles the Ambiance & Camera Sync intent group. **Merged into `refactor-checkpoint`.** Test coverage: 13 JUnit tests in `AmbianceSettingsReducerTest.kt`, covering all 8 intents. Source-diffed against the real `setAmbiance*()` / `applyAmbiancePreset()` handlers in `RgbControllerViewModel.kt` (lines 2775-2845) — no discrepancies found, unlike `CoreControlsReducer`.
+
+**How this works:** 7 single-value setters (`SetAmbianceResponseSpeed`, `SetAmbianceSmoothnessMs`, `SetAmbianceSaturationBoost`, `SetAmbianceBrightnessCompensation`, `SetAmbianceUpdateRateCapFps`, `SetAmbianceSceneCutSensitivity`, `SetAmbianceNoiseDeadband`) each update one field and force `ambiancePreset` to `"Custom"`. `ApplyAmbiancePreset` is the exception: it sets `ambiancePreset` to the applied preset ID (not `"Custom"`), does **not** touch `ambianceUpdateRateCapFps`, and additionally cancels any running scene chain — modeled as `AmbianceSideEffect.CancelSceneChain`, mirroring `CoreSideEffect.CancelSceneChain`.
+
+Deliberately **out of scope** for this reducer — verified, not overlooked:
+- Ambiance capture start/stop has no ViewModel intent; `MainActivity.kt` drives `AmbianceCaptureService` directly via an `ActivityResultLauncher` (needs the Activity for the `MediaProjection` permission result).
+- `WriteAmbianceColor` is a pure BLE passthrough (no `RgbUiState` field touched, fires per captured frame) — belongs with Commands/Protocol, not settings.
+- `CoreSideEffect.StopAmbiance` already exists and is already wired into `CoreControlsReducer`, fired from `SetPower`/`SetColor`/etc. — not new work.
 
 ## Hardware constraint (permanent, confirmed)
 
@@ -82,8 +91,15 @@ Uses screen capture (`MediaProjection`), **not** the physical camera. The camera
 - Smart Scene: chip dropdowns for in-place editing, animation timing consistency, chip label formatting, manual per-step editing — all deferred until scene editors are reconciled.
 - Audio visualizer: `paletteCycling` on Beat Only pending hardware test decision; fire-effect flicker/brightness modulation deferred.
 
+## Testing
+
+- `CoreControlsReducerTest.kt` covers the Core Controls + Connectivity + Device management reducer (`CoreControlsReducer.kt`). 43 tests, all 21 intents.
+- `AmbianceSettingsReducerTest.kt` covers the Ambiance & Camera Sync reducer (`AmbianceSettingsReducer.kt`). 13 tests, all 8 intents.
+- Run either via `./gradlew :app:testDebugUnitTest`. Reducer logic and its tests are opened as **separate PRs** (reducer first, tests based on the reducer branch) — follow this precedent for future reducer slices (audio settings, calibration flow).
+
 ## Git/GitHub notes
 
 - Working branch: `refactor-checkpoint` (tracking `origin/refactor-checkpoint`).
+- The Gradle wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/`, `gradle/gradle-daemon-jvm.properties`) is committed to the repo.
 - If using AI Studio's own GitHub panel elsewhere in this workflow: it silently overwrites custom `LICENSE`/`README` with its own template on repo (re-)init — always check/restore both files after any AI-Studio-driven git re-init. This does not apply to Claude Code's own git operations, just noting it in case AI Studio touches the same repo.
 - `.gitignore` covers `debug.keystore` and `debug.keystore.base64` — keep both covered if keystore handling changes.
