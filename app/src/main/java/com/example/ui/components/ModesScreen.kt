@@ -98,7 +98,7 @@ fun ModesScreen(
 
 
         // --- Connection / Demo mode Alert Banner ---
-        val isConnected = uiState.connectionState == BleConnectionState.CONNECTED
+        val isConnected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED
         AnimatedVisibility(visible = !isConnected) {
             Card(
                 colors = CardDefaults.cardColors(
@@ -156,7 +156,7 @@ fun ModesScreen(
                         )
                     )
                     Text(
-                        text = "${uiState.modeSpeed}%",
+                        text = "${uiState.coreControl.modeSpeed}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -164,7 +164,7 @@ fun ModesScreen(
                     )
                 }
                 ExpressiveSlider(
-                    value = uiState.modeSpeed,
+                    value = uiState.coreControl.modeSpeed,
                     onValueChange = { viewModel.setModeSpeed(it) },
                     labelPrefix = "Speed",
                     activeColor = MaterialTheme.colorScheme.primary,
@@ -275,7 +275,7 @@ fun ModesScreen(
                     .testTag("modes_grid")
             ) {
                 items(filteredModes) { mode ->
-                    val isActive = uiState.modeIndex == mode.byteValue
+                    val isActive = uiState.coreControl.modeIndex == mode.byteValue
                     CustomModeGridItem(
                         mode = mode,
                         isActive = isActive,

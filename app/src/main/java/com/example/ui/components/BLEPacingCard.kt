@@ -17,12 +17,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.example.ControllerUiState
+import com.example.RgbUiState
+import com.example.TelemetryState
 import com.example.RgbControllerViewModel
 import com.example.BleConnectionState
 
 @Composable
-fun BLEPacingCard(state: ControllerUiState, viewModel: RgbControllerViewModel) {
+fun BLEPacingCard(state: RgbUiState, telemetry: TelemetryState, viewModel: RgbControllerViewModel) {
     var selectedDeviceForCalibration by remember { mutableStateOf<String?>(null) }
 
     ExpandableCategoryCard(
@@ -38,7 +39,7 @@ fun BLEPacingCard(state: ControllerUiState, viewModel: RgbControllerViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            val connectedDevices = state.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+            val connectedDevices = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
             
             if (connectedDevices.isEmpty()) {
                 Text(
@@ -50,13 +51,13 @@ fun BLEPacingCard(state: ControllerUiState, viewModel: RgbControllerViewModel) {
 
             connectedDevices.forEach { (address, _) ->
                 androidx.compose.runtime.key(address) {
-                val deviceName = state.scannedDevices.find { it.address == address }?.alias 
-                    ?: state.scannedDevices.find { it.address == address }?.name 
+                val deviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias
+                    ?: state.connectivity.scannedDevices.find { it.address == address }?.name
                     ?: address
 
-                val currentPacing = state.devicePacingMs[address] ?: 100
-                val achievedFps = state.deviceAchievedFps[address] ?: 0
-                val isTesting = state.isTestPatternRunning[address] == true
+                val currentPacing = state.connectivity.devicePacingMs[address] ?: 100
+                val achievedFps = telemetry.deviceAchievedFps[address] ?: 0
+                val isTesting = state.connectivity.isTestPatternRunning[address] == true
 
                 val testInteractionSource = remember(address) { MutableInteractionSource() }
                 val tuneInteractionSource = remember(address) { MutableInteractionSource() }
@@ -148,10 +149,10 @@ fun BLEPacingCard(state: ControllerUiState, viewModel: RgbControllerViewModel) {
     
     if (selectedDeviceForCalibration != null) {
         val address = selectedDeviceForCalibration!!
-        val deviceName = state.scannedDevices.find { it.address == address }?.alias 
-                    ?: state.scannedDevices.find { it.address == address }?.name 
+        val deviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias
+                    ?: state.connectivity.scannedDevices.find { it.address == address }?.name
                     ?: address
-        
+
         PacingAutoTuneDialog(
             address = address,
             deviceName = deviceName,

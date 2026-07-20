@@ -1,4 +1,4 @@
-package com.example
+﻿package com.example
 
 import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
@@ -142,79 +142,15 @@ data class ActiveDeviceState(
     val isPowerOn: Boolean = true
 )
 
-data class ControllerUiState(
-    val isDbLoaded: Boolean = false,
-    val activeFeatureName: String = "Colour",
-    val showFpsTracker: Boolean = false,
-    val connectionState: BleConnectionState = BleConnectionState.DISCONNECTED,
-    val connectedDeviceAddress: String? = null,
-    val connectedDeviceName: String? = null,
-    val isScanning: Boolean = false,
-    val scannedDevices: List<ScannedRgbDevice> = emptyList(),
-    val isPowerOn: Boolean = true,
-    val red: Int = 255,
-    val green: Int = 0,
-    val blue: Int = 128,
-    val brightness: Int = 80,
-    val modeIndex: Int = 0,
-    val modeSpeed: Int = 50,
-    val warmth: Int = 50,
-    val isDemoMode: Boolean = true, // default to true since there's no physical BLE in the emulator
-    val errorMessage: String? = null,
-    val logMessages: List<String> = emptyList(),
-    val deviceConnectionStates: Map<String, BleConnectionState> = emptyMap(),
-    val musicMode: String? = null,
-    val musicSensitivity: Int = 50,
-    val musicAmplitudes: List<Float> = emptyList(),
-    val visualizerHue: Float = 0.0f,
-    val isVisualizerIdle: Boolean = false,
-    val isAudioSyncRunning: Boolean = false,
-    val audioSmoothingAttack: Float = 0.85f,
-    val audioSmoothingDecay: Float = 0.12f,
-    val beatFlashDecayMs: Float = 200f,
-    val ambientCapFraction: Float = 0.40f,
-    val midFluxWeight: Float = 0.25f,
-    val transmissionDelayMs: Int = 16,
-    val noiseGateThreshold: Float = 5.0f,
-    val beatThresholdMultiplier: Float = 1.3f,
-    val beatCooldownMs: Int = 250,
-    val bassGain: Float = 1.0f,
-    val midGain: Float = 1.0f,
-    val highGain: Float = 1.0f,
-    val isAutoGainEnabled: Boolean = true,
-    val isPaletteCyclingEnabled: Boolean = true,
-    val isLogarithmicScalingEnabled: Boolean = true,
-    val bluetoothDelayMs: Int = 0,
-    val totalVisualDelayMs: Int = 180,
-    val visualizerPreset: String = "Default",
-    val audioGammaExponent: Float = 0.45f,
-    val audioFlashStrength: Float = 0.3f,
-    val visualizerMinBrightness: Float = 0.15f,
-    val visualizerColorSpeed: Float = 1.0f,
-    val idleTriggerDelayMs: Long = 2500L,
-    val detectedAudioDeviceName: String? = null,
-    val activeAudioDeviceIdentifier: String? = null,
-    val showCalibrationPrompt: Boolean = false,
-    val isCalibrationModeActive: Boolean = false,
-    val calibrationDelayOffsetMs: Int = 0,
-    val deviceAchievedFps: Map<String, Int> = emptyMap(),
-    val devicePacingMs: Map<String, Int> = emptyMap(),
-    val isTestPatternRunning: Map<String, Boolean> = emptyMap(),
-    val colorCalibrations: Map<String, ColorCalibration> = emptyMap(),
-    val cctCalibrations: Map<String, CctCorrectionProfile> = emptyMap(),
-    val ambianceResponseSpeed: Float = 0.5f,
-    val ambianceSmoothnessMs: Int = 150,
-    val ambianceSaturationBoost: Float = 1.4f,
-    val ambianceBrightnessCompensation: Float = 1.0f,
-    val ambianceUpdateRateCapFps: Int = 20,
-    val ambianceSceneCutSensitivity: Float = 50.0f,
-    val ambianceNoiseDeadband: Float = 0.10f,
-    val ambiancePreset: String = "Balanced",
-    val deviceStatesMap: Map<String, ActiveDeviceState> = emptyMap()
-)
+// ControllerUiState (flat, 60-field) has been migrated to RgbUiState (RgbUiState.kt) —
+// see CLAUDE.md "RgbUiState shape (locked)" for the sub-state mapping.
 
 
-private class BeatDetector(
+// Phase 4: visibility widened from `private` to `internal` so AudioDspProcessor
+// (com.example.core.audio) can reuse it — deliberately left in this file/location per the
+// Phase 4 hardware-isolation trace ("already pure/stateless-per-instance — leave it where it
+// is, just reuse it"); only the access modifier changed, no logic touched.
+internal class BeatDetector(
     private val fluxHistorySize: Int = 64,
     private val medianWindowMs: Long = 1000L,
     val lookaheadMs: Long = 180L,
@@ -755,69 +691,339 @@ class RgbControllerViewModel(
     
         
     private val _uiState = MutableStateFlow(
-        ControllerUiState(
-            isPowerOn = prefsRepo.getAppStatePrefBoolean("power_on", true),
-            activeFeatureName = prefsRepo.getAppStatePrefString("active_feature_name", "Colour") ?: "Colour",
-            showFpsTracker = prefsRepo.getAppStatePrefBoolean("show_fps_tracker", false),
-            red = prefsRepo.getAppStatePrefInt("red", 255),
-            green = prefsRepo.getAppStatePrefInt("green", 0),
-            blue = prefsRepo.getAppStatePrefInt("blue", 128),
-            brightness = prefsRepo.getAppStatePrefInt("brightness", 80),
-            modeIndex = prefsRepo.getAppStatePrefInt("mode_index", 0),
-            modeSpeed = prefsRepo.getAppStatePrefInt("mode_speed", 50),
-            warmth = prefsRepo.getAppStatePrefInt("warmth", 50),
-            audioSmoothingAttack = prefsRepo.getAppStatePrefFloat("audio_smoothing_attack", 0.85f),
-            audioSmoothingDecay = prefsRepo.getAppStatePrefFloat("audio_smoothing_decay", 0.12f),
-            beatFlashDecayMs = prefsRepo.getAppStatePrefFloat("beat_flash_decay_ms", 200f),
-            ambientCapFraction = prefsRepo.getAppStatePrefFloat("ambient_cap_fraction", 0.40f),
-            midFluxWeight = prefsRepo.getAppStatePrefFloat("mid_flux_weight", 0.25f),
-            transmissionDelayMs = prefsRepo.getAppStatePrefInt("transmission_delay_ms", 16),
-            noiseGateThreshold = prefsRepo.getAppStatePrefFloat("noise_gate_threshold", 5.0f),
-            beatThresholdMultiplier = prefsRepo.getAppStatePrefFloat("beat_threshold_multiplier", 1.3f),
-            beatCooldownMs = prefsRepo.getAppStatePrefInt("beat_cooldown_ms", 250),
-            bassGain = prefsRepo.getAppStatePrefFloat("bass_gain", 1.0f),
-            midGain = prefsRepo.getAppStatePrefFloat("mid_gain", 1.0f),
-            highGain = prefsRepo.getAppStatePrefFloat("high_gain", 1.0f),
-            isAutoGainEnabled = prefsRepo.getAppStatePrefBoolean("is_auto_gain_enabled", true),
-            isPaletteCyclingEnabled = prefsRepo.getAppStatePrefBoolean("is_palette_cycling_enabled", true),
-            isLogarithmicScalingEnabled = prefsRepo.getAppStatePrefBoolean("is_logarithmic_scaling_enabled", true),
-            bluetoothDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
-            totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0) + BeatDetector().lookaheadMs.toInt(),
-            visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
-            audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
-            audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
-            visualizerMinBrightness = prefsRepo.getAppStatePrefFloat("visualizer_min_brightness", 0.15f),
-            visualizerColorSpeed = prefsRepo.getAppStatePrefFloat("visualizer_color_speed", 1.0f),
-            idleTriggerDelayMs = prefsRepo.getAppStatePrefLong("idle_trigger_delay_ms", 2500L),
-            ambianceResponseSpeed = prefsRepo.getAmbiancePrefFloat("response_speed", 0.5f),
-            ambianceSmoothnessMs = prefsRepo.getAmbiancePrefInt("smoothness_ms", 150),
-            ambianceSaturationBoost = prefsRepo.getAmbiancePrefFloat("saturation_boost", 1.4f),
-            ambianceBrightnessCompensation = prefsRepo.getAmbiancePrefFloat("brightness_compensation", 1.0f),
-            ambianceUpdateRateCapFps = prefsRepo.getAmbiancePrefInt("update_rate_cap_fps", 20),
-            ambianceSceneCutSensitivity = prefsRepo.getAmbiancePrefFloat("scene_cut_sensitivity", 110.0f), // Balanced default is 110
-            ambianceNoiseDeadband = prefsRepo.getAmbiancePrefFloat("noise_deadband", 0.10f),
-            ambiancePreset = prefsRepo.getAmbiancePrefString("ambiance_preset", "Balanced") ?: "Balanced"
+        RgbUiState(
+            coreControl = CoreControlState(
+                isPowerOn = prefsRepo.getAppStatePrefBoolean("power_on", true),
+                activeFeatureName = prefsRepo.getAppStatePrefString("active_feature_name", "Colour") ?: "Colour",
+                showFpsTracker = prefsRepo.getAppStatePrefBoolean("show_fps_tracker", false),
+                red = prefsRepo.getAppStatePrefInt("red", 255),
+                green = prefsRepo.getAppStatePrefInt("green", 0),
+                blue = prefsRepo.getAppStatePrefInt("blue", 128),
+                brightness = prefsRepo.getAppStatePrefInt("brightness", 80),
+                modeIndex = prefsRepo.getAppStatePrefInt("mode_index", 0),
+                modeSpeed = prefsRepo.getAppStatePrefInt("mode_speed", 50),
+                warmth = prefsRepo.getAppStatePrefInt("warmth", 50)
+            ),
+            audioSettings = AudioSettingsState(
+                audioSmoothingAttack = prefsRepo.getAppStatePrefFloat("audio_smoothing_attack", 0.85f),
+                audioSmoothingDecay = prefsRepo.getAppStatePrefFloat("audio_smoothing_decay", 0.12f),
+                beatFlashDecayMs = prefsRepo.getAppStatePrefFloat("beat_flash_decay_ms", 200f),
+                ambientCapFraction = prefsRepo.getAppStatePrefFloat("ambient_cap_fraction", 0.40f),
+                midFluxWeight = prefsRepo.getAppStatePrefFloat("mid_flux_weight", 0.25f),
+                transmissionDelayMs = prefsRepo.getAppStatePrefInt("transmission_delay_ms", 16),
+                noiseGateThreshold = prefsRepo.getAppStatePrefFloat("noise_gate_threshold", 5.0f),
+                beatThresholdMultiplier = prefsRepo.getAppStatePrefFloat("beat_threshold_multiplier", 1.3f),
+                beatCooldownMs = prefsRepo.getAppStatePrefInt("beat_cooldown_ms", 250),
+                bassGain = prefsRepo.getAppStatePrefFloat("bass_gain", 1.0f),
+                midGain = prefsRepo.getAppStatePrefFloat("mid_gain", 1.0f),
+                highGain = prefsRepo.getAppStatePrefFloat("high_gain", 1.0f),
+                isAutoGainEnabled = prefsRepo.getAppStatePrefBoolean("is_auto_gain_enabled", true),
+                isPaletteCyclingEnabled = prefsRepo.getAppStatePrefBoolean("is_palette_cycling_enabled", true),
+                isLogarithmicScalingEnabled = prefsRepo.getAppStatePrefBoolean("is_logarithmic_scaling_enabled", true),
+                bluetoothDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
+                totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0) + BeatDetector().lookaheadMs.toInt(),
+                visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
+                audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
+                audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
+                visualizerMinBrightness = prefsRepo.getAppStatePrefFloat("visualizer_min_brightness", 0.15f),
+                visualizerColorSpeed = prefsRepo.getAppStatePrefFloat("visualizer_color_speed", 1.0f),
+                idleTriggerDelayMs = prefsRepo.getAppStatePrefLong("idle_trigger_delay_ms", 2500L)
+            ),
+            ambianceSettings = AmbianceSettingsState(
+                ambianceResponseSpeed = prefsRepo.getAmbiancePrefFloat("response_speed", 0.5f),
+                ambianceSmoothnessMs = prefsRepo.getAmbiancePrefInt("smoothness_ms", 150),
+                ambianceSaturationBoost = prefsRepo.getAmbiancePrefFloat("saturation_boost", 1.4f),
+                ambianceBrightnessCompensation = prefsRepo.getAmbiancePrefFloat("brightness_compensation", 1.0f),
+                ambianceUpdateRateCapFps = prefsRepo.getAmbiancePrefInt("update_rate_cap_fps", 20),
+                ambianceSceneCutSensitivity = prefsRepo.getAmbiancePrefFloat("scene_cut_sensitivity", 110.0f), // Balanced default is 110
+                ambianceNoiseDeadband = prefsRepo.getAmbiancePrefFloat("noise_deadband", 0.10f),
+                ambiancePreset = prefsRepo.getAmbiancePrefString("ambiance_preset", "Balanced") ?: "Balanced"
+            )
         )
     )
-    val uiState: StateFlow<ControllerUiState> = _uiState.asStateFlow()
+    val uiState: StateFlow<RgbUiState> = _uiState.asStateFlow()
 
-    private val _protocolBytes = MutableStateFlow(
-        byteArrayOf(
-            0x7E.toByte(), // Header
-            0x00.toByte(), // Mutable 1
-            0x00.toByte(), // Mutable 2
-            0x00.toByte(), // Mutable 3
-            0x00.toByte(), // Mutable 4
-            0x00.toByte(), // Mutable 5
-            0x00.toByte(), // Mutable 6
-            0x00.toByte(), // Mutable 7
-            0xEF.toByte()  // Footer
+    private val _telemetry = MutableStateFlow(TelemetryState())
+    val telemetry: StateFlow<TelemetryState> = _telemetry.asStateFlow()
+
+    private val _colorCalibrations = MutableStateFlow<Map<String, ColorCalibration>>(emptyMap())
+    val colorCalibrations: StateFlow<Map<String, ColorCalibration>> = _colorCalibrations.asStateFlow()
+
+    private val _cctCalibrations = MutableStateFlow<Map<String, CctCorrectionProfile>>(emptyMap())
+    val cctCalibrations: StateFlow<Map<String, CctCorrectionProfile>> = _cctCalibrations.asStateFlow()
+
+    // ============================================================================
+    // MVI DISPATCH — Core Controls + Connectivity & Scanning + Device management
+    // ============================================================================
+
+    private fun dispatch(intent: RgbIntent) {
+        val (coreState, coreEffects) = com.example.presentation.coreControlsReducer(
+            state = _uiState.value,
+            intent = intent,
+            customModes = customModes.value,
+            savedDevices = savedDevices.value,
+            cctCalibrations = _cctCalibrations.value,
+            isAmbianceActive = com.example.ambiance.AmbianceCaptureState.isActive.value,
+            targetAddresses = getCurrentlyControlledDeviceAddresses(),
+            deviceAutomationMode = deviceAutomationMode
         )
-    )
-    val protocolBytes: StateFlow<ByteArray> = _protocolBytes.asStateFlow()
+        val (ambianceState, ambianceEffects) = com.example.presentation.ambianceSettingsReducer(
+            state = coreState,
+            intent = intent
+        )
+        val (audioState, audioEffects) = com.example.presentation.audioSettingsReducer(
+            state = ambianceState,
+            intent = intent,
+            targetAddresses = getCurrentlyControlledDeviceAddresses(),
+            deviceAutomationMode = deviceAutomationMode
+        )
+        val identifier = audioState.audioSettings.activeAudioDeviceIdentifier
+        val savedCalibrationDelayMs = if (identifier != null) {
+            prefsRepo.getCalibrationDelayPrefInt(identifier, 0)
+        } else {
+            prefsRepo.getCalibrationDelayPrefInt("default_delay", 0)
+        }
+        val (newState, calibrationEffects) = com.example.presentation.calibrationFlowReducer(
+            state = audioState,
+            intent = intent,
+            savedCalibrationDelayMs = savedCalibrationDelayMs,
+            connectedManagerAddresses = deviceWriteManagers.keys
+        )
+        _uiState.value = newState
+        coreEffects.forEach { executeCoreSideEffect(it) }
+        ambianceEffects.forEach { executeAmbianceSideEffect(it) }
+        audioEffects.forEach { executeAudioSideEffect(it) }
+        calibrationEffects.forEach { executeCalibrationSideEffect(it) }
+    }
 
-        
+    private fun executeCalibrationSideEffect(effect: com.example.presentation.CalibrationSideEffect) {
+        when (effect) {
+            is com.example.presentation.CalibrationSideEffect.SaveCalibrationDelayPrefInt -> prefsRepo.putCalibrationDelayPrefInt(effect.deviceKey, effect.value)
+            com.example.presentation.CalibrationSideEffect.ClearCalibrationDelayPrefs -> prefsRepo.clearCalibrationDelayPrefs()
+            is com.example.presentation.CalibrationSideEffect.SaveCalibrationPrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
+            is com.example.presentation.CalibrationSideEffect.SavePacingPrefInt -> prefsRepo.putPacingPrefInt(effect.address, effect.value)
+            com.example.presentation.CalibrationSideEffect.ClearPacingPrefs -> prefsRepo.clearPacingPrefs()
+            is com.example.presentation.CalibrationSideEffect.SaveCctCorrectionProfile -> {
+                prefsRepo.putCctCalibrationString(effect.profile.macAddress, effect.profile.toJson())
+                loadCctCalibrations()
+            }
+            is com.example.presentation.CalibrationSideEffect.DeleteCctCorrectionProfile -> {
+                prefsRepo.removeCctCalibration(effect.address)
+                loadCctCalibrations()
+            }
+            com.example.presentation.CalibrationSideEffect.ClearCctCalibrationPrefs -> {
+                prefsRepo.clearCctCalibrationPrefs()
+                _cctCalibrations.value = emptyMap()
+            }
+            is com.example.presentation.CalibrationSideEffect.SaveColorCalibration -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.insertColorCalibration(effect.calibration)
+                    addLog("Saved Color Calibration Profile for ${effect.calibration.macAddress}")
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.DeleteColorCalibration -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteColorCalibration(effect.macAddress)
+                    addLog("Deleted Color Calibration Profile for ${effect.macAddress}")
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.SetDeviceManagerPacing -> {
+                deviceWriteManagers[effect.address]?.currentPacingMs = effect.ms
+            }
+            com.example.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
+                deviceWriteManagers.forEach { (_, manager) -> manager.currentPacingMs = 100 }
+            }
+            // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
+            // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
+            com.example.presentation.CalibrationSideEffect.StartMetronome -> {
+                metronomeJob = viewModelScope.launch(Dispatchers.Default) {
+                    while (true) {
+                        metronomePlayer.playClick()
+                        val currentDelay = _uiState.value.calibrationFlow.calibrationDelayOffsetMs
+                        launch {
+                            delay(currentDelay.toLong())
+                            dispatch(RgbIntent.SendCalibrationFlash)
+                        }
+                        delay(1000L)
+                    }
+                }
+            }
+            com.example.presentation.CalibrationSideEffect.CancelMetronome -> {
+                metronomeJob?.cancel()
+                metronomeJob = null
+            }
+            com.example.presentation.CalibrationSideEffect.SendFlashPulse -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val whiteColor = DuoCoProtocol.createColorCommand(255, 255, 255)
+                    val fullBrightness = DuoCoProtocol.createBrightnessCommand(100)
+                    val pulseOn = fullBrightness + whiteColor
+                    broadcastCommandDirect(pulseOn)
 
+                    delay(120) // pulse duration
+
+                    val blackColor = DuoCoProtocol.createColorCommand(0, 0, 0)
+                    broadcastCommandDirect(blackColor)
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.StartTestPatternLoop -> {
+                testPatternJobs[effect.address] = viewModelScope.launch {
+                    val colors = listOf(
+                        android.graphics.Color.RED,
+                        android.graphics.Color.GREEN,
+                        android.graphics.Color.BLUE,
+                        android.graphics.Color.WHITE
+                    )
+                    var idx = 0
+                    while (isActive) {
+                        val c = colors[idx % colors.size]
+                        val cmd = DuoCoProtocol.createColorCommand(
+                            android.graphics.Color.red(c),
+                            android.graphics.Color.green(c),
+                            android.graphics.Color.blue(c)
+                        )
+                        deviceWriteManagers[effect.address]?.updateCommand(cmd)
+                        idx++
+                        delay(30)
+                    }
+                }
+            }
+            is com.example.presentation.CalibrationSideEffect.CancelTestPatternLoop -> {
+                testPatternJobs[effect.address]?.cancel()
+                testPatternJobs.remove(effect.address)
+            }
+            is com.example.presentation.CalibrationSideEffect.Log -> addLog(effect.message)
+        }
+    }
+
+    private fun executeAudioSideEffect(effect: com.example.presentation.AudioSideEffect) {
+        when (effect) {
+            is com.example.presentation.AudioSideEffect.SaveAudioPrefFloat -> prefsRepo.putAppStatePrefFloat(effect.key, effect.value)
+            is com.example.presentation.AudioSideEffect.SaveAudioPrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
+            is com.example.presentation.AudioSideEffect.SaveAudioPrefLong -> prefsRepo.putAppStatePrefLong(effect.key, effect.value)
+            is com.example.presentation.AudioSideEffect.SaveAudioPrefString -> prefsRepo.putAppStatePrefString(effect.key, effect.value)
+            is com.example.presentation.AudioSideEffect.SaveAudioPrefBoolean -> prefsRepo.putAppStatePrefBoolean(effect.key, effect.value)
+            is com.example.presentation.AudioSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes)
+            com.example.presentation.AudioSideEffect.CancelSceneChain -> cancelSceneChain()
+            com.example.presentation.AudioSideEffect.ClearExclusionsIfNotApplyingScene -> clearExclusionsIfNotApplyingScene()
+            is com.example.presentation.AudioSideEffect.CancelSceneRunner -> {
+                sceneRunners[effect.address]?.release()
+                sceneRunners.remove(effect.address)
+            }
+            is com.example.presentation.AudioSideEffect.SaveDeviceState -> saveDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.AudioSideEffect.RestoreDeviceState -> restoreDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.AudioSideEffect.ClearDeviceAutomationMode -> deviceAutomationMode.remove(effect.address)
+            is com.example.presentation.AudioSideEffect.StopMusicSyncInternal -> stopMusicSyncInternal(effect.keepServiceRunning)
+            is com.example.presentation.AudioSideEffect.StartAudioEngine -> startAudioRecording(effect.mode)
+        }
+    }
+
+    private fun executeAmbianceSideEffect(effect: com.example.presentation.AmbianceSideEffect) {
+        when (effect) {
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefFloat -> prefsRepo.putAmbiancePrefFloat(effect.key, effect.value)
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefInt -> prefsRepo.putAmbiancePrefInt(effect.key, effect.value)
+            is com.example.presentation.AmbianceSideEffect.SaveAmbiancePrefString -> prefsRepo.putAmbiancePrefString(effect.key, effect.value)
+            com.example.presentation.AmbianceSideEffect.CancelSceneChain -> cancelSceneChain()
+        }
+    }
+
+    private fun executeCoreSideEffect(effect: com.example.presentation.CoreSideEffect) {
+        when (effect) {
+            is com.example.presentation.CoreSideEffect.SavePrefBoolean -> prefsRepo.putAppStatePrefBoolean(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.SavePrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.SavePrefString -> prefsRepo.putAppStatePrefString(effect.key, effect.value)
+            is com.example.presentation.CoreSideEffect.Log -> addLog(effect.message)
+            is com.example.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes)
+            is com.example.presentation.CoreSideEffect.SendCommandToDeviceDirect -> sendCommandToDeviceDirect(effect.address, effect.command)
+            is com.example.presentation.CoreSideEffect.ConnectDevice -> connectDeviceHardware(effect.address)
+            is com.example.presentation.CoreSideEffect.DisconnectDevice -> {
+                _uiState.update { s ->
+                    s.copy(connectivity = s.connectivity.copy(
+                        deviceConnectionStates = s.connectivity.deviceConnectionStates + (effect.address to BleConnectionState.DISCONNECTING)
+                    ))
+                }
+                disconnectDeviceHardware(effect.address)
+            }
+            is com.example.presentation.CoreSideEffect.StopMusicSync -> stopMusicSync(effect.restoreState)
+            is com.example.presentation.CoreSideEffect.StopAmbiance -> stopAmbianceIfActive(effect.restoreState)
+            com.example.presentation.CoreSideEffect.CancelSceneChain -> cancelSceneChain()
+            com.example.presentation.CoreSideEffect.ClearExclusionsIfNotApplyingScene -> clearExclusionsIfNotApplyingScene()
+            com.example.presentation.CoreSideEffect.StartBleScan -> startBleScanHardware()
+            com.example.presentation.CoreSideEffect.StopBleScan -> stopBleScanHardware()
+            com.example.presentation.CoreSideEffect.SimulateScan -> simulateScanHardware()
+            com.example.presentation.CoreSideEffect.CheckActiveAudioRoute -> checkActiveAudioRouteHardware()
+            is com.example.presentation.CoreSideEffect.AutoSaveDeviceIfNew -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing == null) {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = effect.autoConnect,
+                                isActiveControlEnabled = effect.activeControl
+                            )
+                        )
+                        addLog("Saved connected device ${effect.name} to database.")
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.ToggleAutoConnect -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing != null) {
+                        repository.updateAutoConnect(effect.address, effect.enabled)
+                    } else {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = effect.enabled,
+                                isActiveControlEnabled = true
+                            )
+                        )
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.UpdateActiveControl -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existing != null) {
+                        repository.updateActiveControl(effect.address, effect.enabled)
+                    } else {
+                        repository.insertSavedDevice(
+                            SavedDevice(
+                                macAddress = effect.address,
+                                customName = effect.name,
+                                isAutoConnectEnabled = true,
+                                isActiveControlEnabled = effect.enabled
+                            )
+                        )
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.SaveDeviceState -> saveDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.CoreSideEffect.RestoreDeviceState -> restoreDeviceState(effect.address, effect.automationType)
+            is com.example.presentation.CoreSideEffect.DeleteSavedDevice -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteSavedDevice(effect.address)
+                }
+            }
+            is com.example.presentation.CoreSideEffect.SaveDeviceAlias -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.saveDeviceAlias(effect.address, effect.customName)
+                    val existingSaved = savedDevices.value.find { it.macAddress == effect.address }
+                    if (existingSaved != null) {
+                        repository.insertSavedDevice(existingSaved.copy(customName = effect.customName))
+                    }
+                }
+            }
+            is com.example.presentation.CoreSideEffect.DeleteDeviceAlias -> {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteDeviceAlias(effect.address)
+                }
+            }
+        }
+    }
 
     fun getCalibrationMatrices(calibration: ColorCalibration): Map<Float, FloatArray> {
         val map = mutableMapOf<Float, FloatArray>()
@@ -985,8 +1191,8 @@ class RgbControllerViewModel(
                 val fps = framesSent
                 framesSent = 0
                 lastFpsTime = now
-                _uiState.update { s -> 
-                    s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) 
+                _telemetry.update { s ->
+                    s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps))
                 }
             }
             tryWrite()
@@ -1102,50 +1308,11 @@ class RgbControllerViewModel(
     private val testPatternJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
 
     fun toggleTestPattern(address: String) {
-        val isRunning = _uiState.value.isTestPatternRunning[address] == true
-        if (isRunning) {
-            testPatternJobs[address]?.cancel()
-            testPatternJobs.remove(address)
-            _uiState.update { s -> s.copy(isTestPatternRunning = s.isTestPatternRunning + (address to false)) }
-        } else {
-            _uiState.update { s -> s.copy(isTestPatternRunning = s.isTestPatternRunning + (address to true)) }
-            testPatternJobs[address] = viewModelScope.launch {
-                val colors = listOf(
-                    android.graphics.Color.RED,
-                    android.graphics.Color.GREEN,
-                    android.graphics.Color.BLUE,
-                    android.graphics.Color.WHITE
-                )
-                var idx = 0
-                while (isActive) {
-                    val c = colors[idx % colors.size]
-                    val cmd = DuoCoProtocol.createColorCommand(
-                        android.graphics.Color.red(c),
-                        android.graphics.Color.green(c),
-                        android.graphics.Color.blue(c)
-                    )
-                    deviceWriteManagers[address]?.updateCommand(cmd)
-                    idx++
-                    // Try to send at maximum speed to see achievable rate, but maybe we should pace it to see distinct colors?
-                    // We can just sleep for a small amount, or let the DeviceWriteManager throttle it.
-                    // If we want the user to see the colors, we should pace it at maybe 50ms interval, or whatever current pacing is.
-                    // Wait, the test pattern is to visually judge. The user needs to see it cycles fast.
-                    // Actually let's just cycle it every 50ms, the pacing will throttle it if needed.
-                    delay(30)
-                }
-            }
-        }
+        dispatch(RgbIntent.ToggleTestPattern(address))
     }
 
     fun setDevicePacing(address: String, ms: Int) {
-        val manager = deviceWriteManagers[address]
-        if (manager != null) {
-            manager.currentPacingMs = ms
-            prefsRepo.putPacingPrefInt(address, ms)
-            _uiState.update { s -> 
-                s.copy(devicePacingMs = s.devicePacingMs + (address to ms)) 
-            }
-        }
+        dispatch(RgbIntent.SetDevicePacing(address, ms))
     }
 
     private val _byteOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -1192,9 +1359,9 @@ class RgbControllerViewModel(
 
     fun updateProtocolByte(index: Int, value: Int) {
         if (index in 1..7) {
-            val current = _protocolBytes.value.clone()
+            val current = _uiState.value.coreControl.protocolBytes.clone()
             current[index] = value.toByte()
-            _protocolBytes.value = current
+            _uiState.update { it.copy(coreControl = it.coreControl.copy(protocolBytes = current)) }
 
             pendingWriteJob?.cancel()
             pendingWriteJob = viewModelScope.launch {
@@ -1255,20 +1422,20 @@ class RgbControllerViewModel(
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val scanTimeoutRunnable = Runnable { stopScanning() }
+    private val scanTimeoutRunnable = Runnable { dispatch(RgbIntent.StopScanning) }
 
     private fun saveDeviceState(macAddress: String, mode: AutomationType) {
         if (deviceAutomationMode[macAddress] == null) {
             val s = _uiState.value
-            val devState = s.deviceStatesMap[macAddress]
-            val red = devState?.red ?: s.red
-            val green = devState?.green ?: s.green
-            val blue = devState?.blue ?: s.blue
-            val warmth = devState?.warmth ?: s.warmth
-            val brightness = devState?.brightness ?: s.brightness
-            val power = devState?.isPowerOn ?: s.isPowerOn
-            
-            val featureName = devState?.activeFeatureName ?: s.activeFeatureName
+            val devState = s.connectivity.deviceStatesMap[macAddress]
+            val red = devState?.red ?: s.coreControl.red
+            val green = devState?.green ?: s.coreControl.green
+            val blue = devState?.blue ?: s.coreControl.blue
+            val warmth = devState?.warmth ?: s.coreControl.warmth
+            val brightness = devState?.brightness ?: s.coreControl.brightness
+            val power = devState?.isPowerOn ?: s.coreControl.isPowerOn
+
+            val featureName = devState?.activeFeatureName ?: s.coreControl.activeFeatureName
             deviceRestoredFeatureName[macAddress] = if (featureName == "Colour" || featureName == "CCT") featureName else "Colour"
             
             deviceAutomationMode[macAddress] = mode
@@ -1312,7 +1479,7 @@ class RgbControllerViewModel(
                     }
                     
                     _uiState.update { current ->
-                        val newMap = current.deviceStatesMap.toMutableMap()
+                        val newMap = current.connectivity.deviceStatesMap.toMutableMap()
                         val existing = newMap[macAddress] ?: ActiveDeviceState()
                         newMap[macAddress] = existing.copy(
                             activeFeatureName = restoredFeatureName,
@@ -1323,7 +1490,7 @@ class RgbControllerViewModel(
                             brightness = state.brightness,
                             isPowerOn = state.power
                         )
-                        current.copy(deviceStatesMap = newMap)
+                        current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
                     }
                 }
             }
@@ -1601,10 +1768,10 @@ class RgbControllerViewModel(
 
         // If no hardware Bluetooth available, enforce Demo Mode automatically
         if (bluetoothAdapter == null) {
-            _uiState.update { it.copy(isDemoMode = true) }
+            _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = true)) }
             addLog("No BLE hardware found. Auto-fallback to Demo/Simulation Mode.")
         } else {
-            _uiState.update { it.copy(isDemoMode = false) }
+            _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = false)) }
             addLog("BLE adapter loaded. Ready to scan!")
         }
 
@@ -1612,12 +1779,12 @@ class RgbControllerViewModel(
         viewModelScope.launch {
             combine(savedAliases, _uiState) { aliases, state ->
                 // Map aliases to devices
-                state.scannedDevices.map { dev ->
+                state.connectivity.scannedDevices.map { dev ->
                     val foundAlias = aliases.find { it.macAddress == dev.address }
                     dev.copy(alias = foundAlias?.aliasName)
                 }
             }.collect { updatedDevices ->
-                _uiState.update { it.copy(scannedDevices = updatedDevices) }
+                _uiState.update { it.copy(connectivity = it.connectivity.copy(scannedDevices = updatedDevices)) }
             }
         }
 
@@ -1625,7 +1792,7 @@ class RgbControllerViewModel(
         viewModelScope.launch {
             repository.allColorCalibrations.collect { calibrations ->
                 val calMap = calibrations.associateBy { it.macAddress }
-                _uiState.update { it.copy(colorCalibrations = calMap) }
+                _colorCalibrations.value = calMap
             }
         }
 
@@ -1648,11 +1815,11 @@ class RgbControllerViewModel(
                 val hasDisconnectedAutoConnectDevices = savedDevices.value.any { saved ->
                     saved.isAutoConnectEnabled && 
                     !connectionManager.isManuallyDisconnected(saved.macAddress) &&
-                    _uiState.value.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTED &&
-                    _uiState.value.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTING
+                    _uiState.value.connectivity.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTED &&
+                    _uiState.value.connectivity.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTING
                 }
-                
-                if (hasDisconnectedAutoConnectDevices && !_uiState.value.isScanning) {
+
+                if (hasDisconnectedAutoConnectDevices && !_uiState.value.connectivity.isScanning) {
                     addLog("Background manager: locating disconnected auto-connect devices...")
                     startScanning()
                 }
@@ -1688,10 +1855,12 @@ class RgbControllerViewModel(
             val firstConnectedAddress = activeConnections.keys.first()
             _uiState.update { s ->
                 s.copy(
-                    deviceConnectionStates = s.deviceConnectionStates + initialStates,
-                    connectionState = BleConnectionState.CONNECTED,
-                    connectedDeviceAddress = firstConnectedAddress,
-                    connectedDeviceName = "DuoCo Light"
+                    connectivity = s.connectivity.copy(
+                        deviceConnectionStates = s.connectivity.deviceConnectionStates + initialStates,
+                        connectionState = BleConnectionState.CONNECTED,
+                        connectedDeviceAddress = firstConnectedAddress,
+                        connectedDeviceName = "DuoCo Light"
+                    )
                 )
             }
             addLog("Synchronized UI state with ${activeConnections.size} active connection(s).")
@@ -1704,19 +1873,19 @@ class RgbControllerViewModel(
                 repository.allPresets
             ) { _, _, _ -> true }
                 .collect {
-                    _uiState.update { s -> s.copy(isDbLoaded = true) }
+                    _uiState.update { s -> s.copy(coreControl = s.coreControl.copy(isDbLoaded = true)) }
                 }
         }
 
         // Reactively sync slowest connected device's pacing to shared preferences for Ambiance capture service
         viewModelScope.launch {
             _uiState.collect { state ->
-                val connected = state.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+                val connected = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
                 val slowest = if (connected.isEmpty()) {
                     0
                 } else {
                     connected.keys.mapNotNull { addr ->
-                        state.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
+                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
                     }.maxOrNull() ?: 0
                 }
                 prefsRepo.putPacingPrefInt("slowest_connected_pacing", slowest)
@@ -1731,15 +1900,15 @@ class RgbControllerViewModel(
                     targetAddresses.forEach { address ->
                         saveDeviceState(address, AutomationType.AMBIANCE)
                     }
-                    val presetName = _uiState.value.ambiancePreset ?: "Balanced"
+                    val presetName = _uiState.value.ambianceSettings.ambiancePreset ?: "Balanced"
                     val label = "Ambiance - $presetName"
                     _uiState.update { current ->
-                        val newMap = current.deviceStatesMap.toMutableMap()
+                        val newMap = current.connectivity.deviceStatesMap.toMutableMap()
                         targetAddresses.forEach { address ->
                             val existing = newMap[address] ?: ActiveDeviceState()
                             newMap[address] = existing.copy(activeFeatureName = label)
                         }
-                        current.copy(deviceStatesMap = newMap)
+                        current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
                     }
                 } else if (!active && lastActive) {
                     deviceAutomationMode.forEach { (address, mode) ->
@@ -1769,22 +1938,20 @@ class RgbControllerViewModel(
         } catch (e: Exception) {
             Log.e("ColorCalibration", "Failed to load CCT calibrations", e)
         }
-        _uiState.update { it.copy(cctCalibrations = calMap) }
+        _cctCalibrations.value = calMap
     }
 
     fun saveCctCorrectionProfile(profile: CctCorrectionProfile) {
-        prefsRepo.putCctCalibrationString(profile.macAddress, profile.toJson())
-        loadCctCalibrations()
+        dispatch(RgbIntent.SaveCctCorrectionProfile(profile))
     }
 
     fun deleteCctCorrectionProfile(address: String) {
-        prefsRepo.removeCctCalibration(address)
-        loadCctCalibrations()
+        dispatch(RgbIntent.DeleteCctCorrectionProfile(address))
     }
 
     fun addLog(message: String) {
         val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        _uiState.update { state ->
+        _telemetry.update { state ->
             val list = state.logMessages.toMutableList()
             list.add(0, "[$timeStr] $message")
             if (list.size > 50) list.removeAt(list.size - 1)
@@ -1808,6 +1975,10 @@ class RgbControllerViewModel(
     }
 
     fun checkActiveAudioRoute() {
+        dispatch(RgbIntent.CheckActiveAudioRoute)
+    }
+
+    private fun checkActiveAudioRouteHardware() {
         val audioManager = getApplication().getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
         val hasBluetoothAudio = devices.any {
@@ -1837,26 +2008,30 @@ class RgbControllerViewModel(
         val savedDelay = prefsRepo.getCalibrationDelayPrefInt(identifier, -1)
         _uiState.update { state ->
             if (savedDelay >= 0) {
-                if (state.bluetoothDelayMs != savedDelay) {
+                if (state.audioSettings.bluetoothDelayMs != savedDelay) {
                     addLog("Detected active Bluetooth audio: $name. Automatically applied saved delay profile of $savedDelay ms.")
                 }
                 state.copy(
-                    detectedAudioDeviceName = name,
-                    activeAudioDeviceIdentifier = identifier,
-                    bluetoothDelayMs = savedDelay,
-                    totalVisualDelayMs = savedDelay + BeatDetector().lookaheadMs.toInt(),
-                    showCalibrationPrompt = false
+                    audioSettings = state.audioSettings.copy(
+                        detectedAudioDeviceName = name,
+                        activeAudioDeviceIdentifier = identifier,
+                        bluetoothDelayMs = savedDelay,
+                        totalVisualDelayMs = savedDelay + BeatDetector().lookaheadMs.toInt()
+                    ),
+                    calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
                 )
             } else {
-                if (state.detectedAudioDeviceName != name) {
+                if (state.audioSettings.detectedAudioDeviceName != name) {
                     addLog("Detected active Bluetooth audio: $name. No delay profile found. Setting 0ms (inviting calibration).")
                 }
                 state.copy(
-                    detectedAudioDeviceName = name,
-                    activeAudioDeviceIdentifier = identifier,
-                    bluetoothDelayMs = 0,
-                    totalVisualDelayMs = BeatDetector().lookaheadMs.toInt(),
-                    showCalibrationPrompt = true
+                    audioSettings = state.audioSettings.copy(
+                        detectedAudioDeviceName = name,
+                        activeAudioDeviceIdentifier = identifier,
+                        bluetoothDelayMs = 0,
+                        totalVisualDelayMs = BeatDetector().lookaheadMs.toInt()
+                    ),
+                    calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = true)
                 )
             }
         }
@@ -1864,112 +2039,47 @@ class RgbControllerViewModel(
 
     private fun onBluetoothAudioRouteInactive() {
         _uiState.update { state ->
-            if (state.detectedAudioDeviceName != null) {
+            if (state.audioSettings.detectedAudioDeviceName != null) {
                 addLog("Bluetooth audio inactive. Reverting delay compensation to 0ms.")
             }
             state.copy(
-                detectedAudioDeviceName = null,
-                activeAudioDeviceIdentifier = null,
-                bluetoothDelayMs = 0,
-                totalVisualDelayMs = BeatDetector().lookaheadMs.toInt(),
-                showCalibrationPrompt = false
+                audioSettings = state.audioSettings.copy(
+                    detectedAudioDeviceName = null,
+                    activeAudioDeviceIdentifier = null,
+                    bluetoothDelayMs = 0,
+                    totalVisualDelayMs = BeatDetector().lookaheadMs.toInt()
+                ),
+                calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
             )
         }
     }
 
     fun dismissCalibrationPrompt() {
-        _uiState.update { it.copy(showCalibrationPrompt = false) }
+        dispatch(RgbIntent.DismissCalibrationPrompt)
     }
 
     fun startCalibrationMode() {
-        stopCalibrationMode()
-        val identifier = _uiState.value.activeAudioDeviceIdentifier
-        val savedDelay = if (identifier != null) {
-            prefsRepo.getCalibrationDelayPrefInt(identifier, 0)
-        } else {
-            prefsRepo.getCalibrationDelayPrefInt("default_delay", 0)
-        }
-        
-        _uiState.update { 
-            it.copy(
-                isCalibrationModeActive = true,
-                calibrationDelayOffsetMs = savedDelay
-            )
-        }
-        
-        addLog("Calibration Mode started. Click plays every 1000ms. Pre-populated delay: $savedDelay ms")
-        
-        metronomeJob = viewModelScope.launch(Dispatchers.Default) {
-            while (true) {
-                metronomePlayer.playClick()
-                val currentDelay = _uiState.value.calibrationDelayOffsetMs
-                launch {
-                    delay(currentDelay.toLong())
-                    sendCalibrationFlash()
-                }
-                delay(1000L)
-            }
-        }
+        dispatch(RgbIntent.StartCalibrationMode)
     }
 
     fun updateCalibrationSliderValue(value: Int) {
-        _uiState.update { it.copy(calibrationDelayOffsetMs = value) }
+        dispatch(RgbIntent.UpdateCalibrationSliderValue(value))
     }
 
     fun saveCalibrationAndExit() {
-        val currentDelay = _uiState.value.calibrationDelayOffsetMs
-        val identifier = _uiState.value.activeAudioDeviceIdentifier
-        
-        if (identifier != null) {
-            prefsRepo.putCalibrationDelayPrefInt(identifier, currentDelay)
-            addLog("Saved calibrated delay of $currentDelay ms for device: ${_uiState.value.detectedAudioDeviceName}")
-        } else {
-            prefsRepo.putCalibrationDelayPrefInt("default_delay", currentDelay)
-            addLog("Saved default calibrated delay of $currentDelay ms")
-        }
-        
-        prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", currentDelay)
-        
-        _uiState.update { 
-            it.copy(
-                bluetoothDelayMs = currentDelay,
-                totalVisualDelayMs = currentDelay + BeatDetector().lookaheadMs.toInt(),
-                showCalibrationPrompt = false
-            )
-        }
-        
-        stopCalibrationMode()
+        dispatch(RgbIntent.SaveCalibrationAndExit)
     }
 
     fun stopCalibrationMode() {
-        metronomeJob?.cancel()
-        metronomeJob = null
-        _uiState.update { 
-            it.copy(isCalibrationModeActive = false) 
-        }
-        addLog("Calibration Mode stopped.")
+        dispatch(RgbIntent.StopCalibrationMode)
     }
 
     fun sendCalibrationFlash() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val whiteColor = DuoCoProtocol.createColorCommand(255, 255, 255)
-            val fullBrightness = DuoCoProtocol.createBrightnessCommand(100)
-            val pulseOn = fullBrightness + whiteColor
-            broadcastCommandDirect(pulseOn)
-            
-            delay(120) // pulse duration
-            
-            val blackColor = DuoCoProtocol.createColorCommand(0, 0, 0)
-            broadcastCommandDirect(blackColor)
-        }
+        dispatch(RgbIntent.SendCalibrationFlash)
     }
 
     fun setDemoMode(isDemo: Boolean) {
-        _uiState.update { it.copy(isDemoMode = isDemo) }
-        addLog(if (isDemo) "Switched to Demo Mode" else "Switched to Real Hardware BLE Mode")
-        if (isDemo) {
-            disconnect()
-        }
+        dispatch(RgbIntent.SetDemoMode(isDemo))
     }
 
     // --- SCANNING ---
@@ -1988,7 +2098,12 @@ class RgbControllerViewModel(
         override fun onScanFailed(errorCode: Int) {
             super.onScanFailed(errorCode)
             addLog("Scan failed with error code: $errorCode")
-            _uiState.update { it.copy(isScanning = false, errorMessage = "Scan failed: error $errorCode") }
+            _uiState.update {
+                it.copy(
+                    connectivity = it.connectivity.copy(isScanning = false),
+                    coreControl = it.coreControl.copy(errorMessage = "Scan failed: error $errorCode")
+                )
+            }
         }
     }
 
@@ -2016,24 +2131,24 @@ class RgbControllerViewModel(
         val isDuoCo = true
 
         _uiState.update { state ->
-            val existing = state.scannedDevices.find { it.address == address }
+            val existing = state.connectivity.scannedDevices.find { it.address == address }
             val updatedList = if (existing != null) {
-                state.scannedDevices.map { 
-                    if (it.address == address) it.copy(rssi = rssi, name = name) else it 
+                state.connectivity.scannedDevices.map {
+                    if (it.address == address) it.copy(rssi = rssi, name = name) else it
                 }
             } else {
                 val dbAlias = savedAliases.value.find { it.macAddress == address }?.aliasName
-                state.scannedDevices + ScannedRgbDevice(address, name, rssi, isDuoCo, dbAlias)
+                state.connectivity.scannedDevices + ScannedRgbDevice(address, name, rssi, isDuoCo, dbAlias)
             }
-            state.copy(scannedDevices = updatedList.sortedByDescending { it.rssi })
+            state.copy(connectivity = state.connectivity.copy(scannedDevices = updatedList.sortedByDescending { it.rssi }))
         }
 
         // Auto connect if saved and enabled
         val saved = savedDevices.value.find { it.macAddress == address }
         if (saved != null && saved.isAutoConnectEnabled && !connectionManager.isManuallyDisconnected(address)) {
-            val isConnected = activeConnections.containsKey(address) || 
-                              _uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED
-            val isConnecting = _uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTING
+            val isConnected = activeConnections.containsKey(address) ||
+                              _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
+            val isConnecting = _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTING
             if (!isConnected && !isConnecting) {
                 addLog("Auto-connecting in background to $address (${saved.customName})")
                 connectDevice(address)
@@ -2042,35 +2157,35 @@ class RgbControllerViewModel(
     }
 
     fun startScanning() {
-        val state = _uiState.value
-        if (state.isScanning) return
+        dispatch(RgbIntent.StartScanning)
+    }
 
-        _uiState.update { it.copy(isScanning = true, errorMessage = null) }
-        addLog("Scan started...")
+    fun stopScanning() {
+        dispatch(RgbIntent.StopScanning)
+    }
 
-        if (state.isDemoMode) {
-            // Simulate scanned devices
-            viewModelScope.launch {
-                delay(400)
-                addSimulatedDevice("00:1A:7D:DA:71:11", "ELK-BLEDOM", -52, true)
-                delay(300)
-                addSimulatedDevice("AA:BB:CC:11:22:33", "Smart LED Bulb", -65, true)
-                delay(500)
-                addSimulatedDevice("FC:45:96:22:88:99", "Generic Light Strips", -80, false)
-                delay(300)
-                addSimulatedDevice("44:23:AA:55:12:90", "LED DMX Controller", -45, true)
-                
-                delay(10000) // scan for 10 seconds in demo
-                if (_uiState.value.isScanning) {
-                    stopScanning()
-                }
+    private fun simulateScanHardware() {
+        viewModelScope.launch {
+            delay(400)
+            addSimulatedDevice("00:1A:7D:DA:71:11", "ELK-BLEDOM", -52, true)
+            delay(300)
+            addSimulatedDevice("AA:BB:CC:11:22:33", "Smart LED Bulb", -65, true)
+            delay(500)
+            addSimulatedDevice("FC:45:96:22:88:99", "Generic Light Strips", -80, false)
+            delay(300)
+            addSimulatedDevice("44:23:AA:55:12:90", "LED DMX Controller", -45, true)
+
+            delay(10000) // scan for 10 seconds in demo
+            if (_uiState.value.connectivity.isScanning) {
+                dispatch(RgbIntent.StopScanning)
             }
-            return
         }
+    }
 
+    private fun startBleScanHardware() {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
-            _uiState.update { it.copy(isScanning = false, errorMessage = "Bluetooth is disabled or unavailable") }
+            _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Bluetooth is disabled or unavailable")) }
             addLog("Bluetooth must be enabled to scan.")
             return
         }
@@ -2078,47 +2193,41 @@ class RgbControllerViewModel(
         try {
             val scanner = adapter.bluetoothLeScanner
             if (scanner == null) {
-                _uiState.update { it.copy(isScanning = false, errorMessage = "BLE Scanner unavailable") }
+                _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "BLE Scanner unavailable")) }
                 addLog("BLE scanner failed to initialize.")
                 return
             }
             scanner.startScan(scanCallback)
             handler.postDelayed(scanTimeoutRunnable, 12000) // Scan for 12s
         } catch (e: SecurityException) {
-            _uiState.update { it.copy(isScanning = false, errorMessage = "Missing Bluetooth Permissions") }
+            _uiState.update { it.copy(connectivity = it.connectivity.copy(isScanning = false), coreControl = it.coreControl.copy(errorMessage = "Missing Bluetooth Permissions")) }
             addLog("SecurityException: Permissions not granted.")
         }
     }
 
-    fun stopScanning() {
-        if (!_uiState.value.isScanning) return
-        _uiState.update { it.copy(isScanning = false) }
+    private fun stopBleScanHardware() {
         handler.removeCallbacks(scanTimeoutRunnable)
-        addLog("Scan stopped.")
-
-        if (!_uiState.value.isDemoMode) {
-            try {
-                bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
-            } catch (e: SecurityException) {
-                addLog("SecurityException during stopScan.")
-            }
+        try {
+            bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (e: SecurityException) {
+            addLog("SecurityException during stopScan.")
         }
     }
 
     private fun addSimulatedDevice(address: String, name: String, rssi: Int, isDuoCo: Boolean) {
         _uiState.update { state ->
-            if (state.scannedDevices.any { it.address == address }) return@update state
+            if (state.connectivity.scannedDevices.any { it.address == address }) return@update state
             val dbAlias = savedAliases.value.find { it.macAddress == address }?.aliasName
-            val list = state.scannedDevices + ScannedRgbDevice(address, name, rssi, isDuoCo, dbAlias)
-            state.copy(scannedDevices = list.sortedByDescending { it.rssi })
+            val list = state.connectivity.scannedDevices + ScannedRgbDevice(address, name, rssi, isDuoCo, dbAlias)
+            state.copy(connectivity = state.connectivity.copy(scannedDevices = list.sortedByDescending { it.rssi }))
         }
 
         // Auto connect if saved and enabled (Demo mode)
         val saved = savedDevices.value.find { it.macAddress == address }
         if (saved != null && saved.isAutoConnectEnabled && !connectionManager.isManuallyDisconnected(address)) {
-            val isConnected = activeConnections.containsKey(address) || 
-                              _uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED
-            val isConnecting = _uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTING
+            val isConnected = activeConnections.containsKey(address) ||
+                              _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED
+            val isConnecting = _uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTING
             if (!isConnected && !isConnecting) {
                 addLog("Auto-connecting (Simulated) to $address (${saved.customName})")
                 connectDevice(address)
@@ -2134,50 +2243,23 @@ class RgbControllerViewModel(
     // --- CONNECTION ---
 
     fun connectDevice(address: String) {
+        dispatch(RgbIntent.ConnectDevice(address))
+    }
+
+    private fun connectDeviceHardware(address: String) {
         connectionManager.connect(address)
         val state = _uiState.value
-        val deviceToConnect = state.scannedDevices.find { it.address == address }
-        val displayName = deviceToConnect?.alias ?: deviceToConnect?.name ?: "Unknown Device"
 
         com.example.DiagnosticLogger.log(
             "BLE",
             "connectDevice attempt: address=$address (${getDiagAttribution(address)})"
         )
 
-        _uiState.update { s ->
-            s.copy(
-                deviceConnectionStates = s.deviceConnectionStates + (address to BleConnectionState.CONNECTING),
-                connectedDeviceAddress = address,
-                connectedDeviceName = displayName
-            )
-        }
-        addLog("Connecting to $displayName ($address)...")
-
-        // Auto-save device to SavedDevices in Room when connecting
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing == null) {
-                repository.insertSavedDevice(
-                    SavedDevice(
-                        macAddress = address,
-                        customName = displayName,
-                        isAutoConnectEnabled = true,
-                        isActiveControlEnabled = true
-                    )
-                )
-                addLog("Saved connected device $displayName to database.")
-            }
-        }
-
-        if (state.isDemoMode) {
+        if (state.coreControl.isDemoMode) {
+            val displayName = state.connectivity.connectedDeviceName ?: "Unknown Device"
             viewModelScope.launch {
                 delay(1200) // Simulating connection lag
-                _uiState.update { s ->
-                    s.copy(
-                        deviceConnectionStates = s.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
-                        connectionState = BleConnectionState.CONNECTED
-                    )
-                }
+                dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTED))
                 addLog("Connected (Simulated) to $displayName!")
             }
             return
@@ -2186,7 +2268,7 @@ class RgbControllerViewModel(
         val adapter = bluetoothAdapter
         if (adapter == null) {
             _uiState.update { s ->
-                s.copy(deviceConnectionStates = s.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED))
+                s.copy(connectivity = s.connectivity.copy(deviceConnectionStates = s.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)))
             }
             return
         }
@@ -2195,14 +2277,14 @@ class RgbControllerViewModel(
             try {
                 val device = adapter.getRemoteDevice(address)
                 connectionManager.connect(address)
-                
+
                 val gatt = device.connectGatt(getApplication(), false, gattCallback)
                 activeConnections[address] = gatt
             } catch (e: SecurityException) {
                 _uiState.update { s ->
                     s.copy(
-                        deviceConnectionStates = s.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED),
-                        errorMessage = "Permission Denied"
+                        connectivity = s.connectivity.copy(deviceConnectionStates = s.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)),
+                        coreControl = s.coreControl.copy(errorMessage = "Permission Denied")
                     )
                 }
                 addLog("Gatt connect permission failed for $address.")
@@ -2213,8 +2295,8 @@ class RgbControllerViewModel(
             } catch (e: Exception) {
                 _uiState.update { s ->
                     s.copy(
-                        deviceConnectionStates = s.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED),
-                        errorMessage = e.message
+                        connectivity = s.connectivity.copy(deviceConnectionStates = s.connectivity.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)),
+                        coreControl = s.coreControl.copy(errorMessage = e.message)
                     )
                 }
                 addLog("Connect error for $address: ${e.message}")
@@ -2227,6 +2309,10 @@ class RgbControllerViewModel(
     }
 
     fun disconnectDevice(address: String) {
+        dispatch(RgbIntent.DisconnectDevice(address))
+    }
+
+    private fun disconnectDeviceHardware(address: String) {
         com.example.DiagnosticLogger.log(
             "BLE",
             "disconnectDevice called: address=$address (${getDiagAttribution(address)})"
@@ -2235,28 +2321,11 @@ class RgbControllerViewModel(
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
         deviceWriteManagers.remove(address)
-        
-        _uiState.update { state ->
-            state.copy(
-                deviceConnectionStates = state.deviceConnectionStates + (address to BleConnectionState.DISCONNECTING)
-            )
-        }
-        
-        if (_uiState.value.isDemoMode) {
+
+        if (_uiState.value.coreControl.isDemoMode) {
             viewModelScope.launch {
                 delay(300)
-                _uiState.update { state ->
-                    val updatedStates = state.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                    val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                    val activeAddr = stillConnected.keys.firstOrNull()
-                    val activeName = activeAddr?.let { addr -> state.scannedDevices.find { it.address == addr }?.name }
-                    state.copy(
-                        deviceConnectionStates = updatedStates,
-                        connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                        connectedDeviceAddress = activeAddr,
-                        connectedDeviceName = activeName
-                    )
-                }
+                dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
                 addLog("Disconnected (Simulated) from $address.")
             }
             return
@@ -2271,18 +2340,7 @@ class RgbControllerViewModel(
                     addLog("SecurityException inside IO disconnect coroutine of $address.")
                 }
             }
-            _uiState.update { state ->
-                val updatedStates = state.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                val activeAddr = stillConnected.keys.firstOrNull()
-                val activeName = activeAddr?.let { addr -> state.scannedDevices.find { it.address == addr }?.name }
-                state.copy(
-                    deviceConnectionStates = updatedStates,
-                    connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                    connectedDeviceAddress = activeAddr,
-                    connectedDeviceName = activeName
-                )
-            }
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
             addLog("Disconnected $address.")
         } catch (e: SecurityException) {
             addLog("SecurityException during disconnect of $address.")
@@ -2290,19 +2348,7 @@ class RgbControllerViewModel(
     }
 
     fun disconnect() {
-        val keys = activeConnections.keys.toList()
-        if (keys.isEmpty()) {
-            _uiState.update {
-                it.copy(
-                    connectionState = BleConnectionState.DISCONNECTED,
-                    connectedDeviceAddress = null,
-                    connectedDeviceName = null,
-                    deviceConnectionStates = emptyMap()
-                )
-            }
-            return
-        }
-        keys.forEach { disconnectDevice(it) }
+        dispatch(RgbIntent.DisconnectAll)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -2342,11 +2388,7 @@ class RgbControllerViewModel(
         
         if (newState == BluetoothProfile.STATE_CONNECTED) {
             addLog("Connected to $address! Discovering services...")
-            _uiState.update { state ->
-                state.copy(
-                    deviceConnectionStates = state.deviceConnectionStates + (address to BleConnectionState.CONNECTING)
-                )
-            }
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTING))
             activeConnections[address] = gatt
             retryAttempts.remove(address)
             connectionManager.setConnected(address)
@@ -2371,19 +2413,8 @@ class RgbControllerViewModel(
             activeConnections.remove(address)
             writeCharacteristics.remove(address)
             deviceWriteManagers.remove(address)
-            
-            _uiState.update { state ->
-                val updatedStates = state.deviceConnectionStates + (address to BleConnectionState.DISCONNECTED)
-                val stillConnected = updatedStates.filter { it.value == BleConnectionState.CONNECTED }
-                val activeAddr = stillConnected.keys.firstOrNull()
-                val activeName = activeAddr?.let { addr -> state.scannedDevices.find { it.address == addr }?.name }
-                state.copy(
-                    deviceConnectionStates = updatedStates,
-                    connectionState = if (stillConnected.isNotEmpty()) BleConnectionState.CONNECTED else BleConnectionState.DISCONNECTED,
-                    connectedDeviceAddress = activeAddr,
-                    connectedDeviceName = activeName
-                )
-            }
+
+            dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 
             // Exponential backoff retry logic if unexpected drop
             if (wasActive && !connectionManager.isManuallyDisconnected(address)) {
@@ -2458,11 +2489,13 @@ class RgbControllerViewModel(
         
         _uiState.update { state ->
             state.copy(
-                deviceConnectionStates = state.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
-                connectionState = BleConnectionState.CONNECTED,
-                connectedDeviceAddress = address,
-                connectedDeviceName = state.scannedDevices.find { it.address == address }?.alias ?: state.scannedDevices.find { it.address == address }?.name ?: "Unknown Device",
-                devicePacingMs = state.devicePacingMs + (address to manager.currentPacingMs)
+                connectivity = state.connectivity.copy(
+                    deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
+                    connectionState = BleConnectionState.CONNECTED,
+                    connectedDeviceAddress = address,
+                    connectedDeviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias ?: state.connectivity.scannedDevices.find { it.address == address }?.name ?: "Unknown Device",
+                    devicePacingMs = state.connectivity.devicePacingMs + (address to manager.currentPacingMs)
+                )
             )
         }
     }
@@ -2495,9 +2528,11 @@ class RgbControllerViewModel(
             addLog("Warning: DuoCo characteristic not found for $address. Commands may not work.")
             _uiState.update { state ->
                 state.copy(
-                    deviceConnectionStates = state.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
-                    connectionState = BleConnectionState.CONNECTED,
-                    connectedDeviceAddress = address
+                    connectivity = state.connectivity.copy(
+                        deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
+                        connectionState = BleConnectionState.CONNECTED,
+                        connectedDeviceAddress = address
+                    )
                 )
             }
         }
@@ -2505,9 +2540,9 @@ class RgbControllerViewModel(
 
     private fun syncPhysicalBulbOfDevice(gatt: BluetoothGatt) {
         val state = _uiState.value
-        val powerCmd = DuoCoProtocol.createPowerCommand(state.isPowerOn)
-        val colorCmd = DuoCoProtocol.createColorCommand(state.red, state.green, state.blue)
-        val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.brightness)
+        val powerCmd = DuoCoProtocol.createPowerCommand(state.coreControl.isPowerOn)
+        val colorCmd = DuoCoProtocol.createColorCommand(state.coreControl.red, state.coreControl.green, state.coreControl.blue)
+        val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.coreControl.brightness)
         val batched = powerCmd + colorCmd + brightnessCmd
         deviceWriteManagers[gatt.device.address]?.updateCommand(batched)
     }
@@ -2515,13 +2550,13 @@ class RgbControllerViewModel(
     // --- COMMAND TRANSMISSION & OUTBOUND QUEUE ---
 
     fun queueCommand(command: ByteArray) {
-        if (!_uiState.value.isAudioSyncRunning) return
-        
-        val delayMs = _uiState.value.totalVisualDelayMs
+        if (!_uiState.value.audioSettings.isAudioSyncRunning) return
+
+        val delayMs = _uiState.value.audioSettings.totalVisualDelayMs
         if (delayMs > 0) {
             viewModelScope.launch(Dispatchers.Default) {
                 delay(delayMs.toLong())
-                if (!_uiState.value.isAudioSyncRunning) return@launch
+                if (!_uiState.value.audioSettings.isAudioSyncRunning) return@launch
                 broadcastCommandDirect(command)
             }
         } else {
@@ -2530,7 +2565,7 @@ class RgbControllerViewModel(
     }
 
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
-        if (_uiState.value.isDemoMode) {
+        if (_uiState.value.coreControl.isDemoMode) {
             val finalCmd = processCommandWithCalibration(address, command)
             val hexStr = finalCmd.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
             Log.d("ColorCalibration", "Simulated transmit to $address: $hexStr")
@@ -2546,8 +2581,8 @@ class RgbControllerViewModel(
             sceneRunners.remove(address)
             
             if (activeExcludedMacs.contains(address)) return@forEach
-            if (_uiState.value.isDemoMode) {
-                if (_uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED) {
+            if (_uiState.value.coreControl.isDemoMode) {
+                if (_uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED) {
                     val finalCmd = processCommandWithCalibration(address, command)
                     val hexStr = finalCmd.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
@@ -2581,8 +2616,8 @@ class RgbControllerViewModel(
                 sceneRunners.remove(address)
             }
 
-            if (_uiState.value.isDemoMode) {
-                if (_uiState.value.deviceConnectionStates[address] == BleConnectionState.CONNECTED) {
+            if (_uiState.value.coreControl.isDemoMode) {
+                if (_uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED) {
                     val finalCmd = processCommandWithCalibration(address, command)
                     val hexStr = finalCmd.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
@@ -2594,15 +2629,11 @@ class RgbControllerViewModel(
     }
 
     fun setActiveFeatureName(name: String) {
-        cancelSceneChain()
-        _uiState.update { it.copy(activeFeatureName = name) }
-        prefsRepo.putAppStatePrefString("active_feature_name", name)
-        clearExclusionsIfNotApplyingScene()
+        dispatch(RgbIntent.SetActiveFeatureName(name))
     }
 
     fun setShowFpsTracker(enabled: Boolean) {
-        prefsRepo.putAppStatePrefBoolean("show_fps_tracker", enabled)
-        _uiState.update { it.copy(showFpsTracker = enabled) }
+        dispatch(RgbIntent.SetShowFpsTracker(enabled))
     }
 
     fun writeAmbianceColor(r: Int, g: Int, b: Int) {
@@ -2621,9 +2652,9 @@ class RgbControllerViewModel(
 
     private fun syncPhysicalBulb() {
         val state = _uiState.value
-        val powerCmd = DuoCoProtocol.createPowerCommand(state.isPowerOn)
-        val colorCmd = DuoCoProtocol.createColorCommand(state.red, state.green, state.blue)
-        val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.brightness)
+        val powerCmd = DuoCoProtocol.createPowerCommand(state.coreControl.isPowerOn)
+        val colorCmd = DuoCoProtocol.createColorCommand(state.coreControl.red, state.coreControl.green, state.coreControl.blue)
+        val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.coreControl.brightness)
         val batched = powerCmd + colorCmd + brightnessCmd
         broadcastCommand(batched)
     }
@@ -2635,183 +2666,62 @@ class RgbControllerViewModel(
     }
 
 
-    private fun getLedPresetName(id: String): String {
-        return when(id) {
-            "energetic_1" -> "Energetic 1"
-            "energetic_2" -> "Energetic 2"
-            "rhythm_1" -> "Rhythm 1"
-            "rhythm_2" -> "Rhythm 2"
-            "spectrum_1" -> "Spectrum 1"
-            "spectrum_2" -> "Spectrum 2"
-            "rolling_1" -> "Rolling 1"
-            "rolling_2" -> "Rolling 2"
-            else -> "Unknown"
-        }
-    }
-
-    private fun getVisualizerPresetName(id: String): String {
-        return when(id) {
-            "Default" -> "Balanced"
-            "Punchy" -> "Punchy"
-            "Smooth Flow" -> "Smooth Flow"
-            "Strobe Blast" -> "Strobe Blast"
-            "Ambient Chill" -> "Ambient Chill"
-            "Bass Thump" -> "Bass Thump"
-            "Laser Sharp" -> "Laser Sharp"
-            else -> id
-        }
-    }
-
     // --- CONTROL INTERFACES ---
 
-    data class VisualizerConfig(
-        val attack: Float, val decay: Float, val flash: Float, val gamma: Float, val idleDelay: Long,
-        val noiseGate: Float, val bassGain: Float,
-        val midGain: Float, val highGain: Float, val paletteCycling: Boolean, val beatMult: Float,
-        val minBrightness: Float, val colorSpeed: Float,
-        val beatFlashDecayMs: Float, val ambientCapFraction: Float, val midFluxWeight: Float
-    )
-
-    
-    
     fun setVisualizerPreset(preset: String) {
-        val currentMusicMode = _uiState.value.musicMode
-        val featureName = if (currentMusicMode == "phone_mic" || currentMusicMode == "on_device") {
-            "Audio Visualiser (${getVisualizerPresetName(preset)})"
-        } else {
-            _uiState.value.activeFeatureName
-        }
-
-        val config = when (preset) {
-            "Punchy" -> VisualizerConfig(0.95f, 0.35f, 0.6f, 0.35f, 2000L, 8.0f, 1.2f, 1.0f, 1.0f, true, 1.3f, 0.15f, 1.5f, 140f, 0.40f, 0.20f)
-            "Smooth Flow" -> VisualizerConfig(0.25f, 0.08f, 0.00f, 0.45f, 2800L, 4.0f, 1.0f, 1.1f, 1.0f, true, 1.8f, 0.18f, 1.2f, 300f, 0.45f, 0.30f)
-            "Strobe Blast" -> VisualizerConfig(1.0f, 0.85f, 1.0f, 0.2f, 1500L, 10.0f, 1.0f, 1.0f, 1.5f, true, 1.2f, 0.10f, 2.0f, 90f, 0.25f, 0.15f)
-            "Ambient Chill" -> VisualizerConfig(0.10f, 0.02f, 0.00f, 0.65f, 5000L, 3.0f, 1.0f, 0.7f, 0.4f, true, 2.5f, 0.35f, 0.15f, 600f, 0.75f, 0.20f)
-            "Bass Thump" -> VisualizerConfig(0.90f, 0.20f, 0.5f, 0.4f, 2500L, 6.0f, 2.0f, 0.6f, 0.4f, true, 1.4f, 0.15f, 1.0f, 170f, 0.45f, 0.05f)
-            "Laser Sharp" -> VisualizerConfig(1.0f, 0.95f, 0.8f, 0.3f, 1500L, 12.0f, 1.0f, 1.0f, 1.0f, true, 1.1f, 0.10f, 3.0f, 70f, 0.20f, 0.10f)
-            "Beat Only" -> VisualizerConfig(1.0f, 0.9f, 1.0f, 0.3f, 1500L, 10.0f, 1.0f, 1.0f, 1.0f, false, 1.2f, 0.05f, 2.0f, 90f, 0.0f, 0.15f)
-            else -> VisualizerConfig(0.85f, 0.12f, 0.3f, 0.45f, 2500L, 5.0f, 1.0f, 1.0f, 1.0f, true, 1.6f, 0.15f, 1.0f, 200f, 0.40f, 0.25f)
-        }
-
-        _uiState.update {
-            it.copy(
-                visualizerPreset = preset,
-                activeFeatureName = featureName,
-                audioSmoothingAttack = config.attack,
-                audioSmoothingDecay = config.decay,
-                audioFlashStrength = config.flash,
-                audioGammaExponent = config.gamma,
-                idleTriggerDelayMs = config.idleDelay,
-                noiseGateThreshold = config.noiseGate,
-                bassGain = config.bassGain,
-                midGain = config.midGain,
-                highGain = config.highGain,
-                isPaletteCyclingEnabled = config.paletteCycling,
-                beatThresholdMultiplier = config.beatMult,
-                visualizerMinBrightness = config.minBrightness,
-                visualizerColorSpeed = config.colorSpeed,
-                beatFlashDecayMs = config.beatFlashDecayMs,
-                ambientCapFraction = config.ambientCapFraction,
-                midFluxWeight = config.midFluxWeight
-            )
-        }
-        
-                    prefsRepo.putAppStatePrefString("visualizer_preset", preset)
-            prefsRepo.putAppStatePrefString("active_feature_name", featureName)
-            prefsRepo.putAppStatePrefFloat("audio_smoothing_attack", config.attack)
-            prefsRepo.putAppStatePrefFloat("audio_smoothing_decay", config.decay)
-            prefsRepo.putAppStatePrefFloat("audio_flash_strength", config.flash)
-            prefsRepo.putAppStatePrefFloat("audio_gamma_exponent", config.gamma)
-            prefsRepo.putAppStatePrefLong("idle_trigger_delay_ms", config.idleDelay)
-            prefsRepo.putAppStatePrefFloat("noise_gate_threshold", config.noiseGate)
-            prefsRepo.putAppStatePrefFloat("bass_gain", config.bassGain)
-            prefsRepo.putAppStatePrefFloat("mid_gain", config.midGain)
-            prefsRepo.putAppStatePrefFloat("high_gain", config.highGain)
-            prefsRepo.putAppStatePrefBoolean("is_palette_cycling_enabled", config.paletteCycling)
-            prefsRepo.putAppStatePrefFloat("beat_threshold_multiplier", config.beatMult)
-            prefsRepo.putAppStatePrefFloat("visualizer_min_brightness", config.minBrightness)
-            prefsRepo.putAppStatePrefFloat("visualizer_color_speed", config.colorSpeed)
-            prefsRepo.putAppStatePrefFloat("beat_flash_decay_ms", config.beatFlashDecayMs)
-            prefsRepo.putAppStatePrefFloat("ambient_cap_fraction", config.ambientCapFraction)
-            prefsRepo.putAppStatePrefFloat("mid_flux_weight", config.midFluxWeight)
+        dispatch(RgbIntent.SetVisualizerPreset(preset))
     }
 
     fun setAudioSmoothingAttack(value: Float) {
-        _uiState.update { it.copy(audioSmoothingAttack = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("audio_smoothing_attack", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetAudioSmoothingAttack(value))
     }
 
     fun setAudioSmoothingDecay(value: Float) {
-        _uiState.update { it.copy(audioSmoothingDecay = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("audio_smoothing_decay", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetAudioSmoothingDecay(value))
     }
 
     fun setAudioGammaExponent(value: Float) {
-        _uiState.update { it.copy(audioGammaExponent = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("audio_gamma_exponent", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetAudioGammaExponent(value))
     }
 
     fun setAudioFlashStrength(value: Float) {
-        _uiState.update { it.copy(audioFlashStrength = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("audio_flash_strength", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetAudioFlashStrength(value))
     }
 
     fun setVisualizerMinBrightness(value: Float) {
-        _uiState.update { it.copy(visualizerMinBrightness = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("visualizer_min_brightness", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetVisualizerMinBrightness(value))
     }
 
     fun setVisualizerColorSpeed(value: Float) {
-        _uiState.update { it.copy(visualizerColorSpeed = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("visualizer_color_speed", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetVisualizerColorSpeed(value))
     }
 
     fun setAmbianceResponseSpeed(value: Float) {
-        _uiState.update { it.copy(ambianceResponseSpeed = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefFloat("response_speed", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceResponseSpeed(value))
     }
 
     fun setAmbianceSmoothnessMs(value: Int) {
-        _uiState.update { it.copy(ambianceSmoothnessMs = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefInt("smoothness_ms", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSmoothnessMs(value))
     }
 
     fun setAmbianceSaturationBoost(value: Float) {
-        _uiState.update { it.copy(ambianceSaturationBoost = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefFloat("saturation_boost", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSaturationBoost(value))
     }
 
     fun setAmbianceBrightnessCompensation(value: Float) {
-        _uiState.update { it.copy(ambianceBrightnessCompensation = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefFloat("brightness_compensation", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceBrightnessCompensation(value))
     }
 
     fun setAmbianceUpdateRateCapFps(value: Int) {
-        _uiState.update { it.copy(ambianceUpdateRateCapFps = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefInt("update_rate_cap_fps", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceUpdateRateCapFps(value))
     }
 
     fun setAmbianceSceneCutSensitivity(value: Float) {
-        _uiState.update { it.copy(ambianceSceneCutSensitivity = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefFloat("scene_cut_sensitivity", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceSceneCutSensitivity(value))
     }
 
     fun setAmbianceNoiseDeadband(value: Float) {
-        _uiState.update { it.copy(ambianceNoiseDeadband = value, ambiancePreset = "Custom") }
-        prefsRepo.putAmbiancePrefFloat("noise_deadband", value)
-        prefsRepo.putAmbiancePrefString("ambiance_preset", "Custom")
+        dispatch(RgbIntent.SetAmbianceNoiseDeadband(value))
     }
 
     fun applyAmbiancePreset(
@@ -2823,165 +2733,73 @@ class RgbControllerViewModel(
         sceneCutSensitivity: Float,
         noiseDeadband: Float
     ) {
-        cancelSceneChain()
-        _uiState.update {
-            it.copy(
-                ambianceResponseSpeed = responseSpeed,
-                ambianceSmoothnessMs = smoothnessMs,
-                ambianceSaturationBoost = saturationBoost,
-                ambianceBrightnessCompensation = brightnessCompensation,
-                ambianceSceneCutSensitivity = sceneCutSensitivity,
-                ambianceNoiseDeadband = noiseDeadband,
-                ambiancePreset = presetId
+        dispatch(
+            RgbIntent.ApplyAmbiancePreset(
+                presetId = presetId,
+                responseSpeed = responseSpeed,
+                smoothnessMs = smoothnessMs,
+                saturationBoost = saturationBoost,
+                brightnessCompensation = brightnessCompensation,
+                sceneCutSensitivity = sceneCutSensitivity,
+                noiseDeadband = noiseDeadband
             )
-        }
-                    prefsRepo.putAmbiancePrefFloat("response_speed", responseSpeed)
-            prefsRepo.putAmbiancePrefInt("smoothness_ms", smoothnessMs)
-            prefsRepo.putAmbiancePrefFloat("saturation_boost", saturationBoost)
-            prefsRepo.putAmbiancePrefFloat("brightness_compensation", brightnessCompensation)
-            prefsRepo.putAmbiancePrefFloat("scene_cut_sensitivity", sceneCutSensitivity)
-            prefsRepo.putAmbiancePrefFloat("noise_deadband", noiseDeadband)
-            prefsRepo.putAmbiancePrefString("ambiance_preset", presetId)
+        )
     }
 
     fun setIdleTriggerDelayMs(value: Long) {
-        _uiState.update { it.copy(idleTriggerDelayMs = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefLong("idle_trigger_delay_ms", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetIdleTriggerDelayMs(value))
     }
 
     fun setTransmissionDelayMs(value: Int) {
-        _uiState.update { it.copy(transmissionDelayMs = value) }
-        prefsRepo.putAppStatePrefInt("transmission_delay_ms", value)
+        dispatch(RgbIntent.SetTransmissionDelayMs(value))
     }
 
     fun setNoiseGateThreshold(value: Float) {
-        _uiState.update { it.copy(noiseGateThreshold = value) }
-        prefsRepo.putAppStatePrefFloat("noise_gate_threshold", value)
+        dispatch(RgbIntent.SetNoiseGateThreshold(value))
     }
 
     fun setBeatThresholdMultiplier(value: Float) {
-        _uiState.update { it.copy(beatThresholdMultiplier = value, visualizerPreset = "Custom") }
-                    prefsRepo.putAppStatePrefFloat("beat_threshold_multiplier", value)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Custom")
+        dispatch(RgbIntent.SetBeatThresholdMultiplier(value))
     }
 
     fun setBeatCooldownMs(value: Int) {
-        _uiState.update { it.copy(beatCooldownMs = value) }
-        prefsRepo.putAppStatePrefInt("beat_cooldown_ms", value)
+        dispatch(RgbIntent.SetBeatCooldownMs(value))
     }
 
     fun setBassGain(value: Float) {
-        _uiState.update { it.copy(bassGain = value) }
-        prefsRepo.putAppStatePrefFloat("bass_gain", value)
+        dispatch(RgbIntent.SetBassGain(value))
     }
 
     fun setMidGain(value: Float) {
-        _uiState.update { it.copy(midGain = value) }
-        prefsRepo.putAppStatePrefFloat("mid_gain", value)
+        dispatch(RgbIntent.SetMidGain(value))
     }
 
     fun setHighGain(value: Float) {
-        _uiState.update { it.copy(highGain = value) }
-        prefsRepo.putAppStatePrefFloat("high_gain", value)
+        dispatch(RgbIntent.SetHighGain(value))
     }
 
     fun setAutoGainEnabled(value: Boolean) {
-        _uiState.update { it.copy(isAutoGainEnabled = value) }
-        prefsRepo.putAppStatePrefBoolean("is_auto_gain_enabled", value)
+        dispatch(RgbIntent.SetAutoGainEnabled(value))
     }
 
     fun setPaletteCyclingEnabled(value: Boolean) {
-        _uiState.update { it.copy(isPaletteCyclingEnabled = value) }
-        prefsRepo.putAppStatePrefBoolean("is_palette_cycling_enabled", value)
+        dispatch(RgbIntent.SetPaletteCyclingEnabled(value))
     }
 
     fun setLogarithmicScalingEnabled(value: Boolean) {
-        _uiState.update { it.copy(isLogarithmicScalingEnabled = value) }
-        prefsRepo.putAppStatePrefBoolean("is_logarithmic_scaling_enabled", value)
+        dispatch(RgbIntent.SetLogarithmicScalingEnabled(value))
     }
 
     fun setBluetoothDelayMs(value: Int) {
-        _uiState.update { it.copy(
-            bluetoothDelayMs = value,
-            totalVisualDelayMs = value + BeatDetector().lookaheadMs.toInt()
-        ) }
-        prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", value)
+        dispatch(RgbIntent.SetBluetoothDelayMs(value))
     }
-    
+
     fun resetAudioPipelineSettings() {
-        _uiState.update {
-            it.copy(
-                audioSmoothingAttack = 0.85f,
-                audioSmoothingDecay = 0.12f,
-                transmissionDelayMs = 16,
-                noiseGateThreshold = 5.0f,
-                beatThresholdMultiplier = 1.3f,
-                beatCooldownMs = 250,
-                bassGain = 1.0f,
-                midGain = 1.0f,
-                highGain = 1.0f,
-                isAutoGainEnabled = true,
-                isPaletteCyclingEnabled = true,
-                isLogarithmicScalingEnabled = true,
-                bluetoothDelayMs = 0,
-                totalVisualDelayMs = BeatDetector().lookaheadMs.toInt(),
-                visualizerPreset = "Default",
-                audioGammaExponent = 0.45f,
-                audioFlashStrength = 0.3f,
-                visualizerMinBrightness = 0.15f,
-                visualizerColorSpeed = 1.0f,
-                beatFlashDecayMs = 200f,
-                ambientCapFraction = 0.40f,
-                midFluxWeight = 0.25f,
-                idleTriggerDelayMs = 2500L
-            )
-        }
-                    prefsRepo.putAppStatePrefFloat("audio_smoothing_attack", 0.85f)
-            prefsRepo.putAppStatePrefFloat("audio_smoothing_decay", 0.12f)
-            prefsRepo.putAppStatePrefInt("transmission_delay_ms", 16)
-            prefsRepo.putAppStatePrefFloat("noise_gate_threshold", 5.0f)
-            prefsRepo.putAppStatePrefFloat("beat_threshold_multiplier", 1.3f)
-            prefsRepo.putAppStatePrefInt("beat_cooldown_ms", 250)
-            prefsRepo.putAppStatePrefFloat("bass_gain", 1.0f)
-            prefsRepo.putAppStatePrefFloat("mid_gain", 1.0f)
-            prefsRepo.putAppStatePrefFloat("high_gain", 1.0f)
-            prefsRepo.putAppStatePrefBoolean("is_auto_gain_enabled", true)
-            prefsRepo.putAppStatePrefBoolean("is_palette_cycling_enabled", true)
-            prefsRepo.putAppStatePrefBoolean("is_logarithmic_scaling_enabled", true)
-            prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", 0)
-            prefsRepo.putAppStatePrefString("visualizer_preset", "Default")
-            prefsRepo.putAppStatePrefFloat("audio_gamma_exponent", 0.45f)
-            prefsRepo.putAppStatePrefFloat("audio_flash_strength", 0.3f)
-            prefsRepo.putAppStatePrefFloat("visualizer_min_brightness", 0.15f)
-            prefsRepo.putAppStatePrefFloat("visualizer_color_speed", 1.0f)
-            prefsRepo.putAppStatePrefFloat("beat_flash_decay_ms", 200f)
-            prefsRepo.putAppStatePrefFloat("ambient_cap_fraction", 0.40f)
-            prefsRepo.putAppStatePrefFloat("mid_flux_weight", 0.25f)
-            prefsRepo.putAppStatePrefLong("idle_trigger_delay_ms", 2500L)
+        dispatch(RgbIntent.ResetAudioPipelineSettings)
     }
 
     fun resetCalibrationSettings() {
-        prefsRepo.clearCalibrationDelayPrefs()
-        prefsRepo.clearCctCalibrationPrefs()
-        prefsRepo.clearPacingPrefs()
-        
-        deviceWriteManagers.forEach { (_, manager) ->
-            manager.currentPacingMs = 100
-        }
-        
-        _uiState.update {
-            it.copy(
-                bluetoothDelayMs = 0,
-                totalVisualDelayMs = BeatDetector().lookaheadMs.toInt(),
-                calibrationDelayOffsetMs = 0,
-                devicePacingMs = it.devicePacingMs.mapValues { 100 },
-                cctCalibrations = emptyMap()
-            )
-        }
-        
-        prefsRepo.putAppStatePrefInt("bluetooth_delay_ms", 0)
-        addLog("Reset Calibration Defaults: bluetooth audio delay compensation set to 0, per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared.")
+        dispatch(RgbIntent.ResetCalibrationSettings)
     }
 
     private fun stopAmbianceIfActive(restoreState: Boolean = true) {
@@ -2997,142 +2815,28 @@ class RgbControllerViewModel(
         }
     }
 
-    private fun updateControlledDevicesInMap(
-        activeFeatureName: String? = null,
-        red: Int? = null,
-        green: Int? = null,
-        blue: Int? = null,
-        warmth: Int? = null,
-        modeIndex: Int? = null,
-        brightness: Int? = null,
-        isPowerOn: Boolean? = null
-    ) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
-        if (targetAddresses.isEmpty()) return
-        
-        _uiState.update { current ->
-            val newMap = current.deviceStatesMap.toMutableMap()
-            targetAddresses.forEach { address ->
-                val existing = newMap[address] ?: ActiveDeviceState(
-                    activeFeatureName = current.activeFeatureName,
-                    red = current.red,
-                    green = current.green,
-                    blue = current.blue,
-                    warmth = current.warmth,
-                    modeIndex = current.modeIndex,
-                    brightness = current.brightness,
-                    isPowerOn = current.isPowerOn
-                )
-                newMap[address] = existing.copy(
-                    activeFeatureName = activeFeatureName ?: existing.activeFeatureName,
-                    red = red ?: existing.red,
-                    green = green ?: existing.green,
-                    blue = blue ?: existing.blue,
-                    warmth = warmth ?: existing.warmth,
-                    modeIndex = modeIndex ?: existing.modeIndex,
-                    brightness = brightness ?: existing.brightness,
-                    isPowerOn = isPowerOn ?: existing.isPowerOn
-                )
-            }
-            current.copy(deviceStatesMap = newMap)
-        }
-    }
-
     fun setPower(isOn: Boolean) {
-        cancelSceneChain()
-        _uiState.update { it.copy(isPowerOn = isOn) }
-        prefsRepo.putAppStatePrefBoolean("power_on", isOn)
-        if (!isOn) {
-            stopMusicSync()
-            stopAmbianceIfActive()
-        }
-        sendCommand(DuoCoProtocol.createPowerCommand(isOn), "Power $isOn")
-        updateControlledDevicesInMap(isPowerOn = isOn)
+        dispatch(RgbIntent.SetPower(isOn))
     }
 
     fun setColor(r: Int, g: Int, b: Int) {
-        cancelSceneChain()
-        clearExclusionsIfNotApplyingScene()
-        _uiState.update { it.copy(red = r, green = g, blue = b, modeIndex = 0, activeFeatureName = "Colour") }
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-                    prefsRepo.putAppStatePrefInt("red", r)
-            prefsRepo.putAppStatePrefInt("green", g)
-            prefsRepo.putAppStatePrefInt("blue", b)
-            prefsRepo.putAppStatePrefInt("mode_index", 0)
-            prefsRepo.putAppStatePrefString("active_feature_name", "Colour")
-        sendCommand(DuoCoProtocol.createColorCommand(r, g, b), "Color R:$r G:$g B:$b")
-        updateControlledDevicesInMap(activeFeatureName = "Colour", red = r, green = g, blue = b, modeIndex = 0)
+        dispatch(RgbIntent.SetColor(r, g, b))
     }
 
     fun setBrightness(percent: Int) {
-        _uiState.update { it.copy(brightness = percent) }
-        prefsRepo.putAppStatePrefInt("brightness", percent)
-        sendCommand(DuoCoProtocol.createBrightnessCommand(percent), "Brightness $percent%", cancelRunningScenes = false)
-        updateControlledDevicesInMap(brightness = percent)
+        dispatch(RgbIntent.SetBrightness(percent))
     }
 
     fun setMode(modeIndex: Int) {
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-        cancelSceneChain()
-        val modeName = customModes.value.find { it.byteValue == modeIndex }?.name ?: "Mode"
-        _uiState.update { it.copy(modeIndex = modeIndex, activeFeatureName = modeName) }
-        prefsRepo.putAppStatePrefString("active_feature_name", modeName)
-        prefsRepo.putAppStatePrefInt("mode_index", modeIndex)
-        sendCommand(DuoCoProtocol.createModeCommand(modeIndex), "Mode $modeIndex")
-        updateControlledDevicesInMap(activeFeatureName = modeName, modeIndex = modeIndex)
+        dispatch(RgbIntent.SetMode(modeIndex))
     }
 
     fun setModeSpeed(speed: Int) {
-        cancelSceneChain()
-        _uiState.update { it.copy(modeSpeed = speed) }
-        prefsRepo.putAppStatePrefInt("mode_speed", speed)
-        sendCommand(DuoCoProtocol.createModeSpeedCommand(speed), "Mode Speed $speed%")
+        dispatch(RgbIntent.SetModeSpeed(speed))
     }
 
     fun setWarmth(percent: Int) {
-        cancelSceneChain()
-        clearExclusionsIfNotApplyingScene()
-        val coercedPercent = percent.coerceIn(0, 100)
-        _uiState.update { it.copy(warmth = coercedPercent, modeIndex = 0, activeFeatureName = "CCT") }
-
-        stopMusicSync(restoreState = false)
-        stopAmbianceIfActive(restoreState = false)
-        // Map UI slider (0-100) non-linearly to mired/Kelvin to compensate for diminishing human visual returns closer to cool (high Kelvin).
-        // 0% -> 500 mired -> 2000K
-        // 100% -> 100 mired -> 10000K
-        prefsRepo.putAppStatePrefString("active_feature_name", "CCT")
-        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(coercedPercent)
-
-        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-        val finalRed = rgb[0]
-        val finalGreen = rgb[1]
-        val finalBlue = rgb[2]
-
-        _uiState.update { it.copy(red = finalRed, green = finalGreen, blue = finalBlue) }
-                    prefsRepo.putAppStatePrefInt("warmth", coercedPercent)
-            prefsRepo.putAppStatePrefInt("mode_index", 0)
-            prefsRepo.putAppStatePrefString("active_feature_name", "Colour")
-            prefsRepo.putAppStatePrefInt("red", finalRed)
-            prefsRepo.putAppStatePrefInt("green", finalGreen)
-            prefsRepo.putAppStatePrefInt("blue", finalBlue)
-
-        // Apply CCT Correction Profile if available for the connected device
-        val address = _uiState.value.connectedDeviceAddress
-        val profile = address?.let { _uiState.value.cctCalibrations[it] }
-
-        val (sendR, sendG, sendB) = if (profile != null) {
-            val cr = (finalRed * profile.scaleR + profile.offsetR).toInt().coerceIn(0, 255)
-            val cg = (finalGreen * profile.scaleG + profile.offsetG).toInt().coerceIn(0, 255)
-            val cb = (finalBlue * profile.scaleB + profile.offsetB).toInt().coerceIn(0, 255)
-            Triple(cr, cg, cb)
-        } else {
-            Triple(finalRed, finalGreen, finalBlue)
-        }
-
-        sendCommand(DuoCoProtocol.createColorCommand(sendR, sendG, sendB), "Warmth R:$sendR G:$sendG B:$sendB (Original R:$finalRed G:$finalGreen B:$finalBlue)")
-        updateControlledDevicesInMap(activeFeatureName = "CCT", red = finalRed, green = finalGreen, blue = finalBlue, warmth = coercedPercent, modeIndex = 0)
+        dispatch(RgbIntent.SetWarmth(percent))
     }
 
 
@@ -3144,38 +2848,38 @@ class RgbControllerViewModel(
 
         return DeviceSceneState(
             groupASelection = groupA,
-            colorR = if (groupA == "Colour") s.red else null,
-            colorG = if (groupA == "Colour") s.green else null,
-            colorB = if (groupA == "Colour") s.blue else null,
-            cctWarmth = if (groupA == "CCT") s.warmth else null,
-            modeIndex = if (groupA == "HardwareMode") s.modeIndex else null,
-            modeSpeed = if (groupA == "HardwareMode" && includeModeSpeed) s.modeSpeed else null,
-            audioPreset = if (groupA == "Audio") s.visualizerPreset else null,
-            audioAttack = if (includeAudioSettings || groupA == "Audio") s.audioSmoothingAttack else null,
-            audioDecay = if (includeAudioSettings || groupA == "Audio") s.audioSmoothingDecay else null,
-            audioFlash = if (includeAudioSettings || groupA == "Audio") s.audioFlashStrength else null,
-            musicMode = if (groupA == "Audio") s.musicMode else null,
+            colorR = if (groupA == "Colour") s.coreControl.red else null,
+            colorG = if (groupA == "Colour") s.coreControl.green else null,
+            colorB = if (groupA == "Colour") s.coreControl.blue else null,
+            cctWarmth = if (groupA == "CCT") s.coreControl.warmth else null,
+            modeIndex = if (groupA == "HardwareMode") s.coreControl.modeIndex else null,
+            modeSpeed = if (groupA == "HardwareMode" && includeModeSpeed) s.coreControl.modeSpeed else null,
+            audioPreset = if (groupA == "Audio") s.audioSettings.visualizerPreset else null,
+            audioAttack = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioSmoothingAttack else null,
+            audioDecay = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioSmoothingDecay else null,
+            audioFlash = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioFlashStrength else null,
+            musicMode = if (groupA == "Audio") s.audioSettings.musicMode else null,
             ambianceIsOn = if (groupA == "Ambiance") com.example.ambiance.AmbianceCaptureState.isActive.value else null,
-            ambiancePreset = if (includeAmbianceSettings || groupA == "Ambiance") s.ambiancePreset else null,
-            ambianceResponseSpeed = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceResponseSpeed else null,
-            ambianceSmoothnessMs = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSmoothnessMs else null,
-            ambianceSaturationBoost = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSaturationBoost else null,
-            ambianceBrightnessCompensation = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceBrightnessCompensation else null,
-            ambianceUpdateRateCapFps = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceUpdateRateCapFps else null,
-            ambianceSceneCutSensitivity = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSceneCutSensitivity else null,
-            ambianceNoiseDeadband = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceNoiseDeadband else null,
-            noiseGateThreshold = if (includeAudioSettings) s.noiseGateThreshold else null,
-            bassGain = if (includeAudioSettings) s.bassGain else null,
-            midGain = if (includeAudioSettings) s.midGain else null,
-            highGain = if (includeAudioSettings) s.highGain else null,
-            isAutoGainEnabled = if (includeAudioSettings) s.isAutoGainEnabled else null,
-            isPaletteCyclingEnabled = if (includeAudioSettings) s.isPaletteCyclingEnabled else null,
-            isLogarithmicScalingEnabled = if (includeAudioSettings) s.isLogarithmicScalingEnabled else null,
-            audioGammaExponent = if (includeAudioSettings) s.audioGammaExponent else null,
-            visualizerMinBrightness = if (includeAudioSettings) s.visualizerMinBrightness else null,
-            visualizerColorSpeed = if (includeAudioSettings) s.visualizerColorSpeed else null,
-            bluetoothDelayMs = if (includeCalibrationSettings) s.bluetoothDelayMs else null,
-            brightness = if (includeBrightness) s.brightness else null,
+            ambiancePreset = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambiancePreset else null,
+            ambianceResponseSpeed = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceResponseSpeed else null,
+            ambianceSmoothnessMs = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSmoothnessMs else null,
+            ambianceSaturationBoost = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSaturationBoost else null,
+            ambianceBrightnessCompensation = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceBrightnessCompensation else null,
+            ambianceUpdateRateCapFps = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceUpdateRateCapFps else null,
+            ambianceSceneCutSensitivity = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSceneCutSensitivity else null,
+            ambianceNoiseDeadband = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceNoiseDeadband else null,
+            noiseGateThreshold = if (includeAudioSettings) s.audioSettings.noiseGateThreshold else null,
+            bassGain = if (includeAudioSettings) s.audioSettings.bassGain else null,
+            midGain = if (includeAudioSettings) s.audioSettings.midGain else null,
+            highGain = if (includeAudioSettings) s.audioSettings.highGain else null,
+            isAutoGainEnabled = if (includeAudioSettings) s.audioSettings.isAutoGainEnabled else null,
+            isPaletteCyclingEnabled = if (includeAudioSettings) s.audioSettings.isPaletteCyclingEnabled else null,
+            isLogarithmicScalingEnabled = if (includeAudioSettings) s.audioSettings.isLogarithmicScalingEnabled else null,
+            audioGammaExponent = if (includeAudioSettings) s.audioSettings.audioGammaExponent else null,
+            visualizerMinBrightness = if (includeAudioSettings) s.audioSettings.visualizerMinBrightness else null,
+            visualizerColorSpeed = if (includeAudioSettings) s.audioSettings.visualizerColorSpeed else null,
+            bluetoothDelayMs = if (includeCalibrationSettings) s.audioSettings.bluetoothDelayMs else null,
+            brightness = if (includeBrightness) s.coreControl.brightness else null,
             isPowerOn = if (isPowerOffMode) false else if (isAnyMode) true else null
         )
     }
@@ -3297,7 +3001,7 @@ class RgbControllerViewModel(
         }
 
         if (scene.state.groupASelection == "Audio" || scene.state.groupASelection == "Ambiance") {
-            val allConnected = _uiState.value.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys
+            val allConnected = _uiState.value.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys
             activeExcludedMacs.addAll(allConnected.filter { !targetMacs.contains(it) })
             applyDeviceState(scene.state, null)
         } else {
@@ -3305,7 +3009,7 @@ class RgbControllerViewModel(
             
             // Fix: Update relevant global UI state fields when applying HardwareMode/Colour/CCT scenes
             _uiState.update { current ->
-                var updated = current
+                var updated = current.coreControl
                 when (scene.state.groupASelection) {
                     "Colour" -> {
                         if (scene.state.colorR != null && scene.state.colorG != null && scene.state.colorB != null) {
@@ -3349,7 +3053,7 @@ class RgbControllerViewModel(
                 if (scene.state.isPowerOn != null) {
                     updated = updated.copy(isPowerOn = scene.state.isPowerOn)
                 }
-                
+
                                     prefsRepo.putAppStatePrefString("active_feature_name", updated.activeFeatureName)
                     prefsRepo.putAppStatePrefInt("red", updated.red)
                     prefsRepo.putAppStatePrefInt("green", updated.green)
@@ -3359,7 +3063,7 @@ class RgbControllerViewModel(
                     prefsRepo.putAppStatePrefInt("warmth", updated.warmth)
                     prefsRepo.putAppStatePrefInt("brightness", updated.brightness)
 
-                updated
+                current.copy(coreControl = updated)
             }
         }
 
@@ -3397,15 +3101,15 @@ class RgbControllerViewModel(
 
     private fun updateDeviceStateInMap(macAddress: String, state: DeviceSceneState) {
         _uiState.update { current ->
-            val existing = current.deviceStatesMap[macAddress] ?: ActiveDeviceState(
-                activeFeatureName = current.activeFeatureName,
-                red = current.red,
-                green = current.green,
-                blue = current.blue,
-                warmth = current.warmth,
-                modeIndex = current.modeIndex,
-                brightness = current.brightness,
-                isPowerOn = current.isPowerOn
+            val existing = current.connectivity.deviceStatesMap[macAddress] ?: ActiveDeviceState(
+                activeFeatureName = current.coreControl.activeFeatureName,
+                red = current.coreControl.red,
+                green = current.coreControl.green,
+                blue = current.coreControl.blue,
+                warmth = current.coreControl.warmth,
+                modeIndex = current.coreControl.modeIndex,
+                brightness = current.coreControl.brightness,
+                isPowerOn = current.coreControl.isPowerOn
             )
             
             var updated = existing
@@ -3470,9 +3174,9 @@ class RgbControllerViewModel(
                 }
             }
             
-            val newMap = current.deviceStatesMap.toMutableMap()
+            val newMap = current.connectivity.deviceStatesMap.toMutableMap()
             newMap[macAddress] = updated
-            current.copy(deviceStatesMap = newMap)
+            current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
         }
     }
 
@@ -3581,7 +3285,7 @@ class RgbControllerViewModel(
                         )
                         // Restoring the Scene's saved FPS value
                         val fps = state.ambianceUpdateRateCapFps ?: 20
-                        _uiState.update { it.copy(ambianceUpdateRateCapFps = fps) }
+                        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceUpdateRateCapFps = fps)) }
                         prefsRepo.putAmbiancePrefInt("update_rate_cap_fps", fps)
                     } else if (state.ambianceIsOn == false && com.example.ambiance.AmbianceCaptureState.isActive.value) {
                         com.example.ambiance.AmbianceCaptureService.stop(getApplication())
@@ -3624,11 +3328,11 @@ class RgbControllerViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val preset = RgbPreset(
                 name = name,
-                red = state.red,
-                green = state.green,
-                blue = state.blue,
-                brightness = state.brightness,
-                modeIndex = state.modeIndex
+                red = state.coreControl.red,
+                green = state.coreControl.green,
+                blue = state.coreControl.blue,
+                brightness = state.coreControl.brightness,
+                modeIndex = state.coreControl.modeIndex
             )
             repository.insertPreset(preset)
             addLog("Saved Preset: '$name'")
@@ -3643,17 +3347,11 @@ class RgbControllerViewModel(
     }
 
     fun saveColorCalibration(calibration: ColorCalibration) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.insertColorCalibration(calibration)
-            addLog("Saved Color Calibration Profile for ${calibration.macAddress}")
-        }
+        dispatch(RgbIntent.SaveColorCalibration(calibration))
     }
 
     fun deleteColorCalibration(macAddress: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteColorCalibration(macAddress)
-            addLog("Deleted Color Calibration Profile for $macAddress")
-        }
+        dispatch(RgbIntent.DeleteColorCalibration(macAddress))
     }
 
     fun fit3x3Matrix(
@@ -3664,14 +3362,16 @@ class RgbControllerViewModel(
     }
 
     fun applyPreset(preset: RgbPreset) {
-        _uiState.update { 
+        _uiState.update {
             it.copy(
-                red = preset.red,
-                green = preset.green,
-                blue = preset.blue,
-                brightness = preset.brightness,
-                modeIndex = preset.modeIndex
-            ) 
+                coreControl = it.coreControl.copy(
+                    red = preset.red,
+                    green = preset.green,
+                    blue = preset.blue,
+                    brightness = preset.brightness,
+                    modeIndex = preset.modeIndex
+                )
+            )
         }
                     prefsRepo.putAppStatePrefInt("red", preset.red)
             prefsRepo.putAppStatePrefInt("green", preset.green)
@@ -3685,187 +3385,23 @@ class RgbControllerViewModel(
     }
 
     fun saveDeviceAlias(address: String, customName: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.saveDeviceAlias(address, customName)
-            addLog("Saved Alias '$customName' for address: $address")
-            
-            // Also update SavedDevice custom name if it exists in Device Center
-            val existingSaved = savedDevices.value.find { it.macAddress == address }
-            if (existingSaved != null) {
-                repository.insertSavedDevice(existingSaved.copy(customName = customName))
-            }
-            
-            // If we are currently connected to this address, update the connected device name
-            if (_uiState.value.connectedDeviceAddress == address) {
-                _uiState.update { it.copy(connectedDeviceName = customName) }
-            }
-            
-            // Refresh scanned device aliases
-            _uiState.update { state ->
-                val list = state.scannedDevices.map { 
-                    if (it.address == address) it.copy(alias = customName) else it 
-                }
-                state.copy(scannedDevices = list)
-            }
-        }
+        dispatch(RgbIntent.SaveDeviceAlias(address, customName))
     }
 
     fun deleteDeviceAlias(address: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteDeviceAlias(address)
-            addLog("Deleted Alias for address: $address")
-            
-            // If connected, revert to scan name or unknown
-            if (_uiState.value.connectedDeviceAddress == address) {
-                val origName = _uiState.value.scannedDevices.find { it.address == address }?.name ?: "Unknown Device"
-                _uiState.update { it.copy(connectedDeviceName = origName) }
-            }
-            
-            // Revert scanned list aliases
-            _uiState.update { state ->
-                val list = state.scannedDevices.map { 
-                    if (it.address == address) it.copy(alias = null) else it 
-                }
-                state.copy(scannedDevices = list)
-            }
-        }
+        dispatch(RgbIntent.DeleteDeviceAlias(address))
     }
 
     fun toggleAutoConnect(address: String, name: String, enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing != null) {
-                repository.updateAutoConnect(address, enabled)
-                addLog("Updated Auto-Connect for ${existing.customName} to $enabled")
-            } else {
-                val device = SavedDevice(
-                    macAddress = address,
-                    customName = name,
-                    isAutoConnectEnabled = enabled,
-                    isActiveControlEnabled = true
-                )
-                repository.insertSavedDevice(device)
-                addLog("Saved device $name with Auto-Connect = $enabled")
-            }
-        }
+        dispatch(RgbIntent.ToggleAutoConnect(address, name, enabled))
     }
 
     fun toggleActiveControl(address: String, name: String, enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val existing = savedDevices.value.find { it.macAddress == address }
-            if (existing != null) {
-                repository.updateActiveControl(address, enabled)
-                addLog("Updated Active Control for ${existing.customName} to $enabled")
-            } else {
-                val device = SavedDevice(
-                    macAddress = address,
-                    customName = name,
-                    isAutoConnectEnabled = true,
-                    isActiveControlEnabled = enabled
-                )
-                repository.insertSavedDevice(device)
-                addLog("Saved device $name with Active Control = $enabled")
-            }
-
-            // Handle mid-automation additions/removals
-            if (enabled) {
-                val s = _uiState.value
-                val musicActive = s.musicMode != null
-                val ambianceActive = com.example.ambiance.AmbianceCaptureState.isActive.value
-                val currentFeatureName = if (musicActive) {
-                    s.activeFeatureName
-                } else if (ambianceActive) {
-                    "Ambiance - ${s.ambiancePreset ?: "Balanced"}"
-                } else {
-                    s.activeFeatureName
-                }
-
-                var devState = s.deviceStatesMap[address]
-                if (devState == null || devState.activeFeatureName != currentFeatureName) {
-                    val baseState = devState ?: ActiveDeviceState(
-                        red = s.red,
-                        green = s.green,
-                        blue = s.blue,
-                        warmth = s.warmth,
-                        modeIndex = s.modeIndex,
-                        brightness = s.brightness,
-                        isPowerOn = s.isPowerOn
-                    )
-                    val newState = baseState.copy(activeFeatureName = currentFeatureName)
-                    _uiState.update { current ->
-                        val newMap = current.deviceStatesMap.toMutableMap()
-                        newMap[address] = newState
-                        current.copy(deviceStatesMap = newMap)
-                    }
-                    devState = newState
-                }
-                
-                // Now send the stored state to the physical device
-                val powerCmd = DuoCoProtocol.createPowerCommand(devState.isPowerOn)
-                val brightnessCmd = DuoCoProtocol.createBrightnessCommand(devState.brightness)
-                sendCommandToDeviceDirect(address, powerCmd)
-                sendCommandToDeviceDirect(address, brightnessCmd)
-                
-                when {
-                    devState.activeFeatureName == "Colour" -> {
-                        val colorCmd = DuoCoProtocol.createColorCommand(devState.red, devState.green, devState.blue)
-                        sendCommandToDeviceDirect(address, colorCmd)
-                    }
-                    devState.activeFeatureName == "CCT" -> {
-                        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(devState.warmth)
-                        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-                        val colorCmd = DuoCoProtocol.createColorCommand(rgb[0], rgb[1], rgb[2])
-                        sendCommandToDeviceDirect(address, colorCmd)
-                    }
-                    devState.activeFeatureName.startsWith("Audio") || devState.activeFeatureName.startsWith("Ambiance") -> {
-                        // Automated states are handled by their respective controllers
-                    }
-                    else -> {
-                        // Mode
-                        val modeCmd = DuoCoProtocol.createModeCommand(devState.modeIndex)
-                        sendCommandToDeviceDirect(address, modeCmd)
-                    }
-                }
-
-                if (musicActive) {
-                    saveDeviceState(address, AutomationType.AUDIO)
-                } else if (ambianceActive) {
-                    saveDeviceState(address, AutomationType.AMBIANCE)
-                }
-            } else {
-                _uiState.update { current ->
-                    if (!current.deviceStatesMap.containsKey(address)) {
-                        val newMap = current.deviceStatesMap.toMutableMap()
-                        newMap[address] = ActiveDeviceState(
-                            activeFeatureName = current.activeFeatureName,
-                            red = current.red,
-                            green = current.green,
-                            blue = current.blue,
-                            warmth = current.warmth,
-                            modeIndex = current.modeIndex,
-                            brightness = current.brightness,
-                            isPowerOn = current.isPowerOn
-                        )
-                        current.copy(deviceStatesMap = newMap)
-                    } else {
-                        current
-                    }
-                }
-
-                val activeMode = deviceAutomationMode[address]
-                if (activeMode != null) {
-                    restoreDeviceState(address, activeMode)
-                }
-            }
-        }
+        dispatch(RgbIntent.ToggleActiveControl(address, name, enabled))
     }
 
     fun deleteSavedDevice(address: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteSavedDevice(address)
-            addLog("Removed device from Saved Center: $address")
-            disconnectDevice(address)
-        }
+        dispatch(RgbIntent.DeleteSavedDevice(address))
     }
 
     fun updateCustomMode(customMode: CustomMode) {
@@ -3883,1003 +3419,135 @@ class RgbControllerViewModel(
     }
 
     fun clearLogs() {
-        _uiState.update { it.copy(logMessages = emptyList()) }
+        _telemetry.update { it.copy(logMessages = emptyList()) }
     }
 
     // --- MUSIC SYNC & AUDIO CAPTURE ACTIONS ---
-    private var audioRecord: AudioRecord? = null
-    private var visualizer: Visualizer? = null
-    
+    // Phase 4: hardware capture (Visualizer / AudioRecord) is isolated behind
+    // com.example.hardware.audio.AudioCaptureSource; the DSP pipeline that used to run inline
+    // here now lives in com.example.core.audio.AudioDspProcessor. This ViewModel is now the
+    // orchestrator: construct the right capture source + a fresh processor, wire callbacks that
+    // reproduce the exact _uiState/_telemetry/queueCommand writes the original inline code made.
+    private var audioCaptureSource: com.example.hardware.audio.AudioCaptureSource? = null
+    private var audioDspProcessor: com.example.core.audio.AudioDspProcessor? = null
+
     // Thread-safe state for transmission
     @Volatile private var latestR = 0
     @Volatile private var latestG = 0
     @Volatile private var latestB = 0
 
-    private var audioThread: Thread? = null
     private var transmissionThread: Thread? = null
 
     fun startMusicSync(mode: String) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
-        targetAddresses.forEach { address ->
-            saveDeviceState(address, AutomationType.AUDIO)
-            sceneRunners[address]?.release()
-            sceneRunners.remove(address)
-        }
-        cancelSceneChain()
-                val featureName = if (mode == "phone_mic" || mode == "on_device") {
-            "Audio Visualiser (${getVisualizerPresetName(_uiState.value.visualizerPreset)})"
-        } else {
-            "LED Visualiser (${getLedPresetName(mode)})"
-        }
-        _uiState.update { current ->
-            val newMap = current.deviceStatesMap.toMutableMap()
-            targetAddresses.forEach { address ->
-                val existing = newMap[address] ?: ActiveDeviceState()
-                newMap[address] = existing.copy(activeFeatureName = featureName)
-            }
-            current.copy(musicMode = mode, activeFeatureName = featureName, deviceStatesMap = newMap)
-        }
-        prefsRepo.putAppStatePrefString("active_feature_name", featureName)
-        
-        stopMusicSyncInternal(keepServiceRunning = (mode == "phone_mic" || mode == "on_device"))
-
-        if (mode == "phone_mic" || mode == "on_device") {
-            startAudioRecording(mode)
-        } else {
-            val presetIndex = when (mode) {
-                "energetic_1" -> 0
-                "energetic_2" -> 1
-                "rhythm_1" -> 2
-                "rhythm_2" -> 3
-                "spectrum_1" -> 4
-                "spectrum_2" -> 5
-                "rolling_1" -> 6
-                "rolling_2" -> 7
-                else -> -1
-            }
-            if (presetIndex != -1) {
-                val toggleCmd = DuoCoProtocol.createPhoneMicToggleCommand(true)
-                sendCommand(toggleCmd, "Phone Mic Toggle ON")
-                
-                val styleCmd = DuoCoProtocol.createMicVisualizerStyleCommand(presetIndex)
-                sendCommand(styleCmd, "Mic Visualizer Style Preset $presetIndex")
-                
-                val sensitivityCmd = DuoCoProtocol.createMusicSensitivityCommand(_uiState.value.musicSensitivity)
-                sendCommand(sensitivityCmd, "Phone Mic sensitivity ${_uiState.value.musicSensitivity}")
-            }
-        }
+        dispatch(RgbIntent.StartMusicSync(mode))
     }
 
     fun stopMusicSync(restoreState: Boolean = true) {
-        clearExclusionsIfNotApplyingScene()
-        
-        val previousMode = _uiState.value.musicMode
-        _uiState.update { it.copy(musicMode = null) }
-        
-        if (previousMode != null) {
-            val toggleCmd = DuoCoProtocol.createPhoneMicToggleCommand(false)
-            sendCommand(toggleCmd, "Phone Mic Toggle OFF")
-        }
-        
-        stopMusicSyncInternal(keepServiceRunning = false)
-
-        deviceAutomationMode.forEach { (address, mode) ->
-            if (mode == AutomationType.AUDIO) {
-                if (restoreState) {
-                    restoreDeviceState(address, AutomationType.AUDIO)
-                } else {
-                    deviceAutomationMode.remove(address)
-                }
-            }
-        }
+        dispatch(RgbIntent.StopMusicSync(restoreState))
     }
 
     private fun stopMusicSyncInternal(keepServiceRunning: Boolean = false) {
-        _uiState.update { it.copy(isAudioSyncRunning = false) }
-        
-        audioThread?.interrupt()
-        audioThread = null
-        
+        _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = false)) }
+
         transmissionThread?.interrupt()
         transmissionThread = null
-        
-        try {
-            audioRecord?.stop()
-        } catch (e: Exception) {}
-        try {
-            audioRecord?.release()
-        } catch (e: Exception) {}
-        audioRecord = null
 
         try {
-            visualizer?.enabled = false
-            visualizer?.release()
+            audioCaptureSource?.stop()
         } catch (e: Exception) {}
-        visualizer = null
-        
+        audioCaptureSource = null
+        audioDspProcessor = null
+
         if (!keepServiceRunning) {
             try {
                 AudioCaptureService.stop(getApplication())
             } catch (e: Exception) {}
         }
-        
-        
+
+
     }
 
     fun setMusicSensitivity(value: Int) {
-        _uiState.update { it.copy(musicSensitivity = value) }
-        val cmd = DuoCoProtocol.createMusicSensitivityCommand(value)
-        sendCommand(cmd, "Mic Sensitivity $value")
+        dispatch(RgbIntent.SetMusicSensitivity(value))
     }
 
     private fun startAudioRecording(mode: String) {
         startAudioEngine(mode)
     }
 
+    /**
+     * Handles one DSP result the same way the original inline callback did: publish
+     * isVisualizerIdle/musicAmplitudes/visualizerHue and queue the derived RGB command.
+     */
+    private fun publishAudioDspResult(result: com.example.core.audio.AudioDspResult) {
+        latestR = result.r
+        latestG = result.g
+        latestB = result.b
+
+        val cmd = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
+        queueCommand(cmd)
+
+        _uiState.update {
+            it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = result.isIdle))
+        }
+        _telemetry.update {
+            it.copy(
+                musicAmplitudes = result.amplitudes,
+                visualizerHue = if (result.isIdle) it.visualizerHue else result.hue
+            )
+        }
+    }
+
     private fun startAudioEngine(mode: String) {
-        _uiState.update { it.copy(isAudioSyncRunning = true) }
-        
-        // 1. Audio Capture and Processing Thread
+        _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = true)) }
+
+        // 1. Audio Capture and Processing
         if (mode == "on_device") {
-            try {
-                val hasPermission = ContextCompat.checkSelfPermission(
-                    getApplication(),
-                    Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
+            val source = com.example.hardware.audio.VisualizerCaptureSource(getApplication())
+            val processor = com.example.core.audio.AudioDspProcessor(source.backend)
+            audioCaptureSource = source
+            audioDspProcessor = processor
 
-                if (!hasPermission) {
-                    addLog("Record Audio Permission missing. Running simulation.")
+            val started = source.start(
+                onFrame = { frame ->
+                    processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                        ?.let { publishAudioDspResult(it) }
+                },
+                onLog = { addLog(it) },
+                isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
+                onError = {
+                    audioCaptureSource = null
+                    audioDspProcessor = null
                     runAudioSimulationEngine()
-                    return
                 }
-
-                val vis = Visualizer(0)
-                com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: ON_DEVICE initialized")
-                vis.captureSize = Visualizer.getCaptureSizeRange()[1]
-                
-                // DSP State Variables
-                var smoothedBass = 0.0f
-                var smoothedMid = 0.0f
-                var smoothedHigh = 0.0f
-                var continuousHueOffset = 0.0f
-                var whiteHotFlashOffset = 1.0f
-                var beatHueOffset = 0.0f
-                var maxObservedBass = 20.0f
-                var maxObservedMid = 20.0f
-                
-                val bassHistory = FloatArray(86)
-                var bassHistoryIdx = 0
-                var bassHistorySum = 0.0f
-                var bassHistoryCount = 0
-                var lastBeatTime = 0L
-                val beatDetector = BeatDetector()
-                var beatPulsePeak = 0.0f
-                var lastBeatFlashTime = 0L
-                var currentPaletteIndex = 0
-                val palettes = arrayOf(0f, 60f, 120f, 180f, 240f, 300f)
-
-                val noiseHistory = FloatArray(86)
-                var noiseHistoryIdx = 0
-                var noiseHistoryCount = 0
-
-                val uiAmplitudes8 = FloatArray(8)
-                var maxUiObserved = 10.0f
-                val maxPerBandObserved = FloatArray(8) { 10.0f }
-                var silenceStartTime = 0L
-                
-                var smoothedHue = 0.0f
-
-                // Sustained energy section-change variables
-                val energyWindowSize = 250 // ~6 seconds
-                val energyHistory = FloatArray(energyWindowSize)
-                var energyHistoryIdx = 0
-                var energyHistorySum = 0.0f
-                var energyHistorySqSum = 0.0f
-                var energyHistoryCount = 0
-
-                val shortWindowSize = 43 // ~1 second
-                val shortHistory = FloatArray(shortWindowSize)
-                var shortHistoryIdx = 0
-                var shortHistorySum = 0.0f
-                var shortHistoryCount = 0
-
-                var lastFftTime = 0L
-
-                vis.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                        if (fft == null || !_uiState.value.isAudioSyncRunning) return
-                        
-                        val nowElapsed = android.os.SystemClock.elapsedRealtime()
-                        if (lastFftTime != 0L) {
-                            val interval = nowElapsed - lastFftTime
-                            com.example.DiagnosticLogger.log(
-                                "AudioCapture",
-                                "FFT capture interval: ${interval}ms, mode=on_device"
-                            )
-                        }
-                        lastFftTime = nowElapsed
-                        
-                        val len = fft.size
-                        val numBins = len / 2
-                        if (numBins < 349) return
-                        
-                        val magnitude = FloatArray(numBins)
-                        val realBins = FloatArray(numBins)
-                        val imagBins = FloatArray(numBins)
-                        magnitude[0] = Math.abs(fft[0].toInt()).toFloat()
-                        realBins[0] = fft[0].toFloat()
-                        imagBins[0] = 0.0f
-                        for (k in 1 until numBins) {
-                            val r = fft[2 * k].toFloat()
-                            val i = fft[2 * k + 1].toFloat()
-                            magnitude[k] = Math.sqrt((r * r + i * i).toDouble()).toFloat()
-                            realBins[k] = r
-                            imagBins[k] = i
-                        }
-
-                        // Calculate frame average magnitude (excluding DC, up to minOf(349, numBins))
-                        val searchLimit = minOf(349, numBins)
-                        var magnitudeSum = 0.0f
-                        var magnitudeCount = 0
-                        for (k in 1 until searchLimit) {
-                            magnitudeSum += magnitude[k]
-                            magnitudeCount++
-                        }
-                        val frameAvgMag = if (magnitudeCount > 0) magnitudeSum / magnitudeCount else 0.0f
-
-                        // Update rolling buffer
-                        noiseHistory[noiseHistoryIdx] = frameAvgMag
-                        noiseHistoryIdx = (noiseHistoryIdx + 1) % 86
-                        if (noiseHistoryCount < 86) noiseHistoryCount++
-
-                        // Calculate 10th percentile of recent magnitudes
-                        val noiseFloor = if (noiseHistoryCount > 0) {
-                            val activeHistory = noiseHistory.copyOfRange(0, noiseHistoryCount)
-                            activeHistory.sort()
-                            val idx = (noiseHistoryCount * 0.1f).toInt().coerceIn(0, noiseHistoryCount - 1)
-                            activeHistory[idx]
-                        } else {
-                            0.0f
-                        }
-
-                        // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
-                        val threshold = noiseFloor * 1.5f
-                        for (k in 0 until numBins) {
-                            if (magnitude[k] < threshold) {
-                                magnitude[k] = 0.0f
-                                realBins[k] = 0.0f
-                                imagBins[k] = 0.0f
-                            }
-                        }
-
-                        val rateHz = if (samplingRate > 0) samplingRate / 1000.0f else 44100.0f
-                        val state = _uiState.value
-                        
-                        var bassEnergy = 0.0f
-                        for (k in 1..3) bassEnergy += magnitude[k]
-                        val bassVal = (bassEnergy / 3.0f) * state.bassGain
-
-                        var midEnergy = 0.0f
-                        for (k in 4..46) midEnergy += magnitude[k]
-                        val midVal = (midEnergy / 43.0f) * state.midGain
-
-                        var highEnergy = 0.0f
-                        for (k in 47..348) highEnergy += magnitude[k]
-                        val highVal = (highEnergy / 302.0f) * state.highGain
-
-                        val totalEnergy = bassVal + midVal + highVal
-
-                        // 1. Add totalEnergy to 6-second window for mean and variance
-                        val oldEnergy = energyHistory[energyHistoryIdx]
-                        energyHistory[energyHistoryIdx] = totalEnergy
-                        energyHistorySum = energyHistorySum - oldEnergy + totalEnergy
-                        energyHistorySqSum = energyHistorySqSum - (oldEnergy * oldEnergy) + (totalEnergy * totalEnergy)
-                        energyHistoryIdx = (energyHistoryIdx + 1) % energyWindowSize
-                        if (energyHistoryCount < energyWindowSize) energyHistoryCount++
-
-                        val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
-                        val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
-                        val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
-
-                        // 2. Add totalEnergy to 1-second window for detecting sustain
-                        val oldShort = shortHistory[shortHistoryIdx]
-                        shortHistory[shortHistoryIdx] = totalEnergy
-                        shortHistorySum = shortHistorySum - oldShort + totalEnergy
-                        shortHistoryIdx = (shortHistoryIdx + 1) % shortWindowSize
-                        if (shortHistoryCount < shortWindowSize) shortHistoryCount++
-
-                        val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
-
-                        val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-                        val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
-
-                        val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
-
-                        val midAlpha = if (midVal > smoothedMid) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedMid = midAlpha * midVal + (1f - midAlpha) * smoothedMid
-
-                        val highAlpha = if (highVal > smoothedHigh) state.audioSmoothingAttack else state.audioSmoothingDecay
-                        smoothedHigh = highAlpha * highVal + (1f - highAlpha) * smoothedHigh
-
-                        val oldBass = bassHistory[bassHistoryIdx]
-                        bassHistory[bassHistoryIdx] = bassVal
-                        bassHistorySum = bassHistorySum - oldBass + bassVal
-                        bassHistoryIdx = (bassHistoryIdx + 1) % 86
-                        if (bassHistoryCount < 86) bassHistoryCount++
-                        val avgBass = if (bassHistoryCount > 0) bassHistorySum / bassHistoryCount else 0.0f
-
-                        val now = System.currentTimeMillis()
-                        val result = beatDetector.process(
-                            magnitude = magnitude,
-                            realBins = realBins,
-                            imagBins = imagBins,
-                            bassRange = 1..8,
-                            midRange = 9..46,
-                            midWeight = state.midFluxWeight,
-                            thresholdMultiplier = state.beatThresholdMultiplier,
-                            minCooldownMs = 180,
-                            maxCooldownMs = state.beatCooldownMs,
-                            now = now
-                        )
-                        val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
-                        if (isBeat) {
-                            if (state.isPaletteCyclingEnabled) {
-                                currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-                            }
-                            beatPulsePeak = 0.6f + 0.4f * result.strength
-                            lastBeatFlashTime = now
-                            
-                            val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
-                            if (useWhiteFlash) {
-                                whiteHotFlashOffset = 0.0f
-                                continuousHueOffset = (continuousHueOffset + 15f) % 360f
-                            } else {
-                                beatHueOffset = 180.0f
-                                continuousHueOffset = (continuousHueOffset + 30f) % 360f
-                            }
-                        }
-
-                        // Calculate Energy Ratios (Hue)
-                        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
-                        beatHueOffset *= 0.85f
-
-                        val activeTotal = smoothedBass + smoothedMid + smoothedHigh
-                        val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
-                        val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
-
-                        continuousHueOffset = (continuousHueOffset + (activeTotal * 0.01f)) % 360f
-                        
-                        var hue = (continuousHueOffset + (midRatio * 60f) - (highRatio * 60f) + 360f + beatHueOffset) % 360f
-                        
-                        // Shift band-hue-range boundaries by 120 degrees if in sustained section
-                        if (isSustainedSection) {
-                            hue = (hue + 120.0f) % 360f
-                        }
-
-                        if (state.isPaletteCyclingEnabled) {
-                            hue = (hue + palettes[currentPaletteIndex]) % 360f
-                        }
-
-                        // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
-                        val targetRad = Math.toRadians(hue.toDouble())
-                        val targetX = Math.cos(targetRad).toFloat()
-                        val targetY = Math.sin(targetRad).toFloat()
-
-                        val smoothedRad = Math.toRadians(smoothedHue.toDouble())
-                        val curSmoothedX = Math.cos(smoothedRad).toFloat()
-                        val curSmoothedY = Math.sin(smoothedRad).toFloat()
-
-                        val nextX: Float
-                        val nextY: Float
-                        if (isBeat) {
-                            nextX = targetX
-                            nextY = targetY
-                        } else {
-                            val alpha = (0.10f * state.visualizerColorSpeed).coerceIn(0.01f, 1.0f)
-                            nextX = alpha * targetX + (1f - alpha) * curSmoothedX
-                            nextY = alpha * targetY + (1f - alpha) * curSmoothedY
-                        }
-
-                        val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-                        smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
-
-                        if (state.isAutoGainEnabled) {
-                            // Aggressive dual-rate auto-gain: rapid decay in low-amplitude states to boost quiet sections instantly
-                            val decayFactorBass = if (bassVal < avgBass) 0.97f else 0.992f
-                            maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
-                            
-                            val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
-                            maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
-                        } else {
-                            maxObservedBass = 100.0f
-                            maxObservedMid = 100.0f
-                        }
-
-                        val baseSat = if (state.isAutoGainEnabled) {
-                            (0.5f + 0.5f * (smoothedMid / maxObservedMid)).coerceIn(0.5f, 1.0f)
-                        } else {
-                            (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
-                        }
-                        val sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
-                        
-                        val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
-                        
-                        var valBase: Float
-                        val bassFloor = 0.8f * avgBass
-                        val rangeBass = maxOf(maxObservedBass - bassFloor, 5.0f)
-                        val bassContribution = if (state.isAutoGainEnabled) {
-                            ((smoothedBass - bassFloor) / rangeBass).coerceIn(0.0f, 1.0f)
-                        } else {
-                            (smoothedBass / 100.0f).coerceIn(0.0f, 1.0f)
-                        }
-
-                        val midFloor = 0.5f * (maxObservedMid * 0.1f)
-                        val rangeMid = maxOf(maxObservedMid - midFloor, 5.0f)
-                        val midContribution = ((smoothedMid - midFloor) / rangeMid).coerceIn(0.0f, 1.0f)
-
-                        var bc = bassContribution
-                        if (smoothedBass >= state.noiseGateThreshold) {
-                            bc = Math.pow(bc.toDouble(), 1.5).toFloat()
-                        } else {
-                            bc = 0.0f
-                        }
-                        valBase = maxOf(bc, midContribution * 0.3f)
-
-                        var value: Float
-                        if (state.visualizerPreset == "Beat Only") {
-                            val elapsedMs = now - lastBeatFlashTime
-                            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                            val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                            value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
-                        } else {
-                            var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
-                            baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                            val ambientLevel = baseValVal * state.ambientCapFraction
-                            val elapsedMs = now - lastBeatFlashTime
-                            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                            val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                            val beatFlash = beatEnvelope * state.audioFlashStrength
-                            value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-                        }
-
-                        val (r, g, b) = hsvToRgb(smoothedHue, sat, value)
-                        latestR = r
-                        latestG = g
-                        latestB = b
-
-                        val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
-                        queueCommand(cmd)
-
-                        val isBelow = totalEnergy < state.noiseGateThreshold
-                        val isIdle: Boolean
-                        if (isBelow) {
-                            if (silenceStartTime == 0L) {
-                                silenceStartTime = now
-                            }
-                            isIdle = (now - silenceStartTime) > state.idleTriggerDelayMs
-                        } else {
-                            silenceStartTime = 0L
-                            isIdle = false
-                        }
-
-                        val normalizedAmplitudesList = if (isIdle) {
-                            val timeSec = now / 1000.0
-                            val pulseVal = 0.15f + 0.10f * Math.sin(2.0 * Math.PI * timeSec / 4.0).toFloat()
-                            List(8) { pulseVal.coerceIn(0.05f, 1.0f) }
-                        } else if (isBelow) {
-                            List(8) { 0.05f }
-                        } else {
-                            val edges = intArrayOf(1, 2, 5, 10, 23, 49, 108, 234, 512)
-                            for (band in 0 until 8) {
-                                val startBin = edges[band]
-                                val endBin = minOf(edges[band + 1], numBins - 1)
-                                var peak = 0.0f
-                                for (bin in startBin until endBin) {
-                                    if (magnitude[bin] > peak) {
-                                        peak = magnitude[bin]
-                                    }
-                                }
-                                // Equal-loudness inspired weighting (boost higher bands)
-                                val weight = 1.0f + (band * 0.4f)
-                                uiAmplitudes8[band] = (if (endBin > startBin) peak else magnitude[startBin]) * weight
-                            }
-
-                            maxUiObserved = maxUiObserved * 0.98f
-                            var currentGlobalMax = 0.0f
-                            for (band in 0 until 8) {
-                                maxPerBandObserved[band] = maxPerBandObserved[band] * 0.98f
-                                maxPerBandObserved[band] = maxOf(maxPerBandObserved[band], uiAmplitudes8[band], 2.0f)
-                                currentGlobalMax = maxOf(currentGlobalMax, uiAmplitudes8[band])
-                            }
-                            maxUiObserved = maxOf(maxUiObserved, currentGlobalMax, 5.0f)
-
-                            uiAmplitudes8.mapIndexed { index, amp ->
-                                val bandNorm = amp / (maxPerBandObserved[index] + 0.001f)
-                                val globalNorm = amp / (maxUiObserved + 0.001f)
-                                // Blend between per-band normalization (70%) and global normalization (30%)
-                                val blended = (bandNorm * 0.7f) + (globalNorm * 0.3f)
-                                blended.coerceIn(0.05f, 1.0f)
-                            }
-                        }
-
-                        _uiState.update { 
-                            it.copy(
-                                musicAmplitudes = normalizedAmplitudesList,
-                                isVisualizerIdle = isIdle,
-                                visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
-                            ) 
-                        }
-                    }
-                }, Visualizer.getMaxCaptureRate(), false, true)
-
-                vis.enabled = true
-                visualizer = vis
-                addLog("System Visualizer initialized successfully for on-device sync (direct FFT).")
-                return
-            } catch (e: Exception) {
-                addLog("Failed to initialize Visualizer: ${e.message}. Running simulation.")
-                runAudioSimulationEngine()
-                return
+            )
+            if (!started) {
+                audioCaptureSource = null
+                audioDspProcessor = null
             }
+            return
         }
 
-        audioThread = Thread {
-            val hasPermission = ContextCompat.checkSelfPermission(
-                getApplication(),
-                Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
+        // 2. "phone_mic" (and any other non-"on_device" mode) — matches the original, which had
+        // no further mode branching here and fell straight into the AudioRecord backend.
+        val source = com.example.hardware.audio.AudioRecordCaptureSource(getApplication())
+        val processor = com.example.core.audio.AudioDspProcessor(source.backend)
+        audioCaptureSource = source
+        audioDspProcessor = processor
 
-            if (!hasPermission) {
-                addLog("Record Audio Permission missing or denied. Running simulation.")
+        source.start(
+            onFrame = { frame ->
+                processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                    ?.let { publishAudioDspResult(it) }
+            },
+            onLog = { addLog(it) },
+            isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
+            onError = {
+                audioCaptureSource = null
+                audioDspProcessor = null
                 runAudioSimulationEngine()
-                return@Thread
             }
-
-            val sampleRate = 44100
-            val channelConfig = AudioFormat.CHANNEL_IN_MONO
-            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-            val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            
-            if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-                addLog("AudioRecord buffer size error, starting simulation.")
-                runAudioSimulationEngine()
-                return@Thread
-            }
-
-            var record: AudioRecord? = null
-            try {
-                record = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    sampleRate,
-                    channelConfig,
-                    audioFormat,
-                    maxOf(minBufferSize, 1024 * 2)
-                )
-
-                if (record.state != AudioRecord.STATE_INITIALIZED) {
-                    addLog("Failed to initialize AudioRecord. Starting simulation.")
-                    runAudioSimulationEngine()
-                    return@Thread
-                }
-
-                audioRecord = record
-                record.startRecording()
-                addLog("AudioRecord recording started at 44.1 kHz (buffer: 1024).")
-                com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: PHONE_MIC started successfully")
-
-                val buffer = ShortArray(1024)
-                val real = FloatArray(1024)
-                val imag = FloatArray(1024)
-
-                // Precompute Hamming Window
-                val hammingWindow = FloatArray(1024) { i ->
-                    0.54f - 0.46f * Math.cos(2.0 * Math.PI * i / 1023.0).toFloat()
-                }
-
-                // DSP State Variables
-                var smoothedBass = 0.0f
-                var smoothedMid = 0.0f
-                var smoothedHigh = 0.0f
-                var continuousHueOffset = 0.0f
-                var whiteHotFlashOffset = 1.0f
-                var beatHueOffset = 0.0f
-                var maxObservedBass = 10.0f
-                var maxObservedMid = 10.0f
-                
-                // 2-second rolling bass history window (~86 frames at 23ms per frame)
-                val bassHistory = FloatArray(86)
-                var bassHistoryIdx = 0
-                var bassHistorySum = 0.0f
-                var bassHistoryCount = 0
-                var lastBeatTime = 0L
-                val beatDetector = BeatDetector()
-                var beatPulsePeak = 0.0f
-                var lastBeatFlashTime = 0L
-                var currentPaletteIndex = 0
-                val palettes = arrayOf(0f, 60f, 120f, 180f, 240f, 300f)
-
-                var smoothedHue = 0.0f
-
-                val noiseHistory = FloatArray(86)
-                var noiseHistoryIdx = 0
-                var noiseHistoryCount = 0
-
-                // UI visualizer spectrum mapping
-                val uiAmplitudes8 = FloatArray(8)
-                var maxUiObserved = 10.0f
-                val maxPerBandObserved = FloatArray(8) { 10.0f }
-                var silenceStartTime = 0L
-
-                // Sustained energy section-change variables
-                val energyWindowSize = 250 // ~6 seconds
-                val energyHistory = FloatArray(energyWindowSize)
-                var energyHistoryIdx = 0
-                var energyHistorySum = 0.0f
-                var energyHistorySqSum = 0.0f
-                var energyHistoryCount = 0
-
-                val shortWindowSize = 43 // ~1 second
-                val shortHistory = FloatArray(shortWindowSize)
-                var shortHistoryIdx = 0
-                var shortHistorySum = 0.0f
-                var shortHistoryCount = 0
-
-                var lastReadTime = 0L
-
-                while (!Thread.currentThread().isInterrupted && audioRecord != null && _uiState.value.isAudioSyncRunning) {
-                    val nowElapsed = android.os.SystemClock.elapsedRealtime()
-                    if (lastReadTime != 0L) {
-                        val interval = nowElapsed - lastReadTime
-                        com.example.DiagnosticLogger.log(
-                            "AudioCapture",
-                            "MIC read callback interval: ${interval}ms, mode=phone_mic"
-                        )
-                    }
-                    lastReadTime = nowElapsed
-
-                    val readResult = record.read(buffer, 0, 1024)
-                    if (readResult <= 0) {
-                        if (readResult == AudioRecord.ERROR_INVALID_OPERATION || readResult == AudioRecord.ERROR_BAD_VALUE) {
-                            break
-                        }
-                        continue
-                    }
-
-                    // Copy raw PCM data to float array and apply Hamming Window
-                    for (i in 0 until 1024) {
-                        val sample = if (i < readResult) buffer[i].toFloat() else 0.0f
-                        real[i] = sample * hammingWindow[i]
-                        imag[i] = 0.0f
-                    }
-
-                    // Compute FFT
-                    Fft.fft(real, imag)
-
-                    // Compute spectral magnitudes
-                    val magnitude = FloatArray(512)
-                    for (k in 0 until 512) {
-                        magnitude[k] = Math.sqrt((real[k] * real[k] + imag[k] * imag[k]).toDouble()).toFloat()
-                    }
-
-                    // Calculate frame average magnitude (excluding DC, up to minOf(349, 512))
-                    val searchLimit = 349
-                    var magnitudeSum = 0.0f
-                    var magnitudeCount = 0
-                    for (k in 1 until searchLimit) {
-                        magnitudeSum += magnitude[k]
-                        magnitudeCount++
-                    }
-                    val frameAvgMag = if (magnitudeCount > 0) magnitudeSum / magnitudeCount else 0.0f
-
-                    // Update rolling buffer
-                    noiseHistory[noiseHistoryIdx] = frameAvgMag
-                    noiseHistoryIdx = (noiseHistoryIdx + 1) % 86
-                    if (noiseHistoryCount < 86) noiseHistoryCount++
-
-                    // Calculate 10th percentile of recent magnitudes
-                    val noiseFloor = if (noiseHistoryCount > 0) {
-                        val activeHistory = noiseHistory.copyOfRange(0, noiseHistoryCount)
-                        activeHistory.sort()
-                        val idx = (noiseHistoryCount * 0.1f).toInt().coerceIn(0, noiseHistoryCount - 1)
-                        activeHistory[idx]
-                    } else {
-                        0.0f
-                    }
-
-                    // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
-                    val threshold = noiseFloor * 1.5f
-                    for (k in 0 until 512) {
-                        if (magnitude[k] < threshold) {
-                            magnitude[k] = 0.0f
-                            real[k] = 0.0f
-                            imag[k] = 0.0f
-                        }
-                    }
-
-                    val state = _uiState.value
-                    // Group frequency bins (each bin has width 44100 / 1024 ≈ 43.07 Hz)
-                    // Bass Band: 20Hz - 150Hz (bins 1 to 3)
-                    var bassEnergy = 0.0f
-                    for (k in 1..3) bassEnergy += magnitude[k]
-                    val bassVal = (bassEnergy / 3.0f) * state.bassGain
-
-                    // Mid Band: 150Hz - 2000Hz (bins 4 to 46)
-                    var midEnergy = 0.0f
-                    for (k in 4..46) midEnergy += magnitude[k]
-                    val midVal = (midEnergy / 43.0f) * state.midGain
-
-                    // High Band: 2000Hz - 15kHz (bins 47 to 348)
-                    var highEnergy = 0.0f
-                    for (k in 47..348) highEnergy += magnitude[k]
-                    val highVal = (highEnergy / 302.0f) * state.highGain
-
-                    val totalEnergy = bassVal + midVal + highVal
-
-                    // 1. Add totalEnergy to 6-second window for mean and variance
-                    val oldEnergy = energyHistory[energyHistoryIdx]
-                    energyHistory[energyHistoryIdx] = totalEnergy
-                    energyHistorySum = energyHistorySum - oldEnergy + totalEnergy
-                    energyHistorySqSum = energyHistorySqSum - (oldEnergy * oldEnergy) + (totalEnergy * totalEnergy)
-                    energyHistoryIdx = (energyHistoryIdx + 1) % energyWindowSize
-                    if (energyHistoryCount < energyWindowSize) energyHistoryCount++
-
-                    val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
-                    val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
-                    val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
-
-                    // 2. Add totalEnergy to 1-second window for detecting sustain
-                    val oldShort = shortHistory[shortHistoryIdx]
-                    shortHistory[shortHistoryIdx] = totalEnergy
-                    shortHistorySum = shortHistorySum - oldShort + totalEnergy
-                    shortHistoryIdx = (shortHistoryIdx + 1) % shortWindowSize
-                    if (shortHistoryCount < shortWindowSize) shortHistoryCount++
-
-                    val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
-
-                    val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-                    val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
-
-                    // Apply Dynamic Exponential Moving Average (EMA) Temporal Smoothing
-                    val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
-
-                    val midAlpha = if (midVal > smoothedMid) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedMid = midAlpha * midVal + (1f - midAlpha) * smoothedMid
-
-                    val highAlpha = if (highVal > smoothedHigh) state.audioSmoothingAttack else state.audioSmoothingDecay
-                    smoothedHigh = highAlpha * highVal + (1f - highAlpha) * smoothedHigh
-
-                    // Track rolling 2-second average of bass energy
-                    val oldBass = bassHistory[bassHistoryIdx]
-                    bassHistory[bassHistoryIdx] = bassVal
-                    bassHistorySum = bassHistorySum - oldBass + bassVal
-                    bassHistoryIdx = (bassHistoryIdx + 1) % 86
-                    if (bassHistoryCount < 86) bassHistoryCount++
-                    val avgBass = if (bassHistoryCount > 0) bassHistorySum / bassHistoryCount else 0.0f
-
-                    val now = System.currentTimeMillis()
-                    val result = beatDetector.process(
-                        magnitude = magnitude,
-                        realBins = real,
-                        imagBins = imag,
-                        bassRange = 1..8,
-                        midRange = 9..46,
-                        midWeight = state.midFluxWeight,
-                        thresholdMultiplier = state.beatThresholdMultiplier,
-                        minCooldownMs = 180,
-                        maxCooldownMs = state.beatCooldownMs,
-                        now = now
-                    )
-                    val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
-                    if (isBeat) {
-                        if (state.isPaletteCyclingEnabled) {
-                            currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-                        }
-                        beatPulsePeak = 0.6f + 0.4f * result.strength
-                        lastBeatFlashTime = now
-                        val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
-                        if (useWhiteFlash) {
-                            whiteHotFlashOffset = 0.0f
-                            continuousHueOffset = (continuousHueOffset + 15f) % 360f
-                        } else {
-                            beatHueOffset = 180.0f
-                            continuousHueOffset = (continuousHueOffset + 30f) % 360f
-                        }
-                    }
-
-                    // Calculate Energy Ratios (Hue)
-                    whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
-                    beatHueOffset *= 0.85f
-
-                    val activeTotal = smoothedBass + smoothedMid + smoothedHigh
-                    val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
-                    val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
-
-                    continuousHueOffset = (continuousHueOffset + (activeTotal * 0.01f)) % 360f
-                    
-                    var hue = (continuousHueOffset + (midRatio * 60f) - (highRatio * 60f) + 360f + beatHueOffset) % 360f
-                    
-                    // Shift band-hue-range boundaries by 120 degrees if in sustained section
-                    if (isSustainedSection) {
-                        hue = (hue + 120.0f) % 360f
-                    }
-
-                    // Shift Hue based on active baseline color palette from beat registration
-                    if (state.isPaletteCyclingEnabled) {
-                        hue = (hue + palettes[currentPaletteIndex]) % 360f
-                    }
-
-                    // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
-                    val targetRad = Math.toRadians(hue.toDouble())
-                    val targetX = Math.cos(targetRad).toFloat()
-                    val targetY = Math.sin(targetRad).toFloat()
-
-                    val smoothedRad = Math.toRadians(smoothedHue.toDouble())
-                    val curSmoothedX = Math.cos(smoothedRad).toFloat()
-                    val curSmoothedY = Math.sin(smoothedRad).toFloat()
-
-                    val nextX: Float
-                    val nextY: Float
-                    if (isBeat) {
-                        nextX = targetX
-                        nextY = targetY
-                    } else {
-                        val alpha = (0.10f * state.visualizerColorSpeed).coerceIn(0.01f, 1.0f)
-                        nextX = alpha * targetX + (1f - alpha) * curSmoothedX
-                        nextY = alpha * targetY + (1f - alpha) * curSmoothedY
-                    }
-
-                    val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-                    smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
-
-                    // Normalize Saturation (Mid Band) and Value (Bass Band) using rolling max auto-gain
-                    if (state.isAutoGainEnabled) {
-                        // Aggressive dual-rate auto-gain using instant bassVal instead of smoothed to maintain snappiness
-                        val decayFactorBass = if (bassVal < avgBass) 0.97f else 0.992f
-                        maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
-                        
-                        val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
-                        maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
-                    } else {
-                        maxObservedBass = 100.0f
-                        maxObservedMid = 100.0f
-                    }
-
-                    val baseSat = if (state.isAutoGainEnabled) {
-                        (0.4f + 0.6f * (smoothedMid / maxObservedMid)).coerceIn(0.4f, 1.0f)
-                    } else {
-                        (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
-                    }
-                    val sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
-                    
-                    val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
-                    
-                    var valBase: Float
-                    val bassFloor = 0.8f * avgBass
-                    val rangeBass = maxOf(maxObservedBass - bassFloor, 5.0f)
-                    val bassContribution = if (state.isAutoGainEnabled) {
-                        ((smoothedBass - bassFloor) / rangeBass).coerceIn(0.0f, 1.0f)
-                    } else {
-                        (smoothedBass / 100.0f).coerceIn(0.0f, 1.0f)
-                    }
-
-                    val midFloor = 0.5f * (maxObservedMid * 0.1f)
-                    val rangeMid = maxOf(maxObservedMid - midFloor, 5.0f)
-                    val midContribution = ((smoothedMid - midFloor) / rangeMid).coerceIn(0.0f, 1.0f)
-
-                    var bc = bassContribution
-                    if (smoothedBass >= state.noiseGateThreshold) {
-                        bc = Math.pow(bc.toDouble(), 1.5).toFloat()
-                    } else {
-                        bc = 0.0f
-                    }
-                    valBase = maxOf(bc, midContribution * 0.3f)
-
-                    var value: Float
-                    if (state.visualizerPreset == "Beat Only") {
-                        val elapsedMs = now - lastBeatFlashTime
-                        val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                        val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                        value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
-                    } else {
-                        var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
-                        baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-                        val ambientLevel = baseValVal * state.ambientCapFraction
-                        val elapsedMs = now - lastBeatFlashTime
-                        val t = elapsedMs.toFloat() / state.beatFlashDecayMs
-                        val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-                        val beatFlash = beatEnvelope * state.audioFlashStrength
-                        value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-                    }
-
-                    // Convert HSV to standard RGB values
-                    val (r, g, b) = hsvToRgb(smoothedHue, sat, value)
-                    latestR = r
-                    latestG = g
-                    latestB = b
-
-                    val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
-                    queueCommand(cmd)
-
-                    val isBelow = totalEnergy < state.noiseGateThreshold
-                    val isIdle: Boolean
-                    if (isBelow) {
-                        if (silenceStartTime == 0L) {
-                            silenceStartTime = now
-                        }
-                        isIdle = (now - silenceStartTime) > state.idleTriggerDelayMs
-                    } else {
-                        silenceStartTime = 0L
-                        isIdle = false
-                    }
-
-                    val normalizedAmplitudesList = if (isIdle) {
-                        val timeSec = now / 1000.0
-                        val pulseVal = 0.15f + 0.10f * Math.sin(2.0 * Math.PI * timeSec / 4.0).toFloat()
-                        List(8) { pulseVal.coerceIn(0.05f, 1.0f) }
-                    } else if (isBelow) {
-                        List(8) { 0.05f }
-                    } else {
-                        val edges = intArrayOf(1, 2, 5, 10, 23, 49, 108, 234, 512)
-                        for (band in 0 until 8) {
-                            val startBin = edges[band]
-                            val endBin = minOf(edges[band + 1], 511)
-                            var peak = 0.0f
-                            for (bin in startBin until endBin) {
-                                if (magnitude[bin] > peak) {
-                                    peak = magnitude[bin]
-                                }
-                            }
-                            // Equal-loudness inspired weighting (boost higher bands)
-                            val weight = 1.0f + (band * 0.4f)
-                            uiAmplitudes8[band] = (if (endBin > startBin) peak else magnitude[startBin]) * weight
-                        }
-
-                        maxUiObserved = maxUiObserved * 0.98f
-                        var currentGlobalMax = 0.0f
-                        for (band in 0 until 8) {
-                            maxPerBandObserved[band] = maxPerBandObserved[band] * 0.98f
-                            maxPerBandObserved[band] = maxOf(maxPerBandObserved[band], uiAmplitudes8[band], 2.0f)
-                            currentGlobalMax = maxOf(currentGlobalMax, uiAmplitudes8[band])
-                        }
-                        maxUiObserved = maxOf(maxUiObserved, currentGlobalMax, 5.0f)
-
-                        uiAmplitudes8.mapIndexed { index, amp ->
-                            val bandNorm = amp / (maxPerBandObserved[index] + 0.001f)
-                            val globalNorm = amp / (maxUiObserved + 0.001f)
-                            // Blend between per-band normalization (70%) and global normalization (30%)
-                            val blended = (bandNorm * 0.7f) + (globalNorm * 0.3f)
-                            blended.coerceIn(0.05f, 1.0f)
-                        }
-                    }
-
-                    _uiState.update {
-                        it.copy(
-                            musicAmplitudes = normalizedAmplitudesList,
-                            isVisualizerIdle = isIdle,
-                            visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                addLog("Audio capture thread error: ${e.message}")
-                runAudioSimulationEngine()
-            } finally {
-                try {
-                    record?.stop()
-                } catch (e: Exception) {}
-                try {
-                    record?.release()
-                } catch (e: Exception) {}
-            }
-        }.apply {
-            name = "AudioCaptureThread"
-            priority = Thread.MAX_PRIORITY - 1
-            start()
-        }
+        )
     }
 
     private fun runAudioSimulationEngine() {
@@ -4926,7 +3594,7 @@ class RgbControllerViewModel(
 
         var lastSimTime = 0L
 
-        while (!Thread.currentThread().isInterrupted && _uiState.value.isAudioSyncRunning) {
+        while (!Thread.currentThread().isInterrupted && _uiState.value.audioSettings.isAudioSyncRunning) {
             val nowElapsed = android.os.SystemClock.elapsedRealtime()
             if (lastSimTime != 0L) {
                 val interval = nowElapsed - lastSimTime
@@ -4937,7 +3605,7 @@ class RgbControllerViewModel(
             }
             lastSimTime = nowElapsed
 
-            val state = _uiState.value
+            val state = _uiState.value.audioSettings
             val startTime = System.currentTimeMillis()
             val timeSec = startTime / 1000.0
 
@@ -5164,9 +3832,11 @@ class RgbControllerViewModel(
             }
 
             _uiState.update {
+                it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = isIdle))
+            }
+            _telemetry.update {
                 it.copy(
                     musicAmplitudes = normalizedAmplitudesList,
-                    isVisualizerIdle = isIdle,
                     visualizerHue = if (isIdle) it.visualizerHue else smoothedHue
                 )
             }
@@ -5189,64 +3859,9 @@ class RgbControllerViewModel(
         return com.example.core.color.ColorConverter.hsvToRgb(h, s, v)
     }
 
-    // In-place Radix-2 Cooley-Tukey Fast Fourier Transform
-    private object Fft {
-        fun fft(real: FloatArray, imag: FloatArray) {
-            val n = real.size
-            if (n == 0) return
-            
-            // Bit-reversal permutation
-            var j = 0
-            for (i in 0 until n) {
-                if (i < j) {
-                    val tempR = real[i]
-                    real[i] = real[j]
-                    real[j] = tempR
-                    
-                    val tempI = imag[i]
-                    imag[i] = imag[j]
-                    imag[j] = tempI
-                }
-                var m = n shr 1
-                while (m >= 1 && j >= m) {
-                    j -= m
-                    m = m shr 1
-                }
-                j += m
-            }
-            
-            // Cooley-Tukey decimation-in-time
-            var len = 2
-            while (len <= n) {
-                val ang = -2.0 * Math.PI / len
-                val wlenR = Math.cos(ang).toFloat()
-                val wlenI = Math.sin(ang).toFloat()
-                for (i in 0 until n step len) {
-                    var wR = 1.0f
-                    var wI = 0.0f
-                    val halfLen = len shr 1
-                    for (k in 0 until halfLen) {
-                        val uR = real[i + k]
-                        val uI = imag[i + k]
-                        
-                        val tR = real[i + k + halfLen] * wR - imag[i + k + halfLen] * wI
-                        val tI = real[i + k + halfLen] * wI + imag[i + k + halfLen] * wR
-                        
-                        real[i + k] = uR + tR
-                        imag[i + k] = uI + tI
-                        
-                        real[i + k + halfLen] = uR - tR
-                        imag[i + k + halfLen] = uI - tI
-                        
-                        val nextWR = wR * wlenR - wI * wlenI
-                        wI = wR * wlenI + wI * wlenR
-                        wR = nextWR
-                    }
-                }
-                len = len shl 1
-            }
-        }
-    }
+    // Phase 4: the FFT utility that used to live here moved to
+    // com.example.hardware.audio.Fft (internal object, algorithm unchanged) — its only caller,
+    // the AudioRecord capture loop, now lives in AudioRecordCaptureSource.
 
     override fun onCleared() {
         if (instance === this) {
