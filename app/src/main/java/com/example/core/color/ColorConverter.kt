@@ -2,6 +2,7 @@ package com.example.core.color
 
 import kotlin.math.pow
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 object ColorConverter {
     /**
@@ -93,4 +94,20 @@ object ColorConverter {
 
         return Triple(rCie, gCie, bCie)
     }
+
+    /**
+     * Gamma-decode a single sRGB channel (0-255) to linear light (0.0-1.0).
+     */
+    fun srgbToLinear(srgb: Int): Double = (srgb / 255.0).pow(2.2)
+
+    /**
+     * Gamma-encode a linear-light channel (0.0-1.0) back to sRGB (0-255).
+     */
+    fun linearToSrgb(linear: Double): Int = (linear.pow(1.0 / 2.2) * 255.0).roundToInt().coerceIn(0, 255)
+
+    /**
+     * Rec. 709 relative luminance. Scale-agnostic: pass 0-255 or 0.0-1.0 channels
+     * consistently and the result is on the same scale.
+     */
+    fun luminance(r: Double, g: Double, b: Double): Double = 0.2126 * r + 0.7152 * g + 0.0722 * b
 }

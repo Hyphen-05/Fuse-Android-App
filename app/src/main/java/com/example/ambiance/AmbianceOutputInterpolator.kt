@@ -3,9 +3,8 @@ package com.example.ambiance
 import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
+import com.example.core.color.ColorConverter
 import com.example.domain.AmbianceCommandSink
-import kotlin.math.pow
-import kotlin.math.roundToInt
 
 class AmbianceOutputInterpolator(
     private val context: Context,
@@ -52,9 +51,9 @@ class AmbianceOutputInterpolator(
 
     fun updateTargetColor(color: Triple<Int, Int, Int>, isSceneCut: Boolean) {
         handler?.post {
-            val linR = srgbToLinear(color.first)
-            val linG = srgbToLinear(color.second)
-            val linB = srgbToLinear(color.third)
+            val linR = ColorConverter.srgbToLinear(color.first)
+            val linG = ColorConverter.srgbToLinear(color.second)
+            val linB = ColorConverter.srgbToLinear(color.third)
             
             targetLinR = linR
             targetLinG = linG
@@ -106,9 +105,9 @@ class AmbianceOutputInterpolator(
     }
 
     private fun writeIfChanged() {
-        val r = linearToSrgb(currentLinR)
-        val g = linearToSrgb(currentLinG)
-        val b = linearToSrgb(currentLinB)
+        val r = ColorConverter.linearToSrgb(currentLinR)
+        val g = ColorConverter.linearToSrgb(currentLinG)
+        val b = ColorConverter.linearToSrgb(currentLinB)
         val currentSrgb = Triple(r, g, b)
 
         if (currentSrgb != lastWrittenSrgb) {
@@ -116,7 +115,4 @@ class AmbianceOutputInterpolator(
             lastWrittenSrgb = currentSrgb
         }
     }
-
-    private fun srgbToLinear(srgb: Int): Double = (srgb / 255.0).pow(2.2)
-    private fun linearToSrgb(linear: Double): Int = (linear.pow(1.0 / 2.2) * 255.0).roundToInt().coerceIn(0, 255)
 }
