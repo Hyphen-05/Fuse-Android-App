@@ -48,12 +48,21 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
             vis.captureSize = Visualizer.getCaptureSizeRange()[1]
 
             var lastFftTime = 0L
+            var loggedBackendInfo = false
 
             vis.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                 override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
 
                 override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
                     if (fft == null || !isRunning()) return
+
+                    if (!loggedBackendInfo) {
+                        loggedBackendInfo = true
+                        DiagnosticLogger.log(
+                            "BackendInfo",
+                            "backend=on_device samplingRate=${samplingRate}Hz captureSize=${vis.captureSize} numBins=${fft.size / 2}"
+                        )
+                    }
 
                     val nowElapsed = android.os.SystemClock.elapsedRealtime()
                     if (lastFftTime != 0L) {

@@ -1,6 +1,7 @@
 package com.example.core.audio
 
 import com.example.AudioSettingsState
+import com.example.DiagnosticLogger
 import com.example.core.color.ColorConverter
 import com.example.hardware.audio.AudioBackend
 import com.example.hardware.audio.AudioCaptureFrame
@@ -90,6 +91,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private var shortHistoryIdx = 0
     private var shortHistorySum = 0.0f
     private var shortHistoryCount = 0
+
+    // Diagnostic-only: throttles the periodic (non-beat) confidence sample below.
+    private var lastDiagnosticSampleMs = 0L
 
     /**
      * Runs one frame through the DSP pipeline. Returns null if the frame should be skipped
@@ -208,6 +212,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             now = nowMs
         )
         val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
+        if (isBeat || nowMs - lastDiagnosticSampleMs >= 1500L) {
+            if (!isBeat) lastDiagnosticSampleMs = nowMs
+            DiagnosticLogger.log(
+                "BeatConfidence",
+                "backend=${backend.name} isBeat=$isBeat strength=${result.strength} confidence=${result.confidence} " +
+                    "bpm=${result.bpm} bpmConfidence=${result.bpmConfidence}"
+            )
+        }
         if (isBeat) {
             if (state.isPaletteCyclingEnabled) {
                 currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size

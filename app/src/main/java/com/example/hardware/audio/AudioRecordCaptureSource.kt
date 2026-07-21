@@ -80,6 +80,10 @@ class AudioRecordCaptureSource(private val context: Context) : AudioCaptureSourc
                 record.startRecording()
                 onLog("AudioRecord recording started at 44.1 kHz (buffer: 1024).")
                 DiagnosticLogger.log("AudioCapture", "Active Engine: PHONE_MIC started successfully")
+                DiagnosticLogger.log(
+                    "BackendInfo",
+                    "backend=phone_mic samplingRate=${sampleRate}Hz captureSize=1024 numBins=512"
+                )
 
                 val buffer = ShortArray(1024)
                 val real = FloatArray(1024)
