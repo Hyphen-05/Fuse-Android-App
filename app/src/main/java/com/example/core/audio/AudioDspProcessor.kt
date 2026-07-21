@@ -469,7 +469,19 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         } else {
             var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
             baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-            val ambientLevel = baseValVal * state.ambientCapFraction
+            // Anticipatory dimming (mapping-proposal-audio-to-led-2026-07-21.md §4, stage 4 —
+            // opt-in, purely additive: a new *consumer* of BeatDetector.nextPredictedBeatMs, zero
+            // change to detection/tuning math). Pre-dips the ambient contribution up to 10% over
+            // the ~80ms leading into a predicted beat, so the subsequent flash reads as a bigger
+            // jump for free. Ramps back to 0 immediately once the window passes; no effect at all
+            // without a tempo lock (nextPredictedBeatMs null) or outside the 80ms window.
+            val msUntilPredictedBeat = result.nextPredictedBeatMs?.let { it - nowMs }
+            val preDip = if (msUntilPredictedBeat != null && msUntilPredictedBeat in 0..80L) {
+                0.10f * (1f - msUntilPredictedBeat / 80f)
+            } else {
+                0f
+            }
+            val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip)
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / state.beatFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
