@@ -117,6 +117,35 @@ data class AudioSettingsState(
     // choose their own flash dynamic range — same formula shape, now parameterized.
     val flashFloor: Float = 0.6f,
     val flashRange: Float = 0.4f,
+    // --- Mapping-layer stage 2: anchor+breath hue model (see mapping-proposal-audio-to-led-
+    // 2026-07-21.md §4/§5). Replaces the old five-source additive hue pile (continuousHueOffset's
+    // per-beat jump + drift, beatHueOffset's 180° decaying impulse, spectral tilt, binary sustain
+    // shift, palette-index offset) with two bounded components: a discrete `anchor` that only
+    // moves on qualifying events, and a bounded `breath` tilt around it.
+    // Matches the "Default"/Balanced preset's table value (§5) so a fresh install with no
+    // SetVisualizerPreset ever dispatched still starts consistent with that preset.
+    val anchorBeatsPerAdvance: Int = 2,
+    // Fallback anchor-advance timer (ms), used only when a preset wants color variety even
+    // without confident beats (Ambient Chill's "16 beats, or 30s timer if no BPM lock"). 0 =
+    // disabled. Not named in the proposal's own per-preset param table (§5) but required to
+    // implement that one preset's documented fallback behavior.
+    val anchorTimerMs: Long = 0L,
+    val hueAnchorJumpDeg: Float = 60f,
+    val hueJumpConfidenceGate: Float = 0.35f,
+    val hueBreathRangeDeg: Float = 25f,
+    // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)
+    // spectral tilt, per §5's per-preset reasoning ("keeps the color leaning with the low end its
+    // identity is built on"). Not a named §5 param table column — a structural flag needed to
+    // implement that one preset's documented divergence.
+    val breathUsesBassRatio: Boolean = false,
+    val hueDriftDegPerSec: Float = 4f,
+    val hueDegreesPerBeat: Float = 0f,
+    // One of "NONE" / "HUE_SHIFT" / "SAT_BOOST" / "BRIGHTNESS_SWELL" — see §4's sustain-response
+    // list. String-typed to match the existing visualizerPreset/musicMode string-enum convention
+    // in this state class rather than introducing a new sealed-type pattern here.
+    val sustainResponse: String = "HUE_SHIFT",
+    val sustainRampMs: Float = 2000f,
+    val whiteFlashRecoveryMs: Float = 1000f,
     val idleTriggerDelayMs: Long = 2500L,
     val detectedAudioDeviceName: String? = null,
     val activeAudioDeviceIdentifier: String? = null

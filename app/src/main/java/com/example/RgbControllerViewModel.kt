@@ -215,6 +215,17 @@ class RgbControllerViewModel(
                 visualizerColorSpeed = prefsRepo.getAppStatePrefFloat("visualizer_color_speed", 1.0f),
                 flashFloor = prefsRepo.getAppStatePrefFloat("flash_floor", 0.6f),
                 flashRange = prefsRepo.getAppStatePrefFloat("flash_range", 0.4f),
+                anchorBeatsPerAdvance = prefsRepo.getAppStatePrefInt("anchor_beats_per_advance", 2),
+                anchorTimerMs = prefsRepo.getAppStatePrefLong("anchor_timer_ms", 0L),
+                hueAnchorJumpDeg = prefsRepo.getAppStatePrefFloat("hue_anchor_jump_deg", 60f),
+                hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
+                hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
+                breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
+                hueDriftDegPerSec = prefsRepo.getAppStatePrefFloat("hue_drift_deg_per_sec", 4f),
+                hueDegreesPerBeat = prefsRepo.getAppStatePrefFloat("hue_degrees_per_beat", 0f),
+                sustainResponse = prefsRepo.getAppStatePrefString("sustain_response", "HUE_SHIFT") ?: "HUE_SHIFT",
+                sustainRampMs = prefsRepo.getAppStatePrefFloat("sustain_ramp_ms", 2000f),
+                whiteFlashRecoveryMs = prefsRepo.getAppStatePrefFloat("white_flash_recovery_ms", 1000f),
                 idleTriggerDelayMs = prefsRepo.getAppStatePrefLong("idle_trigger_delay_ms", 2500L)
             ),
             ambianceSettings = AmbianceSettingsState(

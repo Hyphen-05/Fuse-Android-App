@@ -45,23 +45,115 @@ private data class VisualizerConfig(
     val midGain: Float, val highGain: Float, val paletteCycling: Boolean, val beatMult: Float,
     val minBrightness: Float, val colorSpeed: Float,
     val beatFlashDecayMs: Float, val ambientCapFraction: Float, val midFluxWeight: Float,
-    // Mapping-layer stage 1 (see mapping-proposal-audio-to-led-2026-07-21.md §6, stage 1):
-    // flashFloor/flashRange replace AudioDspProcessor's previously hard-coded 0.6f/0.4f. Every
-    // preset gets the same values here deliberately — this stage only wires the plumbing, it
-    // does not yet apply the per-preset table from §5 (that's stage 2).
-    val flashFloor: Float = 0.6f, val flashRange: Float = 0.4f
+    // Mapping-layer stage 1 (see mapping-proposal-audio-to-led-2026-07-21.md §6): flashFloor/
+    // flashRange replace AudioDspProcessor's previously hard-coded 0.6f/0.4f.
+    val flashFloor: Float = 0.6f, val flashRange: Float = 0.4f,
+    // Mapping-layer stage 2 — anchor+breath hue model (§4/§5). See the per-field doc comments on
+    // the matching AudioSettingsState properties for what each one means; values below implement
+    // the §5 per-preset table.
+    val anchorBeatsPerAdvance: Int = 1,
+    val anchorTimerMs: Long = 0L,
+    val hueAnchorJumpDeg: Float = 60f,
+    val hueJumpConfidenceGate: Float = 0.35f,
+    val hueBreathRangeDeg: Float = 25f,
+    val breathUsesBassRatio: Boolean = false,
+    val hueDriftDegPerSec: Float = 4f,
+    val hueDegreesPerBeat: Float = 0f,
+    val sustainResponse: String = "HUE_SHIFT",
+    val sustainRampMs: Float = 2000f,
+    val whiteFlashRecoveryMs: Float = 1000f
 )
 
-// Mirrors RgbControllerViewModel.setVisualizerPreset()'s per-preset value table (lines 2685-2693) verbatim.
+// Mirrors RgbControllerViewModel.setVisualizerPreset()'s per-preset value table (lines 2685-2693) verbatim
+// for the original 16 fields. flashFloor/flashRange/anchor.../hueBreath.../sustain.../whiteFlashRecoveryMs
+// are new (mapping-proposal-audio-to-led-2026-07-21.md §5/§6) — there is no ViewModel counterpart for
+// those yet, this reducer is their first home.
 private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset) {
-    "Punchy" -> VisualizerConfig(0.95f, 0.35f, 0.6f, 0.35f, 2000L, 8.0f, 1.2f, 1.0f, 1.0f, true, 1.3f, 0.15f, 1.5f, 140f, 0.40f, 0.20f)
-    "Smooth Flow" -> VisualizerConfig(0.25f, 0.08f, 0.00f, 0.45f, 2800L, 4.0f, 1.0f, 1.1f, 1.0f, true, 1.8f, 0.18f, 1.2f, 300f, 0.45f, 0.30f)
-    "Strobe Blast" -> VisualizerConfig(1.0f, 0.85f, 1.0f, 0.2f, 1500L, 10.0f, 1.0f, 1.0f, 1.5f, true, 1.2f, 0.10f, 2.0f, 90f, 0.25f, 0.15f)
-    "Ambient Chill" -> VisualizerConfig(0.10f, 0.02f, 0.00f, 0.65f, 5000L, 3.0f, 1.0f, 0.7f, 0.4f, true, 2.5f, 0.35f, 0.15f, 600f, 0.75f, 0.20f)
-    "Bass Thump" -> VisualizerConfig(0.90f, 0.20f, 0.5f, 0.4f, 2500L, 6.0f, 2.0f, 0.6f, 0.4f, true, 1.4f, 0.15f, 1.0f, 170f, 0.45f, 0.05f)
-    "Laser Sharp" -> VisualizerConfig(1.0f, 0.95f, 0.8f, 0.3f, 1500L, 12.0f, 1.0f, 1.0f, 1.0f, true, 1.1f, 0.10f, 3.0f, 70f, 0.20f, 0.10f)
-    "Beat Only" -> VisualizerConfig(1.0f, 0.9f, 1.0f, 0.3f, 1500L, 10.0f, 1.0f, 1.0f, 1.0f, false, 1.2f, 0.05f, 2.0f, 90f, 0.0f, 0.15f)
-    else -> VisualizerConfig(0.85f, 0.12f, 0.3f, 0.45f, 2500L, 5.0f, 1.0f, 1.0f, 1.0f, true, 1.6f, 0.15f, 1.0f, 200f, 0.40f, 0.25f)
+    "Punchy" -> VisualizerConfig(
+        attack = 0.95f, decay = 0.35f, flash = 0.6f, gamma = 0.35f, idleDelay = 2000L,
+        noiseGate = 8.0f, bassGain = 1.2f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,
+        beatMult = 1.3f, minBrightness = 0.15f, colorSpeed = 1.5f, beatFlashDecayMs = 140f,
+        ambientCapFraction = 0.40f, midFluxWeight = 0.20f,
+        flashFloor = 0.5f, flashRange = 0.5f,
+        anchorBeatsPerAdvance = 1, hueAnchorJumpDeg = 90f, hueJumpConfidenceGate = 0.45f,
+        hueBreathRangeDeg = 10f, hueDriftDegPerSec = 0f,
+        sustainResponse = "SAT_BOOST", sustainRampMs = 800f
+    )
+    "Smooth Flow" -> VisualizerConfig(
+        attack = 0.25f, decay = 0.08f, flash = 0.00f, gamma = 0.45f, idleDelay = 2800L,
+        noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.1f, highGain = 1.0f, paletteCycling = true,
+        beatMult = 1.8f, minBrightness = 0.18f, colorSpeed = 1.2f, beatFlashDecayMs = 300f,
+        ambientCapFraction = 0.45f, midFluxWeight = 0.30f,
+        // Never advances the anchor on beats — the tempo-lock showcase: all color motion is
+        // continuous, clocked to hueDegreesPerBeat, with hueDriftDegPerSec as the fallback rate
+        // before/without a BPM lock.
+        anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
+        hueBreathRangeDeg = 40f, hueDriftDegPerSec = 6f, hueDegreesPerBeat = 1.5f,
+        sustainResponse = "HUE_SHIFT", sustainRampMs = 3000f
+    )
+    "Strobe Blast" -> VisualizerConfig(
+        attack = 1.0f, decay = 0.85f, flash = 1.0f, gamma = 0.2f, idleDelay = 1500L,
+        noiseGate = 10.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.5f, paletteCycling = true,
+        beatMult = 1.2f, minBrightness = 0.10f, colorSpeed = 2.0f, beatFlashDecayMs = 90f,
+        ambientCapFraction = 0.25f, midFluxWeight = 0.15f,
+        flashFloor = 0.7f, flashRange = 0.3f,
+        anchorBeatsPerAdvance = 1, hueAnchorJumpDeg = 120f, hueJumpConfidenceGate = 0.50f,
+        hueBreathRangeDeg = 0f, hueDriftDegPerSec = 0f,
+        sustainResponse = "NONE", sustainRampMs = 0f, whiteFlashRecoveryMs = 250f
+    )
+    "Ambient Chill" -> VisualizerConfig(
+        attack = 0.10f, decay = 0.02f, flash = 0.00f, gamma = 0.65f, idleDelay = 5000L,
+        noiseGate = 3.0f, bassGain = 1.0f, midGain = 0.7f, highGain = 0.4f, paletteCycling = true,
+        beatMult = 2.5f, minBrightness = 0.35f, colorSpeed = 0.15f, beatFlashDecayMs = 600f,
+        ambientCapFraction = 0.75f, midFluxWeight = 0.20f,
+        // The anti-transient preset: long-arc anchor advance (every 16 confident beats, or a 30s
+        // timer if the detector never locks a tempo) instead of recoloring on every beat.
+        anchorBeatsPerAdvance = 16, anchorTimerMs = 30_000L, hueAnchorJumpDeg = 60f,
+        hueJumpConfidenceGate = 0.50f, hueBreathRangeDeg = 45f, hueDriftDegPerSec = 1.5f,
+        sustainResponse = "BRIGHTNESS_SWELL", sustainRampMs = 3000f
+    )
+    "Bass Thump" -> VisualizerConfig(
+        attack = 0.90f, decay = 0.20f, flash = 0.5f, gamma = 0.4f, idleDelay = 2500L,
+        noiseGate = 6.0f, bassGain = 2.0f, midGain = 0.6f, highGain = 0.4f, paletteCycling = true,
+        beatMult = 1.4f, minBrightness = 0.15f, colorSpeed = 1.0f, beatFlashDecayMs = 170f,
+        ambientCapFraction = 0.45f, midFluxWeight = 0.05f,
+        flashFloor = 0.4f, flashRange = 0.6f,
+        anchorBeatsPerAdvance = 1, hueAnchorJumpDeg = 60f, hueJumpConfidenceGate = 0.40f,
+        hueBreathRangeDeg = 15f, breathUsesBassRatio = true, hueDriftDegPerSec = 2f,
+        sustainResponse = "SAT_BOOST", sustainRampMs = 800f
+    )
+    "Laser Sharp" -> VisualizerConfig(
+        attack = 1.0f, decay = 0.95f, flash = 0.8f, gamma = 0.3f, idleDelay = 1500L,
+        noiseGate = 12.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,
+        beatMult = 1.1f, minBrightness = 0.10f, colorSpeed = 3.0f, beatFlashDecayMs = 70f,
+        ambientCapFraction = 0.20f, midFluxWeight = 0.10f,
+        flashFloor = 0.7f, flashRange = 0.3f,
+        anchorBeatsPerAdvance = 1, hueAnchorJumpDeg = 180f, hueJumpConfidenceGate = 0.60f,
+        hueBreathRangeDeg = 0f, hueDriftDegPerSec = 0f,
+        sustainResponse = "NONE", sustainRampMs = 0f, whiteFlashRecoveryMs = 120f
+    )
+    "Beat Only" -> VisualizerConfig(
+        attack = 1.0f, decay = 0.9f, flash = 1.0f, gamma = 0.3f, idleDelay = 1500L,
+        noiseGate = 10.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = false,
+        beatMult = 1.2f, minBrightness = 0.05f, colorSpeed = 2.0f, beatFlashDecayMs = 90f,
+        ambientCapFraction = 0.0f, midFluxWeight = 0.15f,
+        anchorBeatsPerAdvance = 1,
+        // Golden angle (~360/phi^2): consecutive anchor jumps never repeat or cycle visibly in
+        // short order, unlike a plain fraction of 360 (e.g. 60°'s 6-beat repeat) — replaces
+        // palette cycling (already off for this preset) as the source of per-beat color variety.
+        hueAnchorJumpDeg = 137.5f, hueJumpConfidenceGate = 0.40f,
+        hueBreathRangeDeg = 0f, hueDriftDegPerSec = 0f,
+        sustainResponse = "NONE", sustainRampMs = 0f, whiteFlashRecoveryMs = 250f
+    )
+    else -> VisualizerConfig(
+        attack = 0.85f, decay = 0.12f, flash = 0.3f, gamma = 0.45f, idleDelay = 2500L,
+        noiseGate = 5.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,
+        beatMult = 1.6f, minBrightness = 0.15f, colorSpeed = 1.0f, beatFlashDecayMs = 200f,
+        ambientCapFraction = 0.40f, midFluxWeight = 0.25f,
+        anchorBeatsPerAdvance = 2, hueAnchorJumpDeg = 60f, hueJumpConfidenceGate = 0.35f,
+        hueBreathRangeDeg = 25f, hueDriftDegPerSec = 4f,
+        sustainResponse = "HUE_SHIFT", sustainRampMs = 2000f
+    )
 }
 
 // Mirrors RgbControllerViewModel.getVisualizerPresetName() (lines 2652-2663).
@@ -138,7 +230,18 @@ fun audioSettingsReducer(
                     ambientCapFraction = config.ambientCapFraction,
                     midFluxWeight = config.midFluxWeight,
                     flashFloor = config.flashFloor,
-                    flashRange = config.flashRange
+                    flashRange = config.flashRange,
+                    anchorBeatsPerAdvance = config.anchorBeatsPerAdvance,
+                    anchorTimerMs = config.anchorTimerMs,
+                    hueAnchorJumpDeg = config.hueAnchorJumpDeg,
+                    hueJumpConfidenceGate = config.hueJumpConfidenceGate,
+                    hueBreathRangeDeg = config.hueBreathRangeDeg,
+                    breathUsesBassRatio = config.breathUsesBassRatio,
+                    hueDriftDegPerSec = config.hueDriftDegPerSec,
+                    hueDegreesPerBeat = config.hueDegreesPerBeat,
+                    sustainResponse = config.sustainResponse,
+                    sustainRampMs = config.sustainRampMs,
+                    whiteFlashRecoveryMs = config.whiteFlashRecoveryMs
                 ),
                 coreControl = state.coreControl.copy(activeFeatureName = featureName)
             )
@@ -162,7 +265,18 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("ambient_cap_fraction", config.ambientCapFraction),
                 AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", config.midFluxWeight),
                 AudioSideEffect.SaveAudioPrefFloat("flash_floor", config.flashFloor),
-                AudioSideEffect.SaveAudioPrefFloat("flash_range", config.flashRange)
+                AudioSideEffect.SaveAudioPrefFloat("flash_range", config.flashRange),
+                AudioSideEffect.SaveAudioPrefInt("anchor_beats_per_advance", config.anchorBeatsPerAdvance),
+                AudioSideEffect.SaveAudioPrefLong("anchor_timer_ms", config.anchorTimerMs),
+                AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", config.hueAnchorJumpDeg),
+                AudioSideEffect.SaveAudioPrefFloat("hue_jump_confidence_gate", config.hueJumpConfidenceGate),
+                AudioSideEffect.SaveAudioPrefFloat("hue_breath_range_deg", config.hueBreathRangeDeg),
+                AudioSideEffect.SaveAudioPrefBoolean("breath_uses_bass_ratio", config.breathUsesBassRatio),
+                AudioSideEffect.SaveAudioPrefFloat("hue_drift_deg_per_sec", config.hueDriftDegPerSec),
+                AudioSideEffect.SaveAudioPrefFloat("hue_degrees_per_beat", config.hueDegreesPerBeat),
+                AudioSideEffect.SaveAudioPrefString("sustain_response", config.sustainResponse),
+                AudioSideEffect.SaveAudioPrefFloat("sustain_ramp_ms", config.sustainRampMs),
+                AudioSideEffect.SaveAudioPrefFloat("white_flash_recovery_ms", config.whiteFlashRecoveryMs)
             )
             newState to effects
         }
@@ -483,6 +597,19 @@ fun audioSettingsReducer(
                     midFluxWeight = 0.25f,
                     flashFloor = 0.6f,
                     flashRange = 0.4f,
+                    // Resets to "Default"/Balanced's anchor+breath values, matching the reset of
+                    // visualizerPreset itself below.
+                    anchorBeatsPerAdvance = 2,
+                    anchorTimerMs = 0L,
+                    hueAnchorJumpDeg = 60f,
+                    hueJumpConfidenceGate = 0.35f,
+                    hueBreathRangeDeg = 25f,
+                    breathUsesBassRatio = false,
+                    hueDriftDegPerSec = 4f,
+                    hueDegreesPerBeat = 0f,
+                    sustainResponse = "HUE_SHIFT",
+                    sustainRampMs = 2000f,
+                    whiteFlashRecoveryMs = 1000f,
                     idleTriggerDelayMs = 2500L
                 )
             )
@@ -510,6 +637,17 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.25f),
                 AudioSideEffect.SaveAudioPrefFloat("flash_floor", 0.6f),
                 AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.4f),
+                AudioSideEffect.SaveAudioPrefInt("anchor_beats_per_advance", 2),
+                AudioSideEffect.SaveAudioPrefLong("anchor_timer_ms", 0L),
+                AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", 60f),
+                AudioSideEffect.SaveAudioPrefFloat("hue_jump_confidence_gate", 0.35f),
+                AudioSideEffect.SaveAudioPrefFloat("hue_breath_range_deg", 25f),
+                AudioSideEffect.SaveAudioPrefBoolean("breath_uses_bass_ratio", false),
+                AudioSideEffect.SaveAudioPrefFloat("hue_drift_deg_per_sec", 4f),
+                AudioSideEffect.SaveAudioPrefFloat("hue_degrees_per_beat", 0f),
+                AudioSideEffect.SaveAudioPrefString("sustain_response", "HUE_SHIFT"),
+                AudioSideEffect.SaveAudioPrefFloat("sustain_ramp_ms", 2000f),
+                AudioSideEffect.SaveAudioPrefFloat("white_flash_recovery_ms", 1000f),
                 AudioSideEffect.SaveAudioPrefLong("idle_trigger_delay_ms", 2500L)
             )
             newState to effects

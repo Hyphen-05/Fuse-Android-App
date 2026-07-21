@@ -278,4 +278,71 @@ class AudioDspProcessorTest {
             zeroedPeak < defaultPeak
         )
     }
+
+    /** Runs the same beat-driving pattern as the transient tests above, returning the highest [AudioDspResult.hue] seen. */
+    private fun maxHueAfterTransient(settings: AudioSettingsState): Float {
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        var now = 0L
+        repeat(30) {
+            processor.process(uniformFrame(1f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+            now += 20L
+        }
+        val transientTime = now
+        processor.process(uniformFrame(80f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+        now += 20L
+
+        var maxHue = 0f
+        while (now <= transientTime + 200L) {
+            val result = processor.process(uniformFrame(5f, backend = AudioBackend.AUDIO_RECORD), settings, now)!!
+            maxHue = maxOf(maxHue, result.hue)
+            now += 20L
+        }
+        return maxHue
+    }
+
+    @Test
+    fun `a qualifying beat advances the hue anchor by hueAnchorJumpDeg`() {
+        // Mapping-layer stage 2 (anchor+breath hue model). Breath/drift zeroed out so hue tracks
+        // the anchor exactly, isolating the anchor-move mechanism: with anchorBeatsPerAdvance=1
+        // and a confidence gate of 0f (always satisfied), the one detected beat should snap the
+        // anchor straight to hueAnchorJumpDeg -- and the EMA should snap to it immediately, since
+        // an actual anchor move (not just any beat) is what triggers the hard snap.
+        val settings = defaultSettings.copy(
+            anchorBeatsPerAdvance = 1,
+            hueAnchorJumpDeg = 90f,
+            hueJumpConfidenceGate = 0f,
+            hueBreathRangeDeg = 0f,
+            hueDriftDegPerSec = 0f,
+            hueDegreesPerBeat = 0f,
+            // Isolate the anchor mechanism from the independent sustain-response mechanism (the
+            // default "HUE_SHIFT" would otherwise also perturb hue once the loud transient trips
+            // its rolling-variance condition, contaminating this assertion).
+            sustainResponse = "NONE"
+        )
+
+        val maxHue = maxHueAfterTransient(settings)
+
+        assertEquals(90f, maxHue, 1.0f)
+    }
+
+    @Test
+    fun `a beat below hueJumpConfidenceGate flashes but never moves the hue anchor`() {
+        // Same setup as above, but the gate (1.01f) can never be satisfied since confidence is
+        // coerced to [0, 1] -- the anchor must stay at its initial 0f regardless of how strong or
+        // confident the detected beat is, proving the confidence gate actually blocks recoloring
+        // rather than just flash intensity.
+        val settings = defaultSettings.copy(
+            anchorBeatsPerAdvance = 1,
+            hueAnchorJumpDeg = 90f,
+            hueJumpConfidenceGate = 1.01f,
+            hueBreathRangeDeg = 0f,
+            hueDriftDegPerSec = 0f,
+            hueDegreesPerBeat = 0f,
+            sustainResponse = "NONE"
+        )
+
+        val maxHue = maxHueAfterTransient(settings)
+
+        assertEquals(0f, maxHue, 0.5f)
+    }
 }
