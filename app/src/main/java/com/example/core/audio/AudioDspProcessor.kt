@@ -474,9 +474,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // change to detection/tuning math). Pre-dips the ambient contribution up to 10% over
             // the ~80ms leading into a predicted beat, so the subsequent flash reads as a bigger
             // jump for free. Ramps back to 0 immediately once the window passes; no effect at all
-            // without a tempo lock (nextPredictedBeatMs null) or outside the 80ms window.
+            // without a tempo lock (nextPredictedBeatMs null), outside the 80ms window, or on
+            // presets with flashRange == 0 (Ambient Chill/Smooth Flow) — dimming ahead of a flash
+            // that never happens just reads as a periodic dim with nothing to compensate for it.
             val msUntilPredictedBeat = result.nextPredictedBeatMs?.let { it - nowMs }
-            val preDip = if (msUntilPredictedBeat != null && msUntilPredictedBeat in 0..80L) {
+            val preDip = if (state.flashRange > 0f && msUntilPredictedBeat != null && msUntilPredictedBeat in 0..80L) {
                 0.10f * (1f - msUntilPredictedBeat / 80f)
             } else {
                 0f
