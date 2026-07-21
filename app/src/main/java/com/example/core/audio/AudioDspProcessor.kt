@@ -224,7 +224,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             if (state.isPaletteCyclingEnabled) {
                 currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
             }
-            beatPulsePeak = 0.6f + 0.4f * result.strength
+            // Fold confidence into the visual pulse alongside strength: a beat's strength alone
+            // says "how big was the spike," but confidence (peak salience + BPM-lock + phase-grid
+            // agreement) says "how sure are we this is really a beat." Multiplying the strength
+            // contribution by confidence means a strong-but-uncertain beat (e.g. pre-tempo-lock,
+            // or off the expected grid) still registers but visibly softer than an equally strong,
+            // high-confidence one — rather than every detected beat flashing with identical
+            // intensity purely off strength.
+            beatPulsePeak = 0.6f + 0.4f * result.strength * result.confidence.coerceIn(0f, 1f)
             lastBeatFlashTime = nowMs
 
             val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"

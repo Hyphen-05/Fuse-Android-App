@@ -470,8 +470,15 @@ internal class BeatDetector(
         }
 
         // 6. Strength calculation using MAD and median
+        // Soft-saturating curve rather than a hard linear ceiling: the old
+        // `.coerceIn(0f, 4f) / 4f` pinned every beat with ratio >= 4 to an identical 1.0, which
+        // on-device diagnostic data showed happening on ~48% of real detected beats (both
+        // backends) — discarding all "how much bigger than 4x" information. This approaches 1
+        // asymptotically instead, so strength keeps distinguishing "solid beat" from "huge beat"
+        // well beyond the old ceiling.
         val strength = if (scaledMad > 0.001f) {
-            ((evalSample.flux - medianFlux) / scaledMad).coerceIn(0f, 4f) / 4f
+            val ratio = ((evalSample.flux - medianFlux) / scaledMad).coerceAtLeast(0f)
+            (1f - kotlin.math.exp(-ratio / 6f)).coerceIn(0f, 1f)
         } else {
             0f
         }
