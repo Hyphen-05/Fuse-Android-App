@@ -42,6 +42,10 @@ data class AudioDspResult(
  */
 class AudioDspProcessor(private val backend: AudioBackend) {
 
+    companion object {
+        private const val WHITE_FLASH_RECOVERY_MS = 1000f
+    }
+
     // --- DSP state (function-local vars in the original, now instance fields) ---
     private var smoothedBass = 0.0f
     private var smoothedMid = 0.0f
@@ -95,6 +99,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // Diagnostic-only: throttles the periodic (non-beat) confidence sample below.
     private var lastDiagnosticSampleMs = 0L
 
+    // Time-basing (mapping-proposal-audio-to-led-2026-07-21.md §6, stage 1): dt in ms since the
+    // previous frame, derived from successive `nowMs` values rather than assumed as one tick.
+    // Used to make whiteHotFlashOffset's recovery rate backend-agnostic — previously a fixed
+    // +0.05/frame recovered in ~20 frames, which meant ~465ms on the ~43Hz AudioRecord backend
+    // vs. ~1000ms on the ~20Hz Visualizer backend for the exact same "recovery" (see CLAUDE.md's
+    // "Deferred / known-not-urgent" backend-timing note, and the proposal's structural problem
+    // #2).
+    private var lastFrameNowMs = 0L
+
     /**
      * Runs one frame through the DSP pipeline. Returns null if the frame should be skipped
      * outright — mirrors the Visualizer backend's original `if (numBins < 349) return` guard,
@@ -103,6 +116,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     fun process(frame: AudioCaptureFrame, settings: AudioSettingsState, nowMs: Long): AudioDspResult? {
         val numBins = frame.numBins
         if (numBins < 349) return null
+
+        // 0 on the first frame of a run (matches the original per-frame-constant behavior for
+        // that one frame — there is no prior frame to measure a real interval against).
+        val dtMs = if (lastFrameNowMs == 0L) 0L else (nowMs - lastFrameNowMs).coerceAtLeast(0L)
+        lastFrameNowMs = nowMs
 
         val magnitude = frame.magnitude
         val realBins = frame.realBins
@@ -231,7 +249,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // or off the expected grid) still registers but visibly softer than an equally strong,
             // high-confidence one — rather than every detected beat flashing with identical
             // intensity purely off strength.
-            beatPulsePeak = 0.6f + 0.4f * result.strength * result.confidence.coerceIn(0f, 1f)
+            beatPulsePeak = state.flashFloor + state.flashRange * result.strength * result.confidence.coerceIn(0f, 1f)
             lastBeatFlashTime = nowMs
 
             val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
@@ -245,7 +263,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
 
         // Calculate Energy Ratios (Hue)
-        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
+        // Time-based recovery (see the lastFrameNowMs/dtMs comment above): recovers fully over
+        // WHITE_FLASH_RECOVERY_MS regardless of frame rate. Chosen to match the Visualizer
+        // backend's original ~1000ms effective recovery (20 frames @ ~20Hz); this is a real,
+        // intentional behavior change on the AudioRecord/phone_mic backend, which previously
+        // recovered faster (~465ms, 20 frames @ ~43Hz) purely as an artifact of its higher frame
+        // rate — flag this specifically during the stage-1 on-device smoke test.
+        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + (dtMs.toFloat() / WHITE_FLASH_RECOVERY_MS))
         beatHueOffset *= 0.85f
 
         val activeTotal = smoothedBass + smoothedMid + smoothedHigh

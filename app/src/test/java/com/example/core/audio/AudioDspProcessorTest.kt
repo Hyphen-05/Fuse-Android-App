@@ -242,4 +242,40 @@ class AudioDspProcessorTest {
             peakMaxChannel > 0.05f
         )
     }
+
+    @Test
+    fun `flashFloor and flashRange settings scale the beat flash peak`() {
+        // Same beat-driving setup as the transient test above, run twice with the same input:
+        // once with flashFloor/flashRange zeroed out (beatPulsePeak should collapse toward 0
+        // regardless of strength/confidence) and once with the defaults (0.6f/0.4f, the same
+        // values the previously hard-coded formula used). Proves the two AudioSettingsState
+        // fields actually drive AudioDspProcessor's output rather than sitting unused.
+        fun peakFor(settings: AudioSettingsState): Float {
+            val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+            var now = 0L
+            repeat(30) {
+                processor.process(uniformFrame(1f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+                now += 20L
+            }
+            val transientTime = now
+            processor.process(uniformFrame(80f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+            now += 20L
+
+            var peak = 0f
+            while (now <= transientTime + 200L) {
+                val result = processor.process(uniformFrame(5f, backend = AudioBackend.AUDIO_RECORD), settings, now)!!
+                peak = maxOf(peak, maxOf(result.r, result.g, result.b) / 255f)
+                now += 20L
+            }
+            return peak
+        }
+
+        val zeroedPeak = peakFor(defaultSettings.copy(visualizerPreset = "Beat Only", flashFloor = 0f, flashRange = 0f))
+        val defaultPeak = peakFor(defaultSettings.copy(visualizerPreset = "Beat Only"))
+
+        assertTrue(
+            "zeroed flashFloor/flashRange should suppress the beat flash relative to the 0.6f/0.4f defaults (zeroed=$zeroedPeak, default=$defaultPeak)",
+            zeroedPeak < defaultPeak
+        )
+    }
 }

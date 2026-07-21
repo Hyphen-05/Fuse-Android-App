@@ -112,6 +112,11 @@ data class AudioSettingsState(
     val audioFlashStrength: Float = 0.3f,
     val visualizerMinBrightness: Float = 0.15f,
     val visualizerColorSpeed: Float = 1.0f,
+    // Beat flash peak = flashFloor + flashRange * strength * confidence. Split out of the
+    // previously hard-coded 0.6f/0.4f (see item 16 in CLAUDE.md's phase log) so presets can
+    // choose their own flash dynamic range — same formula shape, now parameterized.
+    val flashFloor: Float = 0.6f,
+    val flashRange: Float = 0.4f,
     val idleTriggerDelayMs: Long = 2500L,
     val detectedAudioDeviceName: String? = null,
     val activeAudioDeviceIdentifier: String? = null

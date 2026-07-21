@@ -44,7 +44,12 @@ private data class VisualizerConfig(
     val noiseGate: Float, val bassGain: Float,
     val midGain: Float, val highGain: Float, val paletteCycling: Boolean, val beatMult: Float,
     val minBrightness: Float, val colorSpeed: Float,
-    val beatFlashDecayMs: Float, val ambientCapFraction: Float, val midFluxWeight: Float
+    val beatFlashDecayMs: Float, val ambientCapFraction: Float, val midFluxWeight: Float,
+    // Mapping-layer stage 1 (see mapping-proposal-audio-to-led-2026-07-21.md §6, stage 1):
+    // flashFloor/flashRange replace AudioDspProcessor's previously hard-coded 0.6f/0.4f. Every
+    // preset gets the same values here deliberately — this stage only wires the plumbing, it
+    // does not yet apply the per-preset table from §5 (that's stage 2).
+    val flashFloor: Float = 0.6f, val flashRange: Float = 0.4f
 )
 
 // Mirrors RgbControllerViewModel.setVisualizerPreset()'s per-preset value table (lines 2685-2693) verbatim.
@@ -131,7 +136,9 @@ fun audioSettingsReducer(
                     visualizerColorSpeed = config.colorSpeed,
                     beatFlashDecayMs = config.beatFlashDecayMs,
                     ambientCapFraction = config.ambientCapFraction,
-                    midFluxWeight = config.midFluxWeight
+                    midFluxWeight = config.midFluxWeight,
+                    flashFloor = config.flashFloor,
+                    flashRange = config.flashRange
                 ),
                 coreControl = state.coreControl.copy(activeFeatureName = featureName)
             )
@@ -153,7 +160,9 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("visualizer_color_speed", config.colorSpeed),
                 AudioSideEffect.SaveAudioPrefFloat("beat_flash_decay_ms", config.beatFlashDecayMs),
                 AudioSideEffect.SaveAudioPrefFloat("ambient_cap_fraction", config.ambientCapFraction),
-                AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", config.midFluxWeight)
+                AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", config.midFluxWeight),
+                AudioSideEffect.SaveAudioPrefFloat("flash_floor", config.flashFloor),
+                AudioSideEffect.SaveAudioPrefFloat("flash_range", config.flashRange)
             )
             newState to effects
         }
@@ -472,6 +481,8 @@ fun audioSettingsReducer(
                     beatFlashDecayMs = 200f,
                     ambientCapFraction = 0.40f,
                     midFluxWeight = 0.25f,
+                    flashFloor = 0.6f,
+                    flashRange = 0.4f,
                     idleTriggerDelayMs = 2500L
                 )
             )
@@ -497,6 +508,8 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("beat_flash_decay_ms", 200f),
                 AudioSideEffect.SaveAudioPrefFloat("ambient_cap_fraction", 0.40f),
                 AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.25f),
+                AudioSideEffect.SaveAudioPrefFloat("flash_floor", 0.6f),
+                AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.4f),
                 AudioSideEffect.SaveAudioPrefLong("idle_trigger_delay_ms", 2500L)
             )
             newState to effects

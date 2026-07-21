@@ -213,6 +213,8 @@ class RgbControllerViewModel(
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
                 visualizerMinBrightness = prefsRepo.getAppStatePrefFloat("visualizer_min_brightness", 0.15f),
                 visualizerColorSpeed = prefsRepo.getAppStatePrefFloat("visualizer_color_speed", 1.0f),
+                flashFloor = prefsRepo.getAppStatePrefFloat("flash_floor", 0.6f),
+                flashRange = prefsRepo.getAppStatePrefFloat("flash_range", 0.4f),
                 idleTriggerDelayMs = prefsRepo.getAppStatePrefLong("idle_trigger_delay_ms", 2500L)
             ),
             ambianceSettings = AmbianceSettingsState(
