@@ -50,10 +50,30 @@ class AudioSettingsReducerTest {
         assertEquals(140f, audio.beatFlashDecayMs)
         assertEquals(0.40f, audio.ambientCapFraction)
         assertEquals(0.20f, audio.midFluxWeight)
+        // Mapping-layer stage 1: flashFloor/flashRange, per-preset since stage 2.
+        assertEquals(0.5f, audio.flashFloor)
+        assertEquals(0.5f, audio.flashRange)
+        // Mapping-layer stage 2: anchor+breath hue model, per-preset table (§5). Punchy = near-
+        // instant EMA, big per-beat jumps, minimal breath, SAT_BOOST sustain.
+        assertEquals(1, audio.anchorBeatsPerAdvance)
+        assertEquals(0L, audio.anchorTimerMs)
+        assertEquals(90f, audio.hueAnchorJumpDeg)
+        assertEquals(0.45f, audio.hueJumpConfidenceGate)
+        assertEquals(10f, audio.hueBreathRangeDeg)
+        assertFalse(audio.breathUsesBassRatio)
+        assertEquals(0f, audio.hueDriftDegPerSec)
+        assertEquals(0f, audio.hueDegreesPerBeat)
+        assertEquals("SAT_BOOST", audio.sustainResponse)
+        assertEquals(800f, audio.sustainRampMs)
+        assertEquals(1000f, audio.whiteFlashRecoveryMs)
 
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("visualizer_preset", "Punchy")))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.20f)))
-        assertEquals(18, effects.size)
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_floor", 0.5f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.5f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", 90f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("sustain_response", "SAT_BOOST")))
+        assertEquals(31, effects.size)
     }
 
     @Test
@@ -524,10 +544,14 @@ class AudioSettingsReducerTest {
         assertEquals(200f, audio.beatFlashDecayMs)
         assertEquals(0.40f, audio.ambientCapFraction)
         assertEquals(0.25f, audio.midFluxWeight)
+        assertEquals(0.6f, audio.flashFloor)
+        assertEquals(0.4f, audio.flashRange)
         assertEquals(2500L, audio.idleTriggerDelayMs)
 
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 0)))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("visualizer_preset", "Default")))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_floor", 0.6f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.4f)))
     }
 
     @Test

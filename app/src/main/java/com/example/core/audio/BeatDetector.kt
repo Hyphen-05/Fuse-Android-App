@@ -73,7 +73,14 @@ internal class BeatDetector(
         val strength: Float,
         val confidence: Float,
         val bpm: Float,
-        val bpmConfidence: Float
+        val bpmConfidence: Float,
+        // Mapping-layer stage 4 (mapping-proposal-audio-to-led-2026-07-21.md §4, "anticipatory
+        // dimming" — opt-in, additive only, zero change to detection/tuning math). Extrapolated
+        // forward from the DP beat grid (gridBeats) by whole locked-tempo periods until past
+        // `now`; null whenever there's no tempo lock or no grid yet, same gating as
+        // phaseAgreement's own gridBeats/lockedBpm check below. Absolute timestamp comparable to
+        // the `now` passed into process(), not relative to evalTimestamp.
+        val nextPredictedBeatMs: Long? = null
     )
 
     private class BandResult(
@@ -523,7 +530,24 @@ internal class BeatDetector(
             (strength * 0.5f) + (lockedBpmConfidence * 0.2f) + (phaseAgreement * 0.3f)
         }
 
-        return BeatResult(isBeat, strength, confidence, lockedBpm, lockedBpmConfidence)
+        val nextPredictedBeatMs = if (lockedBpm > 0f && gridBeats.isNotEmpty()) {
+            val periodMs = (60000f / lockedBpm).toLong().coerceAtLeast(1L)
+            var candidate = gridBeats.last()
+            // gridBeats is only rebuilt every tempoUpdateIntervalMs (updateTempoAndGrid), so it
+            // can lag behind `now` -- extrapolate forward by whole periods until we're actually
+            // ahead, so a consumer polling this every frame still gets a correct next-beat ETA
+            // between grid rebuilds. Bounded so a stale/degenerate grid can't spin forever.
+            var guard = 0
+            while (candidate <= now && guard < 64) {
+                candidate += periodMs
+                guard++
+            }
+            candidate
+        } else {
+            null
+        }
+
+        return BeatResult(isBeat, strength, confidence, lockedBpm, lockedBpmConfidence, nextPredictedBeatMs)
     }
 
     private fun getMedian(list: List<Float>): Float {

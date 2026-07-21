@@ -28,7 +28,8 @@ data class AudioDspResult(
  * references — those writes now happen in the ViewModel orchestrator using this class's output.
  *
  * Holds per-run mutable DSP state (smoothing accumulators, rolling histories, the BeatDetector
- * instance, palette index, auto-gain trackers, idle timer, UI-amplitude normalization trackers)
+ * instance, the anchor+breath hue model's anchor/sustain state, auto-gain trackers, idle timer,
+ * UI-amplitude normalization trackers)
  * that in the original code were function-local vars living for the duration of one engine run.
  * Construct a fresh instance per `startAudioEngine` call to match that reset-on-start behavior.
  *
@@ -46,11 +47,29 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private var smoothedBass = 0.0f
     private var smoothedMid = 0.0f
     private var smoothedHigh = 0.0f
-    private var continuousHueOffset = 0.0f
     private var whiteHotFlashOffset = 1.0f
-    private var beatHueOffset = 0.0f
     private var maxObservedBass = if (backend == AudioBackend.VISUALIZER) 20.0f else 10.0f
     private var maxObservedMid = if (backend == AudioBackend.VISUALIZER) 20.0f else 10.0f
+
+    // --- Anchor+breath hue model (mapping-proposal-audio-to-led-2026-07-21.md §4/§6, stage 2) ---
+    // hueAnchor: the discrete color base. Moves only on a qualifying beat/timer event (see
+    // process()'s anchor-move block below); otherwise constant except for slow continuous drift,
+    // which is folded directly into the anchor per the proposal ("drift rotates the anchor's
+    // reference frame... anchor += drift·dt") rather than into the bounded breath term.
+    private var hueAnchor = 0.0f
+    private var beatsSinceAnchorMove = 0
+    private var lastAnchorMoveMs = 0L
+    // True only on the frame an anchor move actually fires — this, not every raw beat, is what
+    // triggers the hue EMA's hard snap (structural problem #3 in the proposal: every preset used
+    // to hard-snap on every beat, including Ambient Chill, whose whole identity is "no transients").
+    private var anchorMovedThisFrame = false
+
+    // --- Sustain-response hysteresis+ramp (replaces the old binary +120° toggle, problem #5) ---
+    // 0L is the "not currently accumulating" sentinel, same convention as silenceStartTime below.
+    private var enterCandidateSinceMs = 0L
+    private var exitCandidateSinceMs = 0L
+    private var sustainActive = false
+    private var sustainStateChangedAtMs = 0L
 
     private val bassHistory = FloatArray(86)
     private var bassHistoryIdx = 0
@@ -65,8 +84,6 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private val beatDetector = BeatDetector()
     private var beatPulsePeak = 0.0f
     private var lastBeatFlashTime = 0L
-    private var currentPaletteIndex = 0
-    private val palettes = floatArrayOf(0f, 60f, 120f, 180f, 240f, 300f)
 
     private val noiseHistory = FloatArray(86)
     private var noiseHistoryIdx = 0
@@ -95,6 +112,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // Diagnostic-only: throttles the periodic (non-beat) confidence sample below.
     private var lastDiagnosticSampleMs = 0L
 
+    // Time-basing (mapping-proposal-audio-to-led-2026-07-21.md §6, stage 1): dt in ms since the
+    // previous frame, derived from successive `nowMs` values rather than assumed as one tick.
+    // Used to make whiteHotFlashOffset's recovery rate backend-agnostic — previously a fixed
+    // +0.05/frame recovered in ~20 frames, which meant ~465ms on the ~43Hz AudioRecord backend
+    // vs. ~1000ms on the ~20Hz Visualizer backend for the exact same "recovery" (see CLAUDE.md's
+    // "Deferred / known-not-urgent" backend-timing note, and the proposal's structural problem
+    // #2).
+    private var lastFrameNowMs = 0L
+
     /**
      * Runs one frame through the DSP pipeline. Returns null if the frame should be skipped
      * outright — mirrors the Visualizer backend's original `if (numBins < 349) return` guard,
@@ -103,6 +129,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     fun process(frame: AudioCaptureFrame, settings: AudioSettingsState, nowMs: Long): AudioDspResult? {
         val numBins = frame.numBins
         if (numBins < 349) return null
+
+        // 0 on the first frame of a run (matches the original per-frame-constant behavior for
+        // that one frame — there is no prior frame to measure a real interval against).
+        val dtMs = if (lastFrameNowMs == 0L) 0L else (nowMs - lastFrameNowMs).coerceAtLeast(0L)
+        lastFrameNowMs = nowMs
 
         val magnitude = frame.magnitude
         val realBins = frame.realBins
@@ -180,8 +211,40 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
         val shortMean = if (shortHistoryCount > 0) shortHistorySum / shortHistoryCount else 0.0f
 
+        // Sustain-response hysteresis+ramp (proposal §4/§5, problem #5): the raw enter/exit
+        // conditions are the original formula (enter unchanged; exit is a new, separate 0.8x
+        // threshold — the original had no distinct exit condition at all), but the debounced
+        // sustainActive flag only flips after the condition has held for a minimum duration, and
+        // sustainIntensity ramps 0->1 / 1->0 over state.sustainRampMs rather than snapping — this
+        // replaces the old instantaneous binary +120° hue toggle, which flickered near threshold
+        // and applied identically to every preset.
         val sustainThreshold = maxOf(35.0f, state.noiseGateThreshold * 5.0f)
-        val isSustainedSection = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
+        val rawSustainEnter = (shortMean > sustainThreshold) && (rollingVariance > 5.0f)
+        val rawSustainExit = shortMean < sustainThreshold * 0.8f
+
+        enterCandidateSinceMs = if (rawSustainEnter) {
+            if (enterCandidateSinceMs == 0L) nowMs else enterCandidateSinceMs
+        } else {
+            0L
+        }
+        exitCandidateSinceMs = if (rawSustainExit) {
+            if (exitCandidateSinceMs == 0L) nowMs else exitCandidateSinceMs
+        } else {
+            0L
+        }
+        if (!sustainActive && rawSustainEnter && enterCandidateSinceMs != 0L && nowMs - enterCandidateSinceMs >= 400L) {
+            sustainActive = true
+            sustainStateChangedAtMs = nowMs
+        } else if (sustainActive && rawSustainExit && exitCandidateSinceMs != 0L && nowMs - exitCandidateSinceMs >= 800L) {
+            sustainActive = false
+            sustainStateChangedAtMs = nowMs
+        }
+        val sustainRampProgress = if (state.sustainRampMs <= 0f) {
+            1f
+        } else {
+            ((nowMs - sustainStateChangedAtMs).toFloat() / state.sustainRampMs).coerceIn(0f, 1f)
+        }
+        val sustainIntensity = if (sustainActive) sustainRampProgress else (1f - sustainRampProgress)
 
         val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
         smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
@@ -220,10 +283,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                     "bpm=${result.bpm} bpmConfidence=${result.bpmConfidence}"
             )
         }
+        val activeTotal = smoothedBass + smoothedMid + smoothedHigh
+        val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
+        val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
+        val bassRatio = if (activeTotal > 0) smoothedBass / activeTotal else 0.0f
+
+        anchorMovedThisFrame = false
         if (isBeat) {
-            if (state.isPaletteCyclingEnabled) {
-                currentPaletteIndex = (currentPaletteIndex + 1) % palettes.size
-            }
             // Fold confidence into the visual pulse alongside strength: a beat's strength alone
             // says "how big was the spike," but confidence (peak salience + BPM-lock + phase-grid
             // agreement) says "how sure are we this is really a beat." Multiplying the strength
@@ -231,41 +297,90 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // or off the expected grid) still registers but visibly softer than an equally strong,
             // high-confidence one — rather than every detected beat flashing with identical
             // intensity purely off strength.
-            beatPulsePeak = 0.6f + 0.4f * result.strength * result.confidence.coerceIn(0f, 1f)
+            beatPulsePeak = state.flashFloor + state.flashRange * result.strength * result.confidence.coerceIn(0f, 1f)
             lastBeatFlashTime = nowMs
 
             val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
             if (useWhiteFlash) {
-                whiteHotFlashOffset = 0.0f
-                continuousHueOffset = (continuousHueOffset + 15f) % 360f
-            } else {
-                beatHueOffset = 180.0f
-                continuousHueOffset = (continuousHueOffset + 30f) % 360f
+                // Analog white-flash depth (proposal §4): desaturation depth tracks how hard the
+                // beat actually hit (strength·confidence) instead of every beat snapping to the
+                // same binary full-white — a weak beat gives a pale wash, a locked-in downbeat
+                // gives the full white pop.
+                val depth = (result.strength * result.confidence.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+                whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+            }
+
+            // Anchor moves are confidence-gated (proposal §4): a low-confidence beat still flashes
+            // (above) but doesn't recolor — flash is cheap and reversible, recoloring is the
+            // perceptually expensive event.
+            if (result.confidence.coerceIn(0f, 1f) >= state.hueJumpConfidenceGate) {
+                beatsSinceAnchorMove++
+                if (state.anchorBeatsPerAdvance > 0 && beatsSinceAnchorMove >= state.anchorBeatsPerAdvance) {
+                    hueAnchor = (hueAnchor + state.hueAnchorJumpDeg) % 360f
+                    beatsSinceAnchorMove = 0
+                    lastAnchorMoveMs = nowMs
+                    anchorMovedThisFrame = true
+                }
             }
         }
 
-        // Calculate Energy Ratios (Hue)
-        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + 0.05f)
-        beatHueOffset *= 0.85f
-
-        val activeTotal = smoothedBass + smoothedMid + smoothedHigh
-        val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
-        val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
-
-        continuousHueOffset = (continuousHueOffset + (activeTotal * 0.01f)) % 360f
-
-        var hue = (continuousHueOffset + (midRatio * 60f) - (highRatio * 60f) + 360f + beatHueOffset) % 360f
-
-        // Shift band-hue-range boundaries by 120 degrees if in sustained section
-        if (isSustainedSection) {
-            hue = (hue + 120.0f) % 360f
+        // Timer fallback for presets that want color variety even without confident beats
+        // (Ambient Chill's documented "every 16 beats, or a 30s timer if no BPM lock"). Only
+        // engages once the detector has gone a while without locking a tempo — once it has, the
+        // beat-count path above is doing the real work and this would just double up.
+        if (state.anchorTimerMs > 0L && result.bpmConfidence < 0.3f &&
+            nowMs - lastAnchorMoveMs >= state.anchorTimerMs
+        ) {
+            hueAnchor = (hueAnchor + state.hueAnchorJumpDeg) % 360f
+            beatsSinceAnchorMove = 0
+            lastAnchorMoveMs = nowMs
+            anchorMovedThisFrame = true
         }
 
-        if (state.isPaletteCyclingEnabled) {
-            hue = (hue + palettes[currentPaletteIndex]) % 360f
+        // whiteHotFlashOffset recovery (time-based since stage 1) now uses a per-preset recovery
+        // time instead of one global constant, so Strobe Blast/Laser Sharp/Beat Only can each pick
+        // how fast their white pop fades back to color.
+        whiteHotFlashOffset = Math.min(1.0f, whiteHotFlashOffset + (dtMs.toFloat() / state.whiteFlashRecoveryMs))
+
+        // Continuous drift folds directly into the anchor rather than a separate accumulator, so
+        // it can never run away independently of the discrete color state — the old
+        // continuousHueOffset mixed exactly this kind of unbounded per-frame drift with per-beat
+        // jumps in one variable (structural problem #1 in the proposal). Tempo-locked when the
+        // detector has a confident BPM, crossfaded with the free-running deg/sec rate by
+        // bpmConfidence otherwise (proposal §4, "tempo-locked color motion").
+        val dtSec = dtMs.toFloat() / 1000f
+        val bpmConf = result.bpmConfidence.coerceIn(0f, 1f)
+        val tempoLockedDriftDegPerSec = (result.bpm.toFloat() / 60f) * state.hueDegreesPerBeat
+        val driftDegPerSec = state.hueDriftDegPerSec * (1f - bpmConf) + tempoLockedDriftDegPerSec * bpmConf
+        hueAnchor = (hueAnchor + driftDegPerSec * dtSec + 360f) % 360f
+
+        // Breath: a bounded tilt around the anchor, never an accumulator — it can't walk away.
+        // Default source is the existing spectral-tilt logic ((midRatio - highRatio), which is
+        // already bounded to [-1, 1]), scaled to the preset's configured range. Bass Thump keys
+        // this to bassRatio instead (see AudioSettingsState.breathUsesBassRatio) so its color
+        // leans with the low end its identity is built on; the bassRatio->offset mapping (centered
+        // on ~0.33, the baseline for three roughly-equal bands) is a judgment call, not specified
+        // numerically in the proposal doc.
+        val breathRange = state.hueBreathRangeDeg
+        val breath = if (state.breathUsesBassRatio) {
+            (((bassRatio - (1f / 3f)) / (2f / 3f)) * breathRange).coerceIn(-breathRange, breathRange)
+        } else {
+            ((midRatio - highRatio) * breathRange).coerceIn(-breathRange, breathRange)
         }
 
-        // Smoothly interpolate hue only when not experiencing a beat pulse spike using circular smoothing
+        var hue = (hueAnchor + breath + 360f) % 360f
+
+        // Sustain response (proposal §4/§5, problem #5): one of four per-preset behaviors, applied
+        // with the hysteresis-debounced, ramped sustainIntensity computed above — replacing the
+        // old single binary +120° hue toggle that applied identically to every preset.
+        when (state.sustainResponse) {
+            "HUE_SHIFT" -> hue = (hue + 120f * sustainIntensity + 360f) % 360f
+            // SAT_BOOST and BRIGHTNESS_SWELL are applied later, once sat/value exist.
+        }
+
+        // Smoothly interpolate hue only when not experiencing an anchor move using circular
+        // smoothing. Snapping only on an actual anchor move (not every raw beat, as before) is
+        // what lets a preset like Ambient Chill breathe continuously without ever hard-cutting.
         val targetRad = Math.toRadians(hue.toDouble())
         val targetX = Math.cos(targetRad).toFloat()
         val targetY = Math.sin(targetRad).toFloat()
@@ -276,7 +391,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
         val nextX: Float
         val nextY: Float
-        if (isBeat) {
+        if (anchorMovedThisFrame) {
             nextX = targetX
             nextY = targetY
         } else {
@@ -314,7 +429,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
             }
         }
-        val sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
+        var sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
+        if (state.sustainResponse == "SAT_BOOST") {
+            // No magnitude is specified in the proposal doc for this response (only HUE_SHIFT's
+            // 120° and BRIGHTNESS_SWELL's +0.10 are given numerically) — 0.3f is a judgment call
+            // chosen to be clearly visible without blowing saturation to a flat 1.0 on every
+            // sustained section.
+            sat = (sat + 0.3f * sustainIntensity).coerceIn(0.0f, 1.0f)
+        }
 
         val sensitivityMultiplier = (state.musicSensitivity / 50.0f)
 
@@ -338,7 +460,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
         val valBase = maxOf(bc, midContribution * 0.3f)
 
-        val value: Float
+        var value: Float
         if (state.visualizerPreset == "Beat Only") {
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / state.beatFlashDecayMs
@@ -347,12 +469,35 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         } else {
             var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
             baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
-            val ambientLevel = baseValVal * state.ambientCapFraction
+            // Anticipatory dimming (mapping-proposal-audio-to-led-2026-07-21.md §4, stage 4 —
+            // opt-in, purely additive: a new *consumer* of BeatDetector.nextPredictedBeatMs, zero
+            // change to detection/tuning math). Pre-dips the ambient contribution up to 10% over
+            // the ~80ms leading into a predicted beat, so the subsequent flash reads as a bigger
+            // jump for free. Ramps back to 0 immediately once the window passes; no effect at all
+            // without a tempo lock (nextPredictedBeatMs null), outside the 80ms window, or on
+            // presets with audioFlashStrength == 0 (Ambient Chill/Smooth Flow both set their
+            // config's `flash` field to 0.00f, which zeroes `beatFlash` at its use site below
+            // regardless of flashFloor/flashRange — those two default to 0.6f/0.4f, nonzero, for
+            // both presets, since neither overrides them. audioFlashStrength, not flashRange, is
+            // the actual "does this preset flash at all" signal; gating on flashRange here was
+            // wrong and never actually skipped the pre-dip for these two presets.
+            val msUntilPredictedBeat = result.nextPredictedBeatMs?.let { it - nowMs }
+            val preDip = if (state.audioFlashStrength > 0f && msUntilPredictedBeat != null && msUntilPredictedBeat in 0..80L) {
+                0.10f * (1f - msUntilPredictedBeat / 80f)
+            } else {
+                0f
+            }
+            val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip)
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / state.beatFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
             val beatFlash = beatEnvelope * state.audioFlashStrength
             value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
+        }
+        if (state.sustainResponse == "BRIGHTNESS_SWELL") {
+            // +0.10 is the one sustain-response magnitude the proposal doc gives explicitly
+            // (Ambient Chill's row in §5's per-preset table).
+            value = (value + 0.10f * sustainIntensity).coerceIn(0.0f, 1.0f)
         }
 
         val (r, g, b) = ColorConverter.hsvToRgb(smoothedHue, sat, value)
