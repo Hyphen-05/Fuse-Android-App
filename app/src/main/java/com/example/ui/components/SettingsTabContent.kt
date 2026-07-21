@@ -1255,6 +1255,7 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                 // LED Freeze Diagnostic Logging Section
                 var isDiagnosticRecording by remember { mutableStateOf(com.example.DiagnosticLogger.isRecording()) }
                 var exportedLogUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                var excludeBleNoise by remember { mutableStateOf(false) }
                 val diagInteractionSource = remember { MutableInteractionSource() }
                 val exportInteractionSource = remember { MutableInteractionSource() }
 
@@ -1276,6 +1277,22 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                     }
 
                     Row(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !isDiagnosticRecording) { excludeBleNoise = !excludeBleNoise },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = excludeBleNoise,
+                            onCheckedChange = { excludeBleNoise = it },
+                            enabled = !isDiagnosticRecording
+                        )
+                        Text(
+                            text = "Exclude BLE write/watchdog logs (for audio diagnostics — prevents the buffer filling up before a full phone-mic/on-device session is captured)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -1287,7 +1304,12 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                                     exportedLogUri = com.example.DiagnosticLogger.exportToFile(context)
                                     android.widget.Toast.makeText(context, "Recording stopped. Log exported!", android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
-                                    com.example.DiagnosticLogger.start()
+                                    val excludedTags = if (excludeBleNoise) {
+                                        setOf("DeviceWriteManager", "BleWriteWatchdog", "BLE")
+                                    } else {
+                                        emptySet()
+                                    }
+                                    com.example.DiagnosticLogger.start(excludedTags)
                                     isDiagnosticRecording = true
                                     exportedLogUri = null
                                     android.widget.Toast.makeText(context, "Recording started", android.widget.Toast.LENGTH_SHORT).show()

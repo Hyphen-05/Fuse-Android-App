@@ -15,15 +15,22 @@ object DiagnosticLogger {
     private const val MAX_ENTRIES = 5000
     private const val MAX_BYTES_ESTIMATE = 2 * 1024 * 1024 // 2MB
 
+    // Tags excluded for the duration of the current recording. Used to keep high-frequency BLE
+    // write/watchdog logging (DeviceWriteManager/BleWriteWatchdog/BLE ticks roughly every 50ms
+    // per device) from evicting lower-frequency audio-diagnostic entries out of the ring buffer.
+    @Volatile
+    private var excludedTags: Set<String> = emptySet()
+
     private val entries = ArrayList<String>()
     private var approxBytes = 0
 
-    fun start() {
+    fun start(excludedTags: Set<String> = emptySet()) {
         synchronized(entries) {
             recording = true
+            this.excludedTags = excludedTags
             entries.clear()
             approxBytes = 0
-            logInternal("DiagnosticLogger", "Diagnostic recording started")
+            logInternal("DiagnosticLogger", "Diagnostic recording started" + if (excludedTags.isNotEmpty()) " (excluding tags: ${excludedTags.joinToString(", ")})" else "")
         }
     }
 
@@ -42,6 +49,7 @@ object DiagnosticLogger {
 
     fun log(tag: String, message: String) {
         if (!recording) return
+        if (tag in excludedTags) return
         logInternal(tag, message)
     }
 
