@@ -1,4 +1,4 @@
-﻿package com.example
+package com.example
 
 import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
@@ -721,12 +721,58 @@ class RgbControllerViewModel(
     private val _scenes = MutableStateFlow<List<AppScene>>(emptyList())
     val scenes: StateFlow<List<AppScene>> = _scenes.asStateFlow()
 
-    private var sceneChainJob: kotlinx.coroutines.Job? = null
-
-    private fun cancelSceneChain() {
-        sceneChainJob?.cancel()
-        sceneChainJob = null
+    // Scene orchestration lives in com.example.domain.SceneManager (Phase 6, scene slice).
+    // Constructed here (not in AppContainer) because it borrows this ViewModel's live mutable
+    // state (_uiState/_scenes/customModes/sceneRunners/activeExcludedMacs) by reference. `by lazy`
+    // sidesteps init-order hazards (customModes is assigned in an init block).
+    private val sceneManager: com.example.domain.SceneManager by lazy {
+        com.example.domain.SceneManager(
+            scope = viewModelScope,
+            application = application,
+            prefsRepo = prefsRepo,
+            uiState = _uiState,
+            scenes = _scenes,
+            customModes = customModes,
+            sceneRunners = sceneRunners,
+            activeExcludedMacs = activeExcludedMacs,
+            deviceStateStore = deviceStateStore,
+            commands = com.example.domain.SceneCommandSink(
+                sendCommandToDeviceDirect = ::sendCommandToDeviceDirect,
+                getControlledAddresses = ::getCurrentlyControlledDeviceAddresses,
+                setPower = ::setPower,
+                setColor = ::setColor,
+                setBrightness = ::setBrightness,
+                setMode = ::setMode,
+                setModeSpeed = ::setModeSpeed,
+                setWarmth = ::setWarmth,
+                startMusicSync = ::startMusicSync,
+                setVisualizerPreset = ::setVisualizerPreset,
+                applyAmbiancePreset = ::applyAmbiancePreset,
+                setAmbianceResponseSpeed = ::setAmbianceResponseSpeed,
+                setAmbianceSmoothnessMs = ::setAmbianceSmoothnessMs,
+                setAmbianceSaturationBoost = ::setAmbianceSaturationBoost,
+                setAmbianceBrightnessCompensation = ::setAmbianceBrightnessCompensation,
+                setAmbianceUpdateRateCapFps = ::setAmbianceUpdateRateCapFps,
+                setAmbianceSceneCutSensitivity = ::setAmbianceSceneCutSensitivity,
+                setAudioSmoothingAttack = ::setAudioSmoothingAttack,
+                setAudioSmoothingDecay = ::setAudioSmoothingDecay,
+                setAudioFlashStrength = ::setAudioFlashStrength,
+                setNoiseGateThreshold = ::setNoiseGateThreshold,
+                setBassGain = ::setBassGain,
+                setMidGain = ::setMidGain,
+                setHighGain = ::setHighGain,
+                setAutoGainEnabled = ::setAutoGainEnabled,
+                setPaletteCyclingEnabled = ::setPaletteCyclingEnabled,
+                setLogarithmicScalingEnabled = ::setLogarithmicScalingEnabled,
+                setAudioGammaExponent = ::setAudioGammaExponent,
+                setVisualizerMinBrightness = ::setVisualizerMinBrightness,
+                setVisualizerColorSpeed = ::setVisualizerColorSpeed,
+                setBluetoothDelayMs = ::setBluetoothDelayMs
+            )
+        )
     }
+
+    private fun cancelSceneChain() = sceneManager.cancelSceneChain()
 
     private val handler = Handler(Looper.getMainLooper())
     private val scanTimeoutRunnable = Runnable { dispatch(RgbIntent.StopScanning) }
@@ -1826,9 +1872,8 @@ class RgbControllerViewModel(
             .map { it.macAddress }
     }
 
-    private var isApplyingScene = false
     private fun clearExclusionsIfNotApplyingScene() {
-        if (!isApplyingScene) {
+        if (!sceneManager.isApplyingScene) {
             activeExcludedMacs.clear()
         }
     }
@@ -2061,487 +2106,24 @@ class RgbControllerViewModel(
     }
 
 
-    // --- SCENES LOGIC ---
-    fun captureCurrentDeviceState(groupA: String?, includeBrightness: Boolean, includeModeSpeed: Boolean = false, includeAmbianceSettings: Boolean = false, includeCalibrationSettings: Boolean = false, includeAudioSettings: Boolean = false): DeviceSceneState {
-        val s = _uiState.value
-        val isPowerOffMode = groupA == "Power Off"
-        val isAnyMode = groupA != null && groupA != "None" && !isPowerOffMode
+    // --- SCENES LOGIC (extracted to com.example.domain.SceneManager) ---
+    fun saveScene(name: String, groupA: String?, includeBrightness: Boolean, includeModeSpeed: Boolean, targetScope: String, selectedDeviceMacs: List<String>?, includeAmbianceSettings: Boolean = false, includeCalibrationSettings: Boolean = false, includeAudioSettings: Boolean = false, chainedSceneId: String? = null, chainedSceneDelaySeconds: Int? = null, chainedSceneReverseId: String? = null): String =
+        sceneManager.saveScene(name, groupA, includeBrightness, includeModeSpeed, targetScope, selectedDeviceMacs, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds, chainedSceneReverseId)
 
-        return DeviceSceneState(
-            groupASelection = groupA,
-            colorR = if (groupA == "Colour") s.coreControl.red else null,
-            colorG = if (groupA == "Colour") s.coreControl.green else null,
-            colorB = if (groupA == "Colour") s.coreControl.blue else null,
-            cctWarmth = if (groupA == "CCT") s.coreControl.warmth else null,
-            modeIndex = if (groupA == "HardwareMode") s.coreControl.modeIndex else null,
-            modeSpeed = if (groupA == "HardwareMode" && includeModeSpeed) s.coreControl.modeSpeed else null,
-            audioPreset = if (groupA == "Audio") s.audioSettings.visualizerPreset else null,
-            audioAttack = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioSmoothingAttack else null,
-            audioDecay = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioSmoothingDecay else null,
-            audioFlash = if (includeAudioSettings || groupA == "Audio") s.audioSettings.audioFlashStrength else null,
-            musicMode = if (groupA == "Audio") s.audioSettings.musicMode else null,
-            ambianceIsOn = if (groupA == "Ambiance") com.example.ambiance.AmbianceCaptureState.isActive.value else null,
-            ambiancePreset = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambiancePreset else null,
-            ambianceResponseSpeed = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceResponseSpeed else null,
-            ambianceSmoothnessMs = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSmoothnessMs else null,
-            ambianceSaturationBoost = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSaturationBoost else null,
-            ambianceBrightnessCompensation = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceBrightnessCompensation else null,
-            ambianceUpdateRateCapFps = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceUpdateRateCapFps else null,
-            ambianceSceneCutSensitivity = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceSceneCutSensitivity else null,
-            ambianceNoiseDeadband = if (includeAmbianceSettings || groupA == "Ambiance") s.ambianceSettings.ambianceNoiseDeadband else null,
-            noiseGateThreshold = if (includeAudioSettings) s.audioSettings.noiseGateThreshold else null,
-            bassGain = if (includeAudioSettings) s.audioSettings.bassGain else null,
-            midGain = if (includeAudioSettings) s.audioSettings.midGain else null,
-            highGain = if (includeAudioSettings) s.audioSettings.highGain else null,
-            isAutoGainEnabled = if (includeAudioSettings) s.audioSettings.isAutoGainEnabled else null,
-            isPaletteCyclingEnabled = if (includeAudioSettings) s.audioSettings.isPaletteCyclingEnabled else null,
-            isLogarithmicScalingEnabled = if (includeAudioSettings) s.audioSettings.isLogarithmicScalingEnabled else null,
-            audioGammaExponent = if (includeAudioSettings) s.audioSettings.audioGammaExponent else null,
-            visualizerMinBrightness = if (includeAudioSettings) s.audioSettings.visualizerMinBrightness else null,
-            visualizerColorSpeed = if (includeAudioSettings) s.audioSettings.visualizerColorSpeed else null,
-            bluetoothDelayMs = if (includeCalibrationSettings) s.audioSettings.bluetoothDelayMs else null,
-            brightness = if (includeBrightness) s.coreControl.brightness else null,
-            isPowerOn = if (isPowerOffMode) false else if (isAnyMode) true else null
-        )
-    }
+    fun updateScene(sceneId: String, name: String, groupA: String?, includeBrightness: Boolean, includeModeSpeed: Boolean, targetScope: String, selectedDeviceMacs: List<String>?, includeAmbianceSettings: Boolean = false, includeCalibrationSettings: Boolean = false, includeAudioSettings: Boolean = false, chainedSceneId: String? = null, chainedSceneDelaySeconds: Int? = null, chainedSceneReverseId: String? = null) =
+        sceneManager.updateScene(sceneId, name, groupA, includeBrightness, includeModeSpeed, targetScope, selectedDeviceMacs, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds, chainedSceneReverseId)
 
-    fun saveScene(name: String, groupA: String?, includeBrightness: Boolean, includeModeSpeed: Boolean, targetScope: String, selectedDeviceMacs: List<String>?, includeAmbianceSettings: Boolean = false, includeCalibrationSettings: Boolean = false, includeAudioSettings: Boolean = false, chainedSceneId: String? = null, chainedSceneDelaySeconds: Int? = null, chainedSceneReverseId: String? = null): String {
-        val stateSnapshot = captureCurrentDeviceState(groupA, includeBrightness, includeModeSpeed, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings)
-        val newId = UUID.randomUUID().toString()
-        val newScene = AppScene(
-            id = newId,
-            name = name,
-            targetScope = targetScope,
-            selectedDeviceMacs = selectedDeviceMacs,
-            state = stateSnapshot,
-            chainedSceneId = chainedSceneId,
-            chainedSceneReverseId = chainedSceneReverseId,
-            chainedSceneDelaySeconds = chainedSceneDelaySeconds
-        )
-        
-        val current = _scenes.value.toMutableList()
-        current.add(newScene)
-        _scenes.value = current
-        prefsRepo.saveScenes(current)
-        return newId
-    }
+    fun deleteScene(sceneId: String) = sceneManager.deleteScene(sceneId)
 
-    fun updateScene(sceneId: String, name: String, groupA: String?, includeBrightness: Boolean, includeModeSpeed: Boolean, targetScope: String, selectedDeviceMacs: List<String>?, includeAmbianceSettings: Boolean = false, includeCalibrationSettings: Boolean = false, includeAudioSettings: Boolean = false, chainedSceneId: String? = null, chainedSceneDelaySeconds: Int? = null, chainedSceneReverseId: String? = null) {
-        val stateSnapshot = captureCurrentDeviceState(groupA, includeBrightness, includeModeSpeed, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings)
-        
-        val current = _scenes.value.toMutableList()
-        val index = current.indexOfFirst { it.id == sceneId }
-        if (index != -1) {
-            val updatedScene = current[index].copy(
-                name = name,
-                targetScope = targetScope,
-                selectedDeviceMacs = selectedDeviceMacs,
-                state = stateSnapshot,
-                chainedSceneId = chainedSceneId,
-                chainedSceneReverseId = chainedSceneReverseId,
-                chainedSceneDelaySeconds = chainedSceneDelaySeconds
-            )
-            current[index] = updatedScene
-            _scenes.value = current
-            prefsRepo.saveScenes(current)
-        }
-    }
+    fun renameScene(sceneId: String, newName: String) = sceneManager.renameScene(sceneId, newName)
 
-    fun deleteScene(sceneId: String) {
-        val current = _scenes.value.filter { it.id != sceneId }
-        _scenes.value = current
-        prefsRepo.saveScenes(current)
-    }
+    fun saveAiSceneSequence(params: ProceduralSceneParams, sceneName: String, explanation: String): AppScene? =
+        sceneManager.saveAiSceneSequence(params, sceneName, explanation)
 
-    fun renameScene(sceneId: String, newName: String) {
-        val current = _scenes.value.map { if (it.id == sceneId) it.copy(name = newName) else it }
-        _scenes.value = current
-        prefsRepo.saveScenes(current)
-    }
+    fun updateAiSceneSequence(sceneId: String, params: ProceduralSceneParams, sceneName: String) =
+        sceneManager.updateAiSceneSequence(sceneId, params, sceneName)
 
-    fun saveAiSceneSequence(params: ProceduralSceneParams, sceneName: String, explanation: String): AppScene? {
-        if (params.palette.isEmpty()) return null
-        
-        val sceneId = UUID.randomUUID().toString()
-        
-        val state = DeviceSceneState(
-            groupASelection = "Colour",
-            colorR = params.palette.first().first,
-            colorG = params.palette.first().second,
-            colorB = params.palette.first().third,
-            isPowerOn = true,
-            animatedSequence = params
-        )
-        
-        val scene = AppScene(
-            id = sceneId,
-            name = sceneName,
-            targetScope = "ALL_DEVICES", // Default for AI scenes
-            state = state
-        )
-        
-        val current = _scenes.value.toMutableList()
-        current.add(scene)
-        _scenes.value = current
-        prefsRepo.saveScenes(current)
-        
-        return scene
-    }
-
-    fun updateAiSceneSequence(sceneId: String, params: ProceduralSceneParams, sceneName: String) {
-        if (params.palette.isEmpty()) return
-        val current = _scenes.value.toMutableList()
-        val index = current.indexOfFirst { it.id == sceneId }
-        if (index != -1) {
-            val oldScene = current[index]
-            val updatedState = oldScene.state.copy(
-                animatedSequence = params,
-                colorR = params.palette.first().first,
-                colorG = params.palette.first().second,
-                colorB = params.palette.first().third
-            )
-            val updatedScene = oldScene.copy(
-                name = sceneName,
-                state = updatedState
-            )
-            current[index] = updatedScene
-            _scenes.value = current
-            prefsRepo.saveScenes(current)
-        }
-    }
-
-    fun applyScene(scene: AppScene, isReversing: Boolean = false) {
-        cancelSceneChain()
-        isApplyingScene = true
-        activeExcludedMacs.clear()
-
-        val targetMacs = if (scene.targetScope == "SELECT_DEVICES" && scene.selectedDeviceMacs != null) {
-            scene.selectedDeviceMacs
-        } else {
-            getCurrentlyControlledDeviceAddresses()
-        }
-
-        if (scene.state.groupASelection == "Audio" || scene.state.groupASelection == "Ambiance") {
-            val allConnected = _uiState.value.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys
-            activeExcludedMacs.addAll(allConnected.filter { !targetMacs.contains(it) })
-            applyDeviceState(scene.state, null)
-        } else {
-            applyDeviceState(scene.state, targetMacs)
-            
-            // Fix: Update relevant global UI state fields when applying HardwareMode/Colour/CCT scenes
-            _uiState.update { current ->
-                var updated = current.coreControl
-                when (scene.state.groupASelection) {
-                    "Colour" -> {
-                        if (scene.state.colorR != null && scene.state.colorG != null && scene.state.colorB != null) {
-                            updated = updated.copy(
-                                activeFeatureName = "Colour",
-                                red = scene.state.colorR,
-                                green = scene.state.colorG,
-                                blue = scene.state.colorB
-                            )
-                        }
-                    }
-                    "CCT" -> {
-                        if (scene.state.cctWarmth != null) {
-                            val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(scene.state.cctWarmth)
-                            val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-                            updated = updated.copy(
-                                activeFeatureName = "CCT",
-                                warmth = scene.state.cctWarmth,
-                                red = rgb[0],
-                                green = rgb[1],
-                                blue = rgb[2]
-                            )
-                        }
-                    }
-                    "HardwareMode" -> {
-                        if (scene.state.modeIndex != null) {
-                            val modeName = customModes.value.find { it.byteValue == scene.state.modeIndex }?.name ?: "Mode"
-                            updated = updated.copy(
-                                activeFeatureName = modeName,
-                                modeIndex = scene.state.modeIndex
-                            )
-                        }
-                        if (scene.state.modeSpeed != null) {
-                            updated = updated.copy(modeSpeed = scene.state.modeSpeed)
-                        }
-                    }
-                }
-                if (scene.state.brightness != null) {
-                    updated = updated.copy(brightness = scene.state.brightness)
-                }
-                if (scene.state.isPowerOn != null) {
-                    updated = updated.copy(isPowerOn = scene.state.isPowerOn)
-                }
-
-                                    prefsRepo.putAppStatePrefString("active_feature_name", updated.activeFeatureName)
-                    prefsRepo.putAppStatePrefInt("red", updated.red)
-                    prefsRepo.putAppStatePrefInt("green", updated.green)
-                    prefsRepo.putAppStatePrefInt("blue", updated.blue)
-                    prefsRepo.putAppStatePrefInt("mode_index", updated.modeIndex)
-                    prefsRepo.putAppStatePrefInt("mode_speed", updated.modeSpeed)
-                    prefsRepo.putAppStatePrefInt("warmth", updated.warmth)
-                    prefsRepo.putAppStatePrefInt("brightness", updated.brightness)
-
-                current.copy(coreControl = updated)
-            }
-        }
-
-        var nextIsReversing = isReversing
-        val nextSceneId = if (isReversing && scene.chainedSceneReverseId != null) {
-            scene.chainedSceneReverseId
-        } else if (!isReversing && scene.chainedSceneId != null) {
-            scene.chainedSceneId
-        } else if (!isReversing && scene.chainedSceneReverseId != null) {
-            nextIsReversing = true
-            scene.chainedSceneReverseId
-        } else if (isReversing && scene.chainedSceneId != null) {
-            nextIsReversing = false
-            scene.chainedSceneId
-        } else {
-            null
-        }
-
-        if (nextSceneId != null) {
-            val targetScene = _scenes.value.find { it.id == nextSceneId }
-            if (targetScene != null) {
-                sceneChainJob = viewModelScope.launch {
-                    val delaySeconds = scene.chainedSceneDelaySeconds ?: 0
-                    if (delaySeconds <= 0) {
-                        delay(50L)
-                    } else {
-                        delay(delaySeconds.toLong() * 1000L)
-                    }
-                    applyScene(targetScene, nextIsReversing)
-                }
-            }
-        }
-        isApplyingScene = false
-    }
-
-    private fun updateDeviceStateInMap(macAddress: String, state: DeviceSceneState) {
-        _uiState.update { current ->
-            val existing = current.connectivity.deviceStatesMap[macAddress] ?: ActiveDeviceState(
-                activeFeatureName = current.coreControl.activeFeatureName,
-                red = current.coreControl.red,
-                green = current.coreControl.green,
-                blue = current.coreControl.blue,
-                warmth = current.coreControl.warmth,
-                modeIndex = current.coreControl.modeIndex,
-                brightness = current.coreControl.brightness,
-                isPowerOn = current.coreControl.isPowerOn
-            )
-            
-            var updated = existing
-            
-            if (state.brightness != null) {
-                updated = updated.copy(brightness = state.brightness)
-            }
-            if (state.isPowerOn != null) {
-                updated = updated.copy(isPowerOn = state.isPowerOn)
-            }
-            
-            when (state.groupASelection) {
-                "Colour" -> {
-                    if (state.colorR != null && state.colorG != null && state.colorB != null) {
-                        updated = updated.copy(
-                            activeFeatureName = "Colour",
-                            red = state.colorR,
-                            green = state.colorG,
-                            blue = state.colorB
-                        )
-                    }
-                }
-                "CCT" -> {
-                    if (state.cctWarmth != null) {
-                        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(state.cctWarmth)
-                        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-                        updated = updated.copy(
-                            activeFeatureName = "CCT",
-                            warmth = state.cctWarmth,
-                            red = rgb[0],
-                            green = rgb[1],
-                            blue = rgb[2]
-                        )
-                    }
-                }
-                "HardwareMode" -> {
-                    if (state.modeIndex != null) {
-                        val modeName = customModes.value.find { it.byteValue == state.modeIndex }?.name ?: "Mode"
-                        updated = updated.copy(
-                            activeFeatureName = modeName,
-                            modeIndex = state.modeIndex
-                        )
-                    }
-                }
-                "Audio" -> {
-                    if (state.audioPreset != null) {
-                        updated = updated.copy(
-                            activeFeatureName = "Audio - ${state.audioPreset}"
-                        )
-                    }
-                }
-                "Ambiance" -> {
-                    if (state.ambianceIsOn == true) {
-                        updated = updated.copy(
-                            activeFeatureName = "Ambiance - ${state.ambiancePreset ?: "Balanced"}"
-                        )
-                    } else if (state.ambianceIsOn == false) {
-                        updated = updated.copy(
-                            activeFeatureName = "Colour"
-                        )
-                    }
-                }
-            }
-            
-            val newMap = current.connectivity.deviceStatesMap.toMutableMap()
-            newMap[macAddress] = updated
-            current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
-        }
-    }
-
-    private fun applyDeviceState(state: DeviceSceneState, targetMacsList: List<String>?) {
-        val macs = targetMacsList ?: getCurrentlyControlledDeviceAddresses()
-
-        if (targetMacsList != null) {
-            macs.forEach { mac -> updateDeviceStateInMap(mac, state) }
-        }
-
-        macs.forEach { mac ->
-            sceneRunners[mac]?.release()
-            sceneRunners.remove(mac)
-        }
-        
-        if (state.animatedSequence != null) {
-            val runner = SceneAnimationRunner(
-                macAddresses = macs,
-                sequence = state.animatedSequence,
-                sendCommand = { m, cmd -> sendCommandToDeviceDirect(m, cmd) },
-                saveState = { m, p, r, g, b, w -> 
-                    viewModelScope.launch {
-                        val currentB = deviceStateStore.getState(m)?.brightness ?: 100
-                        deviceStateStore.saveState(m, p, r, g, b, w, currentB)
-                    }
-                }
-            )
-            macs.forEach { mac ->
-                sceneRunners[mac] = runner
-            }
-            runner.start()
-        }
-
-        // Apply Power (Group B - also includes power)
-        state.isPowerOn?.let { isOn ->
-            if (targetMacsList == null) setPower(isOn)
-            else macs.forEach { sendCommandToDeviceDirect(it, DuoCoProtocol.createPowerCommand(isOn)) }
-        }
-
-        // Group B
-        state.brightness?.let { br -> 
-            if (targetMacsList == null) setBrightness(br) 
-            else macs.forEach { mac -> sendCommandToDeviceDirect(mac, DuoCoProtocol.createBrightnessCommand(br)) }
-        }
-
-        // Group A
-        if (state.animatedSequence != null) {
-            return // Skip applying static colour/mode if an animated sequence is running
-        }
-
-        when (state.groupASelection) {
-            "Colour" -> {
-                if (state.colorR != null && state.colorG != null && state.colorB != null) {
-                    if (targetMacsList == null) setColor(state.colorR, state.colorG, state.colorB)
-                    else macs.forEach { sendCommandToDeviceDirect(it, DuoCoProtocol.createColorCommand(state.colorR, state.colorG, state.colorB)) }
-                }
-            }
-            "CCT" -> {
-                state.cctWarmth?.let { warmth ->
-                    if (targetMacsList == null) setWarmth(warmth)
-                    // Wait, warmth command for direct is complex (needs applying calibration logic directly? No, setWarmth applies globally)
-                    // Let's just create color command for warmth
-                    else {
-                        val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(warmth)
-                        val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
-                        val mappedRed = rgb[0]
-                        val mappedGreen = rgb[1]
-                        val mappedBlue = rgb[2]
-                        macs.forEach { mac -> sendCommandToDeviceDirect(mac, DuoCoProtocol.createColorCommand(mappedRed, mappedGreen, mappedBlue)) }
-                    }
-                }
-            }
-            "HardwareMode" -> {
-                state.modeIndex?.let { mi ->
-                    if (targetMacsList == null) setMode(mi)
-                    else macs.forEach { mac -> sendCommandToDeviceDirect(mac, DuoCoProtocol.createModeCommand(mi)) }
-                }
-                state.modeSpeed?.let { ms ->
-                    if (targetMacsList == null) setModeSpeed(ms)
-                    else macs.forEach { mac -> sendCommandToDeviceDirect(mac, DuoCoProtocol.createModeSpeedCommand(ms)) }
-                }
-            }
-            "Audio" -> {
-                if (targetMacsList == null) {
-                    state.musicMode?.let { startMusicSync(it) }
-                    state.audioPreset?.let { setVisualizerPreset(it) }
-                }
-            }
-            "Ambiance" -> {
-                if (targetMacsList == null) {
-                    // Start or stop ambiance based on state.ambianceIsOn
-                    if (state.ambianceIsOn == true && !com.example.ambiance.AmbianceCaptureState.isActive.value) {
-                        // Ambiance starting requires intent, we can't fully trigger it from here without intent
-                        // But we can apply the preset
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            android.widget.Toast.makeText(getApplication(), "Ambiance settings applied — tap Ambiance to start capture", android.widget.Toast.LENGTH_LONG).show()
-                        }
-                        applyAmbiancePreset(
-                            state.ambiancePreset ?: "Balanced",
-                            state.ambianceResponseSpeed ?: 0.5f,
-                            state.ambianceSmoothnessMs ?: 150,
-                            state.ambianceSaturationBoost ?: 1.4f,
-                            state.ambianceBrightnessCompensation ?: 1.0f,
-                            state.ambianceSceneCutSensitivity ?: 110.0f,
-                            state.ambianceNoiseDeadband ?: 0.10f
-                        )
-                        // Restoring the Scene's saved FPS value
-                        val fps = state.ambianceUpdateRateCapFps ?: 20
-                        _uiState.update { it.copy(ambianceSettings = it.ambianceSettings.copy(ambianceUpdateRateCapFps = fps)) }
-                        prefsRepo.putAmbiancePrefInt("update_rate_cap_fps", fps)
-                    } else if (state.ambianceIsOn == false && com.example.ambiance.AmbianceCaptureState.isActive.value) {
-                        com.example.ambiance.AmbianceCaptureService.stop(getApplication())
-                    }
-                }
-            }
-        }
-    
-        // Independent App-level Settings
-        // Ambiance Settings
-        state.ambianceResponseSpeed?.let { setAmbianceResponseSpeed(it) }
-        state.ambianceSmoothnessMs?.let { setAmbianceSmoothnessMs(it) }
-        state.ambianceSaturationBoost?.let { setAmbianceSaturationBoost(it) }
-        state.ambianceBrightnessCompensation?.let { setAmbianceBrightnessCompensation(it) }
-        state.ambianceUpdateRateCapFps?.let { setAmbianceUpdateRateCapFps(it) }
-        state.ambianceSceneCutSensitivity?.let { setAmbianceSceneCutSensitivity(it) }
-
-        // Audio Settings
-        state.audioAttack?.let { setAudioSmoothingAttack(it) }
-        state.audioDecay?.let { setAudioSmoothingDecay(it) }
-        state.audioFlash?.let { setAudioFlashStrength(it) }
-        state.noiseGateThreshold?.let { setNoiseGateThreshold(it) }
-        state.bassGain?.let { setBassGain(it) }
-        state.midGain?.let { setMidGain(it) }
-        state.highGain?.let { setHighGain(it) }
-        state.isAutoGainEnabled?.let { setAutoGainEnabled(it) }
-        state.isPaletteCyclingEnabled?.let { setPaletteCyclingEnabled(it) }
-        state.isLogarithmicScalingEnabled?.let { setLogarithmicScalingEnabled(it) }
-        state.audioGammaExponent?.let { setAudioGammaExponent(it) }
-        state.visualizerMinBrightness?.let { setVisualizerMinBrightness(it) }
-        state.visualizerColorSpeed?.let { setVisualizerColorSpeed(it) }
-
-        // Calibration Settings
-        state.bluetoothDelayMs?.let { setBluetoothDelayMs(it) }
-    }
+    fun applyScene(scene: AppScene, isReversing: Boolean = false) = sceneManager.applyScene(scene, isReversing)
     // --- ROOM DATABASE OPERATIONS ---
 
     fun savePreset(name: String) {
