@@ -454,24 +454,27 @@ class AudioSettingsReducerTest {
 
     // ========================================================================
     // SetBluetoothDelayMs — totalVisualDelayMs derivation regression tests.
-    // Guards the BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS = 180L stand-in: if the
-    // real BeatDetector's lookaheadMs default ever changes, this must be updated.
+    // totalVisualDelayMs mirrors bluetoothDelayMs directly (no added lookahead):
+    // the calibration flash bypasses queueCommand's totalVisualDelayMs delay
+    // entirely, so the calibrated value already IS the full delay to apply —
+    // adding BeatDetector's lookaheadMs on top double-counted detection latency
+    // that has already elapsed by the time a beat is ever reported.
     // ========================================================================
 
     @Test
-    fun setBluetoothDelayMs_derivesTotalVisualDelayAsValuePlus180msLookahead() {
+    fun setBluetoothDelayMs_derivesTotalVisualDelayAsValueDirectly() {
         val (newState, effects) = reduce(intent = RgbIntent.SetBluetoothDelayMs(50))
 
         assertEquals(50, newState.audioSettings.bluetoothDelayMs)
-        assertEquals(230, newState.audioSettings.totalVisualDelayMs) // 50 + 180
+        assertEquals(50, newState.audioSettings.totalVisualDelayMs)
         assertEquals(listOf(AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 50)), effects)
     }
 
     @Test
-    fun setBluetoothDelayMs_zero_totalVisualDelayEqualsBareLookahead() {
+    fun setBluetoothDelayMs_zero_totalVisualDelayIsZero() {
         val (newState, _) = reduce(intent = RgbIntent.SetBluetoothDelayMs(0))
 
-        assertEquals(180, newState.audioSettings.totalVisualDelayMs)
+        assertEquals(0, newState.audioSettings.totalVisualDelayMs)
     }
 
     @Test
@@ -486,7 +489,7 @@ class AudioSettingsReducerTest {
     // ========================================================================
 
     @Test
-    fun resetAudioPipelineSettings_restoresAllDefaultsIncludingTotalVisualDelay() {
+    fun resetAudioPipelineSettings_restoresAllDefaultsIncludingTotalVisualDelayIsZero() {
         val dirty = RgbUiState().let {
             it.copy(audioSettings = it.audioSettings.copy(
                 audioSmoothingAttack = 0.1f,
@@ -512,7 +515,7 @@ class AudioSettingsReducerTest {
         assertTrue(audio.isPaletteCyclingEnabled)
         assertTrue(audio.isLogarithmicScalingEnabled)
         assertEquals(0, audio.bluetoothDelayMs)
-        assertEquals(180, audio.totalVisualDelayMs) // BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS, unchanged by bluetoothDelayMs=0
+        assertEquals(0, audio.totalVisualDelayMs)
         assertEquals("Default", audio.visualizerPreset)
         assertEquals(0.45f, audio.audioGammaExponent)
         assertEquals(0.3f, audio.audioFlashStrength)

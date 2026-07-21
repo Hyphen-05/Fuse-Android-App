@@ -39,13 +39,6 @@ sealed interface AudioSideEffect {
     data class StartAudioEngine(val mode: String) : AudioSideEffect
 }
 
-// Mirrors BeatDetector's default lookaheadMs (com.example.core.audio.BeatDetector, moved out of
-// RgbControllerViewModel.kt in Phase 5, part B — see its constructor default there):
-// `BeatDetector().lookaheadMs` is always constructed with no args, so the effective value is always
-// this default. Kept as a local constant here rather than importing the class, to avoid this
-// reducer depending on audio-pipeline internals for a single derived value.
-private const val BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS = 180L
-
 private data class VisualizerConfig(
     val attack: Float, val decay: Float, val flash: Float, val gamma: Float, val idleDelay: Long,
     val noiseGate: Float, val bassGain: Float,
@@ -434,14 +427,17 @@ fun audioSettingsReducer(
             newState to effects
         }
 
-        // Derives totalVisualDelayMs = bluetoothDelayMs + BeatDetector().lookaheadMs inline, mirroring
-        // RgbControllerViewModel.setBluetoothDelayMs() (2904-2910). Only bluetooth_delay_ms is persisted —
-        // totalVisualDelayMs is not written to prefs in the source either.
+        // totalVisualDelayMs mirrors bluetoothDelayMs directly, not bluetoothDelayMs +
+        // BeatDetector's lookaheadMs: the calibration flash that produces this value is sent
+        // via broadcastCommandDirect, bypassing queueCommand's totalVisualDelayMs delay
+        // entirely, so the calibrated value already IS the full delay to apply. Only
+        // bluetooth_delay_ms is persisted — totalVisualDelayMs is not written to prefs
+        // in the source either.
         is RgbIntent.SetBluetoothDelayMs -> {
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = intent.value,
-                    totalVisualDelayMs = intent.value + BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS.toInt()
+                    totalVisualDelayMs = intent.value
                 )
             )
             val effects = listOf(
@@ -467,7 +463,7 @@ fun audioSettingsReducer(
                     isPaletteCyclingEnabled = true,
                     isLogarithmicScalingEnabled = true,
                     bluetoothDelayMs = 0,
-                    totalVisualDelayMs = BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS.toInt(),
+                    totalVisualDelayMs = 0,
                     visualizerPreset = "Default",
                     audioGammaExponent = 0.45f,
                     audioFlashStrength = 0.3f,

@@ -55,6 +55,12 @@ internal class BeatDetector(
     private var ibiIdx = 0
     private var lastBeatTime = 0L
 
+    // Slow-release reference for scaledMad — see its use in process() below. Prevents the
+    // MAD-based threshold/strength normalization from collapsing to near-zero the moment a
+    // track ends, which otherwise lets ambient mic self-noise/room noise look like a normal
+    // beat relative to its own (now tiny) recent variability.
+    private var madReference = 0f
+
     private var lastTempoUpdateTime = 0L
     private var lockedBpm = 0f
     private var candidateStreakCount = 0
@@ -436,7 +442,19 @@ internal class BeatDetector(
 
         // 1.4826 standard scale factor for normal distribution matching, with noise protection
         val scaledMad = maxOf(mad * 1.4826f, 0.1f)
-        val threshold = maxOf(medianFlux + thresholdMultiplier * scaledMad, 0.3f)
+
+        // Slow-release reference for scaledMad: tracks the loudest recent scaledMad instantly
+        // (attack), but decays over a few seconds (release) rather than collapsing the moment a
+        // track ends. Without this, scaledMad — and therefore both the candidate threshold below
+        // and the strength ratio further down — re-normalizes against whatever tiny variability
+        // is present during near-silence, so ambient mic/room noise between tracks ends up
+        // looking like a totally ordinary beat relative to itself, even though it's nowhere near
+        // the music's actual dynamic range. Flooring at 25% of the reference (not the full
+        // reference) still lets the detector adapt down over time for genuinely quiet songs.
+        madReference = if (scaledMad > madReference) scaledMad else madReference * 0.995f + scaledMad * 0.005f
+        val effectiveMad = maxOf(scaledMad, madReference * 0.25f)
+
+        val threshold = maxOf(medianFlux + thresholdMultiplier * effectiveMad, 0.3f)
 
         // 4. Local peak-picking: find the sample closest to evalTimestamp
         val evalSample = fluxBuffer.minByOrNull { kotlin.math.abs(it.timestampMs - evalTimestamp) }
@@ -476,8 +494,8 @@ internal class BeatDetector(
         // backends) — discarding all "how much bigger than 4x" information. This approaches 1
         // asymptotically instead, so strength keeps distinguishing "solid beat" from "huge beat"
         // well beyond the old ceiling.
-        val strength = if (scaledMad > 0.001f) {
-            val ratio = ((evalSample.flux - medianFlux) / scaledMad).coerceAtLeast(0f)
+        val strength = if (effectiveMad > 0.001f) {
+            val ratio = ((evalSample.flux - medianFlux) / effectiveMad).coerceAtLeast(0f)
             (1f - kotlin.math.exp(-ratio / 6f)).coerceIn(0f, 1f)
         } else {
             0f

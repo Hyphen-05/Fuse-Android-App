@@ -72,14 +72,6 @@ sealed interface CalibrationSideEffect {
     data class Log(val message: String) : CalibrationSideEffect
 }
 
-// Mirrors BeatDetector's default lookaheadMs (com.example.core.audio.BeatDetector, moved out of
-// RgbControllerViewModel.kt in Phase 5, part B — see its constructor default there):
-// `BeatDetector().lookaheadMs` is always constructed with no args, so the effective value is always
-// this default. Kept as a local constant here rather than importing the class, to avoid this
-// reducer depending on audio-pipeline internals for a single derived value.
-// Same constant as AudioSettingsReducer's BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS.
-private const val BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS = 180L
-
 fun calibrationFlowReducer(
     state: RgbUiState,
     intent: RgbIntent,
@@ -134,10 +126,17 @@ fun calibrationFlowReducer(
                 "Saved default calibrated delay of $currentDelay ms"
             }
 
+            // totalVisualDelayMs mirrors bluetoothDelayMs directly here, not
+            // bluetoothDelayMs + BeatDetector's lookaheadMs: the calibration flash
+            // (SendFlashPulse) is fired via broadcastCommandDirect, bypassing
+            // queueCommand's totalVisualDelayMs delay entirely, so currentDelay already
+            // IS the full delay the user tuned against the metronome click — adding the
+            // 180ms lookahead on top would double-count detection latency that has
+            // already elapsed by the time a beat is ever reported.
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = currentDelay,
-                    totalVisualDelayMs = currentDelay + BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS.toInt()
+                    totalVisualDelayMs = currentDelay
                 ),
                 calibrationFlow = state.calibrationFlow.copy(
                     showCalibrationPrompt = false,
@@ -178,7 +177,7 @@ fun calibrationFlowReducer(
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = 0,
-                    totalVisualDelayMs = BEAT_DETECTOR_DEFAULT_LOOKAHEAD_MS.toInt()
+                    totalVisualDelayMs = 0
                 ),
                 calibrationFlow = state.calibrationFlow.copy(calibrationDelayOffsetMs = 0),
                 connectivity = state.connectivity.copy(

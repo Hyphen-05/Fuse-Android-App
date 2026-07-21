@@ -119,7 +119,7 @@ class CalibrationFlowReducerTest {
             effects
         )
         assertEquals(55, newState.audioSettings.bluetoothDelayMs)
-        assertEquals(55 + 180, newState.audioSettings.totalVisualDelayMs)
+        assertEquals(55, newState.audioSettings.totalVisualDelayMs)
         assertFalse(newState.calibrationFlow.showCalibrationPrompt)
         assertFalse(newState.calibrationFlow.isCalibrationModeActive)
     }
@@ -220,7 +220,7 @@ class CalibrationFlowReducerTest {
         val (newState, _) = reduce(state = initial, intent = RgbIntent.ResetCalibrationSettings)
 
         assertEquals(0, newState.audioSettings.bluetoothDelayMs)
-        assertEquals(180, newState.audioSettings.totalVisualDelayMs)
+        assertEquals(0, newState.audioSettings.totalVisualDelayMs)
         assertEquals(0, newState.calibrationFlow.calibrationDelayOffsetMs)
         assertEquals(mapOf("A1" to 100, "A2" to 100), newState.connectivity.devicePacingMs)
     }

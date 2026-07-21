@@ -4,7 +4,6 @@ import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
 import com.example.core.calibration.CalibrationMatrixSolver
 import com.example.core.animation.ProceduralSceneParams
-import com.example.core.audio.BeatDetector
 import com.example.hardware.audio.MetronomePlayer
 import com.example.domain.repository.AppPreferencesRepository
 import com.example.domain.repository.RgbDatabaseRepository
@@ -201,7 +200,14 @@ class RgbControllerViewModel(
                 isPaletteCyclingEnabled = prefsRepo.getAppStatePrefBoolean("is_palette_cycling_enabled", true),
                 isLogarithmicScalingEnabled = prefsRepo.getAppStatePrefBoolean("is_logarithmic_scaling_enabled", true),
                 bluetoothDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
-                totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0) + BeatDetector().lookaheadMs.toInt(),
+                // totalVisualDelayMs mirrors bluetoothDelayMs directly — the calibration flash
+                // (SendFlashPulse) is sent via broadcastCommandDirect, bypassing queueCommand's
+                // totalVisualDelayMs delay entirely, so the value the user tunes against the
+                // metronome click already IS the full delay that should be applied here. Adding
+                // BeatDetector's lookaheadMs on top double-counts: that 180ms is detection latency
+                // that has already elapsed by the time a beat is reported, not an additional delay
+                // to apply going forward.
+                totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
                 visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
                 audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
@@ -1307,7 +1313,7 @@ class RgbControllerViewModel(
                         detectedAudioDeviceName = name,
                         activeAudioDeviceIdentifier = identifier,
                         bluetoothDelayMs = savedDelay,
-                        totalVisualDelayMs = savedDelay + BeatDetector().lookaheadMs.toInt()
+                        totalVisualDelayMs = savedDelay
                     ),
                     calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
                 )
@@ -1320,7 +1326,7 @@ class RgbControllerViewModel(
                         detectedAudioDeviceName = name,
                         activeAudioDeviceIdentifier = identifier,
                         bluetoothDelayMs = 0,
-                        totalVisualDelayMs = BeatDetector().lookaheadMs.toInt()
+                        totalVisualDelayMs = 0
                     ),
                     calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = true)
                 )
@@ -1338,7 +1344,7 @@ class RgbControllerViewModel(
                     detectedAudioDeviceName = null,
                     activeAudioDeviceIdentifier = null,
                     bluetoothDelayMs = 0,
-                    totalVisualDelayMs = BeatDetector().lookaheadMs.toInt()
+                    totalVisualDelayMs = 0
                 ),
                 calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
             )

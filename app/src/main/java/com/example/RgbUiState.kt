@@ -106,7 +106,7 @@ data class AudioSettingsState(
     val isPaletteCyclingEnabled: Boolean = true,
     val isLogarithmicScalingEnabled: Boolean = true,
     val bluetoothDelayMs: Int = 0,
-    val totalVisualDelayMs: Int = 180,
+    val totalVisualDelayMs: Int = 0,
     val visualizerPreset: String = "Default",
     val audioGammaExponent: Float = 0.45f,
     val audioFlashStrength: Float = 0.3f,
