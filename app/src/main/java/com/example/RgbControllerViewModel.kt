@@ -151,17 +151,13 @@ class RgbControllerViewModel(
     private val repository: com.example.domain.repository.RgbDatabaseRepository,
     private val connectionManager: com.example.domain.ConnectionManager,
     private val bleScanTransport: com.example.hardware.ble.BleScanTransport,
-    private val bleGattTransport: com.example.hardware.ble.BleGattTransport
-) : androidx.lifecycle.ViewModel() {
+    private val bleGattTransport: com.example.hardware.ble.BleGattTransport,
+    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink
+) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener {
 
     private fun getApplication(): android.app.Application = application as android.app.Application
 
     companion object {
-        @Volatile
-        private var instance: RgbControllerViewModel? = null
-
-        fun getActiveInstance(): RgbControllerViewModel? = instance
-
         // Scene-orchestration exclusion set — NOT BLE transport, stays here. The raw BLE connection
         // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
         // connectionScope) moved to com.example.hardware.ble.AndroidBleGattTransport (Phase 6).
@@ -778,12 +774,14 @@ class RgbControllerViewModel(
     val customModes: StateFlow<List<CustomMode>>
 
     init {
-        instance = this
-
         // Point the long-lived BLE transport's live callbacks/hooks at this ViewModel. Because the
         // transport is a singleton that survives ViewModel recreation, re-registering here (rather
-        // than the callback hunting for getActiveInstance()) is what keeps its GATT callbacks and
-        // its DeviceWriteManagers wired to the current VM — closing that escape hatch on this path.
+        // than the callback hunting for a static getActiveInstance()) is what keeps its GATT
+        // callbacks and its DeviceWriteManagers wired to the current VM — closing that escape hatch
+        // on this path. The ambiance-capture escape hatch is closed the same way via
+        // ambianceCommandSink below. Neither external nor internal callers of the old
+        // RgbControllerViewModel.getActiveInstance() static singleton remain (verified by repo-wide
+        // grep during the Phase 6 merge) — the companion-object `instance` field/getter was removed.
         bleGattTransport.registerCallbacks(
             onConnectionStateChange = { address, status, newState -> handleConnectionStateChange(address, status, newState) },
             onServicesDiscovered = { address, status -> handleServicesDiscovered(address, status) },
@@ -799,6 +797,7 @@ class RgbControllerViewModel(
             diagAttribution = { address -> getDiagAttribution(address) }
         )
 
+        ambianceCommandSink.listener = this
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
 
@@ -1829,11 +1828,11 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetShowFpsTracker(enabled))
     }
 
-    fun writeAmbianceColor(r: Int, g: Int, b: Int) {
+    override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
     }
 
-    fun setAmbianceCaptureActive(active: Boolean) {
+    override fun setAmbianceCaptureActive(active: Boolean) {
         dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
@@ -2319,8 +2318,8 @@ class RgbControllerViewModel(
     // the AudioRecord capture loop, now lives in AudioRecordCaptureSource.
 
     override fun onCleared() {
-        if (instance === this) {
-            instance = null
+        if (ambianceCommandSink.listener === this) {
+            ambianceCommandSink.listener = null
         }
         super.onCleared()
         stopMusicSyncInternal()
