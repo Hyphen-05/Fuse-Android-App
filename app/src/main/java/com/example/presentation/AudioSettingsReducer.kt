@@ -576,6 +576,18 @@ fun audioSettingsReducer(
             newState to effects
         }
 
+        // Same by-ear calibration pattern as SetBluetoothDelayMs above — see the field's doc
+        // comment on AudioSettingsState for what it drives.
+        is RgbIntent.SetFlashTimingOffsetMs -> {
+            val newState = state.copy(
+                audioSettings = state.audioSettings.copy(flashTimingOffsetMs = intent.value)
+            )
+            val effects = listOf(
+                AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", intent.value)
+            )
+            newState to effects
+        }
+
         // Mirrors RgbControllerViewModel.resetAudioPipelineSettings() (2912-2962).
         is RgbIntent.ResetAudioPipelineSettings -> {
             val newState = state.copy(
@@ -594,6 +606,7 @@ fun audioSettingsReducer(
                     isLogarithmicScalingEnabled = true,
                     bluetoothDelayMs = 0,
                     totalVisualDelayMs = 0,
+                    flashTimingOffsetMs = 100,
                     visualizerPreset = "Default",
                     audioGammaExponent = 0.45f,
                     audioFlashStrength = 0.3f,
@@ -634,6 +647,7 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefBoolean("is_palette_cycling_enabled", true),
                 AudioSideEffect.SaveAudioPrefBoolean("is_logarithmic_scaling_enabled", true),
                 AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 0),
+                AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 100),
                 AudioSideEffect.SaveAudioPrefString("visualizer_preset", "Default"),
                 AudioSideEffect.SaveAudioPrefFloat("audio_gamma_exponent", 0.45f),
                 AudioSideEffect.SaveAudioPrefFloat("audio_flash_strength", 0.3f),

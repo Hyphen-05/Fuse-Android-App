@@ -80,7 +80,16 @@ internal class BeatDetector(
         // `now`; null whenever there's no tempo lock or no grid yet, same gating as
         // phaseAgreement's own gridBeats/lockedBpm check below. Absolute timestamp comparable to
         // the `now` passed into process(), not relative to evalTimestamp.
-        val nextPredictedBeatMs: Long? = null
+        val nextPredictedBeatMs: Long? = null,
+        // Predictive flash scheduling, P1 (mapping-proposal-audio-to-led-2026-07-21.md §4 —
+        // "fast causal trigger when not tempo-locked"). A cheap, causal (not centered) onset
+        // check on this frame's raw flux value against a *trailing* median/MAD window, computed
+        // unconditionally alongside the centered detector above but otherwise independent of it —
+        // does not feed isBeat/strength/confidence/nextPredictedBeatMs. Exists purely so a
+        // consumer (AudioDspProcessor's flash scheduler) has a ~1-frame-latency fallback trigger
+        // for the window before a tempo lock exists, when nextPredictedBeatMs is still null.
+        val causalFlux: Float = 0f,
+        val causalIsCandidate: Boolean = false
     )
 
     private class BandResult(
@@ -413,6 +422,29 @@ internal class BeatDetector(
             updateTempoAndGrid(now)
         }
 
+        // Fast causal trigger inputs (P1, mapping-proposal-audio-to-led-2026-07-21.md §4): a
+        // trailing-window (not centered) median/MAD threshold on `flux`, the sample for `now`
+        // itself -- unlike the centered detector below, this needs no lookahead buffer, so it's
+        // valid from the very first frame. Reuses `thresholdMultiplier` (the same tuning knob the
+        // centered detector uses) rather than inventing a second one. Cheap: the trailing window
+        // is the same medianWindowMs duration, just anchored at `now` instead of `evalTimestamp`.
+        val causalWindowStart = now - medianWindowMs
+        val causalSubset = fluxBuffer.filter { it.timestampMs in causalWindowStart..now }
+        val causalFlux: Float
+        val causalIsCandidate: Boolean
+        if (causalSubset.isEmpty()) {
+            causalFlux = flux
+            causalIsCandidate = false
+        } else {
+            val causalFluxes = causalSubset.map { it.flux }
+            val causalMedian = getMedian(causalFluxes)
+            val causalMad = getMedian(causalFluxes.map { kotlin.math.abs(it - causalMedian) })
+            val causalScaledMad = maxOf(causalMad * 1.4826f, 0.1f)
+            val causalThreshold = maxOf(causalMedian + thresholdMultiplier * causalScaledMad, 0.3f)
+            causalFlux = flux
+            causalIsCandidate = flux > causalThreshold
+        }
+
         // 2. Introduce the evaluation point (results now describe evalTimestamp in the past)
         // (c) Results describe evalTimestamp, a point ~lookaheadMs in the past:
         // This intentionally introduces a fixed detection latency (~150-200ms) to allow looking ahead
@@ -427,7 +459,7 @@ internal class BeatDetector(
         val hasLatest = fluxBuffer.any { it.timestampMs >= latestLimit }
 
         if (!hasEarliest || !hasLatest) {
-            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
+            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence, causalFlux = causalFlux, causalIsCandidate = causalIsCandidate)
         }
 
         // 3. Centered median/MAD threshold evaluation
@@ -438,7 +470,7 @@ internal class BeatDetector(
         // threshold that reflects local signal conditions symmetrically.
         val subset = fluxBuffer.filter { it.timestampMs in earliestLimit..(evalTimestamp + (medianWindowMs / 2)) }
         if (subset.isEmpty()) {
-            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
+            return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence, causalFlux = causalFlux, causalIsCandidate = causalIsCandidate)
         }
 
         val subsetFluxes = subset.map { it.flux }
@@ -465,7 +497,7 @@ internal class BeatDetector(
 
         // 4. Local peak-picking: find the sample closest to evalTimestamp
         val evalSample = fluxBuffer.minByOrNull { kotlin.math.abs(it.timestampMs - evalTimestamp) }
-            ?: return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence)
+            ?: return BeatResult(isBeat = false, strength = 0f, confidence = 0f, bpm = lockedBpm, bpmConfidence = lockedBpmConfidence, causalFlux = causalFlux, causalIsCandidate = causalIsCandidate)
 
         // Filter samples inside the small peak window around evalTimestamp
         val peakWindowStart = evalTimestamp - peakWindowMs
@@ -547,7 +579,7 @@ internal class BeatDetector(
             null
         }
 
-        return BeatResult(isBeat, strength, confidence, lockedBpm, lockedBpmConfidence, nextPredictedBeatMs)
+        return BeatResult(isBeat, strength, confidence, lockedBpm, lockedBpmConfidence, nextPredictedBeatMs, causalFlux, causalIsCandidate)
     }
 
     private fun getMedian(list: List<Float>): Float {

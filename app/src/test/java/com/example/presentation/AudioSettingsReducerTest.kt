@@ -505,6 +505,20 @@ class AudioSettingsReducerTest {
     }
 
     // ========================================================================
+    // SetFlashTimingOffsetMs — P1 predictive flash scheduling's by-ear slider,
+    // same standalone-value pattern as SetBluetoothDelayMs above (no preset reset,
+    // single pref write).
+    // ========================================================================
+
+    @Test
+    fun setFlashTimingOffsetMs_updatesStateAndPersists() {
+        val (newState, effects) = reduce(intent = RgbIntent.SetFlashTimingOffsetMs(120))
+
+        assertEquals(120, newState.audioSettings.flashTimingOffsetMs)
+        assertEquals(listOf(AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 120)), effects)
+    }
+
+    // ========================================================================
     // ResetAudioPipelineSettings
     // ========================================================================
 
@@ -515,6 +529,7 @@ class AudioSettingsReducerTest {
                 audioSmoothingAttack = 0.1f,
                 bluetoothDelayMs = 999,
                 totalVisualDelayMs = 9999,
+                flashTimingOffsetMs = 250,
                 visualizerPreset = "Custom",
                 bassGain = 5f
             ))
@@ -536,6 +551,7 @@ class AudioSettingsReducerTest {
         assertTrue(audio.isLogarithmicScalingEnabled)
         assertEquals(0, audio.bluetoothDelayMs)
         assertEquals(0, audio.totalVisualDelayMs)
+        assertEquals(100, audio.flashTimingOffsetMs)
         assertEquals("Default", audio.visualizerPreset)
         assertEquals(0.45f, audio.audioGammaExponent)
         assertEquals(0.3f, audio.audioFlashStrength)
@@ -549,6 +565,7 @@ class AudioSettingsReducerTest {
         assertEquals(2500L, audio.idleTriggerDelayMs)
 
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 0)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 100)))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("visualizer_preset", "Default")))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_floor", 0.6f)))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.4f)))

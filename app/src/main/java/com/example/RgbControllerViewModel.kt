@@ -208,6 +208,7 @@ class RgbControllerViewModel(
                 // that has already elapsed by the time a beat is reported, not an additional delay
                 // to apply going forward.
                 totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
+                flashTimingOffsetMs = prefsRepo.getAppStatePrefInt("flash_timing_offset_ms", 100),
                 visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
                 audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
@@ -2081,6 +2082,10 @@ class RgbControllerViewModel(
 
     fun setBluetoothDelayMs(value: Int) {
         dispatch(RgbIntent.SetBluetoothDelayMs(value))
+    }
+
+    fun setFlashTimingOffsetMs(value: Int) {
+        dispatch(RgbIntent.SetFlashTimingOffsetMs(value))
     }
 
     fun resetAudioPipelineSettings() {

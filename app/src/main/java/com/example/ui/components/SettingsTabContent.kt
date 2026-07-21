@@ -656,6 +656,41 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                                 Text("Calibrate")
                             }
                         }
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Flash Timing Offset",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${state.audioSettings.flashTimingOffsetMs} ms",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Text(
+                            text = "Fine-tunes when the music-sync flash renders relative to the predicted beat. " +
+                                "Play a steady-beat visualizer preset and adjust by ear/eye until the flash lands " +
+                                "exactly on the beat — this is tuned by feel, not measured.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.flashTimingOffsetMs.toFloat(),
+                            onValueChange = { viewModel.setFlashTimingOffsetMs(it.toInt()) },
+                            valueRange = 0f..300f,
+                            totalSteps = 300,
+                            modifier = Modifier.fillMaxWidth().testTag("flash_timing_offset_slider")
+                        )
                     }
                 }
 
