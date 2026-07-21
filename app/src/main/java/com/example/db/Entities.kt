@@ -26,7 +26,14 @@ data class SavedDevice(
     @PrimaryKey val macAddress: String,
     val customName: String,
     val isAutoConnectEnabled: Boolean = true,
-    val isActiveControlEnabled: Boolean = true
+    val isActiveControlEnabled: Boolean = true,
+    // Multi-device spatial roles (visualizer-review-2026-07-21.md P4). "Mirror" (default) is the
+    // pre-existing behavior — identical color to every device. String, not an enum, matching the
+    // existing string-enum convention (visualizerPreset/musicMode/sustainResponse).
+    val deviceRole: String = "Mirror",
+    // Only consulted when deviceRole == "HueOffset". 180° (complementary) default; a 90°
+    // split-complementary look is the documented alternative some users may prefer.
+    val hueOffsetDegrees: Float = 180f
 )
 
 @Entity(tableName = "custom_modes")

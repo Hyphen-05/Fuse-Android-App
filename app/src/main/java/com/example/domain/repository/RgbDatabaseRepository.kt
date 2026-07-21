@@ -22,6 +22,8 @@ interface RgbDatabaseRepository {
     suspend fun deleteSavedDevice(macAddress: String)
     suspend fun updateAutoConnect(macAddress: String, enabled: Boolean)
     suspend fun updateActiveControl(macAddress: String, enabled: Boolean)
+    suspend fun updateDeviceRole(macAddress: String, role: String)
+    suspend fun updateHueOffsetDegrees(macAddress: String, degrees: Float)
     suspend fun insertCustomMode(customMode: CustomMode)
     suspend fun deleteAllCustomModes()
     suspend fun insertCustomModes(customModes: List<CustomMode>)

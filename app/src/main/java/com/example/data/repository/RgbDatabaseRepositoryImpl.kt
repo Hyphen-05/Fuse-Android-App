@@ -40,6 +40,12 @@ class RgbDatabaseRepositoryImpl(private val rgbDao: RgbDao) : RgbDatabaseReposit
     override suspend fun updateActiveControl(macAddress: String, enabled: Boolean) {
         rgbDao.updateActiveControl(macAddress, enabled)
     }
+    override suspend fun updateDeviceRole(macAddress: String, role: String) {
+        rgbDao.updateDeviceRole(macAddress, role)
+    }
+    override suspend fun updateHueOffsetDegrees(macAddress: String, degrees: Float) {
+        rgbDao.updateHueOffsetDegrees(macAddress, degrees)
+    }
     override suspend fun insertCustomMode(customMode: CustomMode) {
         rgbDao.insertCustomMode(customMode)
     }

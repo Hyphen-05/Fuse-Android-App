@@ -6,7 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.db.SavedDevice
 
-@Database(entities = [RgbPreset::class, RgbDeviceAlias::class, SavedDevice::class, CustomMode::class, ColorCalibration::class], version = 4, exportSchema = false)
+@Database(entities = [RgbPreset::class, RgbDeviceAlias::class, SavedDevice::class, CustomMode::class, ColorCalibration::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun rgbDao(): RgbDao
 

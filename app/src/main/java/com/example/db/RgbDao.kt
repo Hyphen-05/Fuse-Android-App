@@ -41,6 +41,12 @@ interface RgbDao {
     @Query("UPDATE saved_devices SET isActiveControlEnabled = :enabled WHERE macAddress = :macAddress")
     suspend fun updateActiveControl(macAddress: String, enabled: Boolean)
 
+    @Query("UPDATE saved_devices SET deviceRole = :role WHERE macAddress = :macAddress")
+    suspend fun updateDeviceRole(macAddress: String, role: String)
+
+    @Query("UPDATE saved_devices SET hueOffsetDegrees = :degrees WHERE macAddress = :macAddress")
+    suspend fun updateHueOffsetDegrees(macAddress: String, degrees: Float)
+
     @Query("SELECT * FROM custom_modes ORDER BY byteValue ASC")
     fun getAllCustomModes(): Flow<List<CustomMode>>
 
