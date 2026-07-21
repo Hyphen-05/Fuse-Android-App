@@ -316,6 +316,60 @@ fun DevicesScreen(
                                     }
                                 }
 
+                                HorizontalDivider(color = if (isConnected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant)
+
+                                // Row 3: Visualizer spatial role (visualizer-review-2026-07-21.md P4).
+                                // Default "Mirror" reproduces pre-existing behavior exactly for
+                                // single-device setups or anyone who doesn't want the spatial effects.
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "Visualizer Role",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        listOf("Mirror", "HueOffset", "AlternatingFlash", "BandSplit").forEach { role ->
+                                            FilterChip(
+                                                selected = saved.deviceRole == role,
+                                                onClick = { viewModel.setDeviceRole(saved.macAddress, role) },
+                                                label = {
+                                                    Text(
+                                                        text = when (role) {
+                                                            "HueOffset" -> "Hue Offset"
+                                                            "AlternatingFlash" -> "Alternating"
+                                                            "BandSplit" -> "Band Split"
+                                                            else -> role
+                                                        },
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.testTag("device_role_chip_${saved.macAddress}_$role")
+                                            )
+                                        }
+                                    }
+                                    if (saved.deviceRole == "HueOffset") {
+                                        Text(
+                                            text = "Hue offset: ${saved.hueOffsetDegrees.toInt()}° (180° = complementary, 90° = split-complementary)",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        )
+                                        Slider(
+                                            value = saved.hueOffsetDegrees,
+                                            onValueChange = { viewModel.setDeviceHueOffsetDegrees(saved.macAddress, it) },
+                                            valueRange = 0f..360f,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("hue_offset_slider_${saved.macAddress}")
+                                        )
+                                    }
+                                }
 
                             }
                         }

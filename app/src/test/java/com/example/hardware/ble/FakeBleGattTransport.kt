@@ -45,6 +45,7 @@ class FakeBleGattTransport(
     val connectCalls = mutableListOf<String>()
     val disconnectedAddresses = mutableListOf<String>()
     val writtenCommands = mutableListOf<Pair<String, ByteArray>>()
+    val writtenCommandPriorities = mutableListOf<Triple<String, Float, Boolean>>()
     val writeCompletedAddresses = mutableListOf<String>()
     val requestPriorityCalls = mutableListOf<String>()
     val discoverServicesCalls = mutableListOf<String>()
@@ -109,12 +110,17 @@ class FakeBleGattTransport(
         return registrationResult
     }
 
-    override fun writeCommand(address: String, command: ByteArray) {
+    override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
         writtenCommands.add(address to command)
+        writtenCommandPriorities.add(Triple(address, priority, bypassPacing))
     }
 
     override fun notifyWriteCompleted(address: String) {
         writeCompletedAddresses.add(address)
+    }
+
+    override fun getPacingMs(address: String, default: Int): Int {
+        return pacingSet.lastOrNull { it.first == address }?.second ?: default
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {

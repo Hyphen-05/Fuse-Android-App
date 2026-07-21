@@ -1778,6 +1778,88 @@ class RgbControllerViewModel(
         }
     }
 
+    // Round-robins which AlternatingFlash-role device gets the real flash on each detected beat
+    // (visualizer-review-2026-07-21.md P4) — shared across all such devices so they take turns
+    // rather than each independently computing its own parity.
+    private var alternatingFlashBeatCounter = 0
+
+    /**
+     * Same delay-then-broadcast shape as [queueCommand], but for one audio-DSP frame: computes a
+     * per-device command via [applyDeviceRoleToResult] instead of broadcasting identical bytes to
+     * every device (visualizer-review-2026-07-21.md P4), and threads [AudioDspResult.value]/
+     * [AudioDspResult.isBeat] through to the write path as the peak-hold priority / pacing-bypass
+     * signal (P2).
+     */
+    private fun queueAudioResult(result: com.example.core.audio.AudioDspResult) {
+        if (!_uiState.value.audioSettings.isAudioSyncRunning) return
+
+        val delayMs = _uiState.value.audioSettings.totalVisualDelayMs
+        if (delayMs > 0) {
+            viewModelScope.launch(Dispatchers.Default) {
+                delay(delayMs.toLong())
+                if (!_uiState.value.audioSettings.isAudioSyncRunning) return@launch
+                broadcastAudioResultDirect(result)
+            }
+        } else {
+            broadcastAudioResultDirect(result)
+        }
+    }
+
+    private fun broadcastAudioResultDirect(result: com.example.core.audio.AudioDspResult) {
+        val targetAddresses = getCurrentlyControlledDeviceAddresses()
+        if (result.isBeat) alternatingFlashBeatCounter++
+
+        val alternatingAddresses = targetAddresses.filter { deviceRoleFor(it) == "AlternatingFlash" }
+        val bandSplitAddresses = targetAddresses.filter { deviceRoleFor(it) == "BandSplit" }
+
+        targetAddresses.forEach { address ->
+            sceneRunners[address]?.release()
+            sceneRunners.remove(address)
+
+            if (activeExcludedMacs.contains(address)) return@forEach
+
+            val (r, g, b) = when (deviceRoleFor(address)) {
+                "HueOffset" -> {
+                    val offset = savedDevices.value.find { it.macAddress == address }?.hueOffsetDegrees ?: 180f
+                    ColorConverter.hsvToRgb((result.hue + offset + 360f) % 360f, result.sat, result.value)
+                }
+                "AlternatingFlash" -> {
+                    val myIdx = alternatingAddresses.indexOf(address)
+                    val groupSize = alternatingAddresses.size.coerceAtLeast(1)
+                    val isFlashTarget = myIdx >= 0 && (alternatingFlashBeatCounter % groupSize) == myIdx
+                    ColorConverter.hsvToRgb(result.hue, result.sat, if (isFlashTarget) result.value else result.ambientValue)
+                }
+                "BandSplit" -> {
+                    val myIdx = bandSplitAddresses.indexOf(address)
+                    val level = if (myIdx % 2 == 0) result.bassLevel else result.midHighLevel
+                    ColorConverter.hsvToRgb(result.hue, result.sat, level)
+                }
+                else -> Triple(result.r, result.g, result.b)
+            }
+            val cmd = DuoCoProtocol.createMusicColorCommand(r, g, b)
+
+            if (_uiState.value.coreControl.isDemoMode) {
+                if (_uiState.value.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED) {
+                    val finalCmd = processCommandWithCalibration(address, cmd)
+                    val hexStr = finalCmd.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
+                    addLog("[Simulated Broadcast] Sent to $address: $hexStr")
+                }
+            } else {
+                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.isBeat)
+            }
+        }
+    }
+
+    private fun deviceRoleFor(address: String): String {
+        return savedDevices.value.find { it.macAddress == address }?.deviceRole ?: "Mirror"
+    }
+
+    private fun currentEffectivePacingMs(): Int {
+        val addresses = getCurrentlyControlledDeviceAddresses()
+        if (addresses.isEmpty()) return 0
+        return addresses.maxOf { bleGattTransport.getPacingMs(it) }
+    }
+
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
         if (_uiState.value.coreControl.isDemoMode) {
             val finalCmd = processCommandWithCalibration(address, command)
@@ -2145,6 +2227,22 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.DeleteSavedDevice(address))
     }
 
+    // Multi-device spatial roles (visualizer-review-2026-07-21.md P4). SavedDevice already lives
+    // outside RgbUiState/the reducer system (its own `savedDevices` StateFlow backed directly by
+    // the DB), so these go straight to the repository rather than through dispatch() — same
+    // pattern as updateCustomMode below.
+    fun setDeviceRole(address: String, role: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateDeviceRole(address, role)
+        }
+    }
+
+    fun setDeviceHueOffsetDegrees(address: String, degrees: Float) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateHueOffsetDegrees(address, degrees)
+        }
+    }
+
     fun updateCustomMode(customMode: CustomMode) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertCustomMode(customMode)
@@ -2229,8 +2327,15 @@ class RgbControllerViewModel(
         latestG = result.g
         latestB = result.b
 
-        val cmd = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
-        queueCommand(cmd)
+        if (result.isBeat) {
+            // P0 (visualizer-review-2026-07-21.md): detection timestamp, correlatable against
+            // DeviceWriteManager's "Write enqueued"/"writeCharacteristic() initiated" log lines by
+            // matching cmdHex (exact only for Mirror-role devices, which is the common case).
+            val cmdHex = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
+                .joinToString("") { String.format("%02X", it) }
+            DiagnosticLogger.log("AudioSync", "Beat peak frame detected: cmdHex=$cmdHex value=${result.value}")
+        }
+        queueAudioResult(result)
 
         _uiState.update {
             it.copy(audioSettings = it.audioSettings.copy(isVisualizerIdle = result.isIdle))
@@ -2255,7 +2360,7 @@ class RgbControllerViewModel(
 
             val started = source.start(
                 onFrame = { frame ->
-                    processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                    processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis(), currentEffectivePacingMs())
                         ?.let { publishAudioDspResult(it) }
                 },
                 onLog = { addLog(it) },
@@ -2282,7 +2387,7 @@ class RgbControllerViewModel(
 
         source.start(
             onFrame = { frame ->
-                processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis())
+                processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis(), currentEffectivePacingMs())
                     ?.let { publishAudioDspResult(it) }
             },
             onLog = { addLog(it) },

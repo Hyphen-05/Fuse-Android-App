@@ -18,7 +18,24 @@ data class AudioDspResult(
     val b: Int,
     val hue: Float,
     val amplitudes: List<Float>,
-    val isIdle: Boolean
+    val isIdle: Boolean,
+    // --- Fields below added for the delivery-path work (visualizer-review-2026-07-21.md P2/P4) ---
+    // Final HSV components behind r/g/b, exposed so per-device role transforms (P4) and the
+    // wire's peak-hold priority (P2) can recompute a variant color without re-deriving hue/sat/value
+    // from the RGB bytes.
+    val sat: Float = 0f,
+    val value: Float = 0f,
+    // value with the beat-flash contribution zeroed out — i.e. what this frame would have been on
+    // pure ambient/ambient-floor alone. Used by AlternatingFlash (P4) for the device that isn't the
+    // flash target this beat, and available generally as "value minus the transient spike."
+    val ambientValue: Float = 0f,
+    // True only on the exact frame BeatDetector fired (not just a high `value`) — the write path's
+    // peak-priority bypass (P2) and AlternatingFlash's per-beat device toggle (P4) both need to know
+    // "this frame IS the beat," not just "this frame is loud."
+    val isBeat: Boolean = false,
+    // 0..1 band levels for BandSplit (P4): one device following bass, the other mid/high.
+    val bassLevel: Float = 0f,
+    val midHighLevel: Float = 0f
 )
 
 /**
@@ -126,7 +143,17 @@ class AudioDspProcessor(private val backend: AudioBackend) {
      * outright — mirrors the Visualizer backend's original `if (numBins < 349) return` guard,
      * which discarded the frame with no state update and no downstream publish at all.
      */
-    fun process(frame: AudioCaptureFrame, settings: AudioSettingsState, nowMs: Long): AudioDspResult? {
+    fun process(
+        frame: AudioCaptureFrame,
+        settings: AudioSettingsState,
+        nowMs: Long,
+        // The slowest currentPacingMs among the devices this frame will be broadcast to, or 0 if
+        // unknown/no connected devices yet. Used only to floor the effective flash-decay window
+        // (visualizer-review-2026-07-21.md P2) — a percussive preset's decay envelope must span at
+        // least a couple of wire writes, or the whole flash can land in the gap between two paced
+        // writes and never be visible at all. 0 means "don't floor," not "floor to zero."
+        effectivePacingMs: Int = 0
+    ): AudioDspResult? {
         val numBins = frame.numBins
         if (numBins < 349) return null
 
@@ -460,12 +487,27 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
         val valBase = maxOf(bc, midContribution * 0.3f)
 
+        // Floor the effective decay window to the wire (visualizer-review-2026-07-21.md P2): a
+        // preset's `beatFlashDecayMs` is tuned assuming every frame reaches the device, but at
+        // real pacing (default 50ms, auto-tune may land higher) a short decay like Laser Sharp's
+        // 70ms can fall entirely between two paced writes, so the flash is a coin-flip whether it
+        // ever appears on the wire at all. 2.5x is chosen to guarantee at least ~2 writes land
+        // inside the envelope regardless of phase alignment between the beat and the pacing timer.
+        val effectiveBeatFlashDecayMs = if (effectivePacingMs > 0) {
+            maxOf(state.beatFlashDecayMs, effectivePacingMs * 2.5f)
+        } else {
+            state.beatFlashDecayMs
+        }
+
         var value: Float
+        var ambientValue: Float
         if (state.visualizerPreset == "Beat Only") {
             val elapsedMs = nowMs - lastBeatFlashTime
-            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
+            val t = elapsedMs.toFloat() / effectiveBeatFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
             value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
+            // Beat Only has no ambient term at all — its floor is the closest thing to "no flash."
+            ambientValue = state.visualizerMinBrightness
         } else {
             var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
             baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
@@ -481,7 +523,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // both presets, since neither overrides them. audioFlashStrength, not flashRange, is
             // the actual "does this preset flash at all" signal; gating on flashRange here was
             // wrong and never actually skipped the pre-dip for these two presets.
-            val msUntilPredictedBeat = result.nextPredictedBeatMs?.let { it - nowMs }
+            // Retargeted to the predicted *flash* time, not the predicted audible onset
+            // (visualizer-review-2026-07-21.md P2/§1c): nextPredictedBeatMs extrapolates the DP
+            // grid, which lives on the capture/onset timeline, but the flash for that beat doesn't
+            // actually start until BeatDetector's centered detector fires at onset + lookaheadMs.
+            // Without the offset the dip fired, released, and then ~180ms of plain ambient played
+            // before the flash — the dip-then-pop contrast never happened. This is the interim fix
+            // the proposal names explicitly; the real fix is predictive flash scheduling (P1),
+            // out of scope this session.
+            val msUntilPredictedBeat = result.nextPredictedBeatMs?.let { (it + beatDetector.lookaheadMs) - nowMs }
             val preDip = if (state.audioFlashStrength > 0f && msUntilPredictedBeat != null && msUntilPredictedBeat in 0..80L) {
                 0.10f * (1f - msUntilPredictedBeat / 80f)
             } else {
@@ -489,15 +539,17 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             }
             val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip)
             val elapsedMs = nowMs - lastBeatFlashTime
-            val t = elapsedMs.toFloat() / state.beatFlashDecayMs
+            val t = elapsedMs.toFloat() / effectiveBeatFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
             val beatFlash = beatEnvelope * state.audioFlashStrength
             value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
+            ambientValue = maxOf(state.visualizerMinBrightness, ambientLevel.coerceIn(0f, 1f))
         }
         if (state.sustainResponse == "BRIGHTNESS_SWELL") {
             // +0.10 is the one sustain-response magnitude the proposal doc gives explicitly
             // (Ambient Chill's row in §5's per-preset table).
             value = (value + 0.10f * sustainIntensity).coerceIn(0.0f, 1.0f)
+            ambientValue = (ambientValue + 0.10f * sustainIntensity).coerceIn(0.0f, 1.0f)
         }
 
         val (r, g, b) = ColorConverter.hsvToRgb(smoothedHue, sat, value)
@@ -560,7 +612,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             b = b,
             hue = smoothedHue,
             amplitudes = normalizedAmplitudesList,
-            isIdle = isIdle
+            isIdle = isIdle,
+            sat = sat,
+            value = value,
+            ambientValue = ambientValue,
+            isBeat = isBeat,
+            bassLevel = bc,
+            midHighLevel = midContribution
         )
     }
 }

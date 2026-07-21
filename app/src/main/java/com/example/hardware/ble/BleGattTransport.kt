@@ -82,11 +82,22 @@ interface BleGattTransport {
     /** Finds the DuoCo write characteristic and, if present, builds this device's write manager. */
     fun registerDuoCoCharacteristic(address: String): CharacteristicRegistration
 
-    /** Enqueue a command onto the device's write manager (`deviceWriteManagers[address].updateCommand`). */
-    fun writeCommand(address: String, command: ByteArray)
+    /**
+     * Enqueue a command onto the device's write manager (`deviceWriteManagers[address].updateCommand`).
+     * [priority] and [bypassPacing] implement the peak-hold/peak-priority write rule
+     * (visualizer-review-2026-07-21.md P2): a higher-priority queued command of the same type
+     * survives a lower-priority one trying to replace it until it's actually been written, and
+     * [bypassPacing] skips the pacing wait for this one write (used on the exact frame a beat
+     * flash fires). Defaults (0f/false) reproduce the prior dedupe-by-latest behavior exactly for
+     * every non-audio command path.
+     */
+    fun writeCommand(address: String, command: ByteArray, priority: Float = 0f, bypassPacing: Boolean = false)
 
     /** Forward a GATT write-complete ack to the device's write manager. */
     fun notifyWriteCompleted(address: String)
+
+    /** Current pacing (ms) for a device's write manager, or [default] if none exists yet. */
+    fun getPacingMs(address: String, default: Int = 50): Int
 
     /** Remove all three per-device maps and return the removed [BluetoothGatt] (for disconnect/close). */
     fun removeConnection(address: String): BluetoothGatt?
@@ -269,12 +280,16 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         )
     }
 
-    override fun writeCommand(address: String, command: ByteArray) {
-        deviceWriteManagers[address]?.updateCommand(command)
+    override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
+        deviceWriteManagers[address]?.updateCommand(command, priority, bypassPacing)
     }
 
     override fun notifyWriteCompleted(address: String) {
         deviceWriteManagers[address]?.onWriteCompleted()
+    }
+
+    override fun getPacingMs(address: String, default: Int): Int {
+        return deviceWriteManagers[address]?.currentPacingMs ?: default
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {

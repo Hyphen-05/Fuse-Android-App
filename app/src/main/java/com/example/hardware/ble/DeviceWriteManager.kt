@@ -36,7 +36,12 @@ class DeviceWriteManager(
     private val onFpsUpdate: (String, Int) -> Unit,
     private val diagAttribution: (String) -> String
 ) {
-    private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<ByteArray>()
+    // Queued command plus the peak-hold/pacing-bypass metadata it was enqueued with
+    // (visualizer-review-2026-07-21.md P2). [priority] compares only against other queued
+    // commands of the *same type byte* (index 2) — see [updateCommand].
+    private data class QueuedCommand(val bytes: ByteArray, val priority: Float, val bypassPacing: Boolean)
+
+    private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<QueuedCommand>()
     @Volatile var isWriting = false
     @Volatile var lastWriteTime = 0L
     val writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
@@ -49,18 +54,36 @@ class DeviceWriteManager(
     private var consecutiveWatchdogTriggers = 0
     private var lastQueueLogTime = 0L
 
-    fun updateCommand(command: ByteArray) {
+    /**
+     * [priority] and [bypassPacing] implement the peak-hold/peak-priority write rule
+     * (visualizer-review-2026-07-21.md P2): previously this dequeued *any* existing same-type
+     * command in favor of the latest one, so a computed flash peak could be silently overwritten
+     * by the very next (lower-value) DSP frame before the pacing timer ever let it write. Now, a
+     * still-queued command of the same type is only replaced if its priority is <= the new one's —
+     * a higher-priority command that hasn't been written yet survives lower-priority frames until
+     * it's actually sent, at which point normal latest-wins resumes. [bypassPacing] marks the exact
+     * frame a flash fires so [tryWrite] can skip the pacing wait for that one write.
+     */
+    fun updateCommand(command: ByteArray, priority: Float = 0f, bypassPacing: Boolean = false) {
         val processed = calibrate(address, command)
 
         val type = if (processed.size >= 3) processed[2] else null
-        if (type != null) {
-            val iterator = commandQueue.iterator()
-            while (iterator.hasNext()) {
-                val existing = iterator.next()
-                if (existing.size >= 3 && existing[2] == type) {
-                    iterator.remove()
-                }
-            }
+        // A held peak of the same type takes priority over this frame if it hasn't written yet —
+        // checked read-only first, so a mixed-priority queue (shouldn't happen under the
+        // single-entry-per-type invariant this maintains, but don't assume) never partially
+        // mutates the queue before the decision is made.
+        val supersededByExisting = type != null && commandQueue.any {
+            it.bytes.size >= 3 && it.bytes[2] == type && it.priority > priority
+        }
+        if (type != null && !supersededByExisting) {
+            commandQueue.removeAll { it.bytes.size >= 3 && it.bytes[2] == type }
+        }
+        if (supersededByExisting) {
+            com.example.DiagnosticLogger.log(
+                "DeviceWriteManager",
+                "Write superseded by held peak: address=$address, droppedPriority=$priority. (${diagAttribution(address)})"
+            )
+            return
         }
 
         val qSizeBefore = commandQueue.size
@@ -72,11 +95,11 @@ class DeviceWriteManager(
                 "Backpressure triggered (Queue size > 20)! Polled/dropped command. address=$address. (${diagAttribution(address)})"
             )
         }
-        commandQueue.offer(processed)
+        commandQueue.offer(QueuedCommand(processed, priority, bypassPacing))
         val qSizeAfter = commandQueue.size
         com.example.DiagnosticLogger.log(
             "DeviceWriteManager",
-            "Write enqueued: address=$address, cmdHex=${processed.joinToString("") { String.format("%02X", it) }}, queueSizeBefore=$qSizeBefore, queueSizeAfter=$qSizeAfter. (${diagAttribution(address)})"
+            "Write enqueued: address=$address, cmdHex=${processed.joinToString("") { String.format("%02X", it) }}, priority=$priority, bypassPacing=$bypassPacing, queueSizeBefore=$qSizeBefore, queueSizeAfter=$qSizeAfter. (${diagAttribution(address)})"
         )
 
         val now = System.currentTimeMillis()
@@ -103,6 +126,13 @@ class DeviceWriteManager(
             framesSent = 0
             lastFpsTime = now
             onFpsUpdate(address, fps)
+            // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per device
+            // during a real session — reuses this existing ~1s cadence rather than adding a new
+            // timer, so it's free.
+            com.example.DiagnosticLogger.log(
+                "DeviceWriteManager",
+                "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
+            )
         }
         tryWrite()
     }
@@ -115,7 +145,10 @@ class DeviceWriteManager(
         val now = System.currentTimeMillis()
         val elapsed = now - lastWriteTime
 
-        if (currentPacingMs > 0) {
+        // Peak-priority bypass (visualizer-review-2026-07-21.md P2): the frame a flash fires
+        // skips the pacing wait entirely rather than risking the flash landing in the gap between
+        // two paced writes.
+        if (currentPacingMs > 0 && !cmd.bypassPacing) {
             if (elapsed < currentPacingMs) {
                 if (pendingJob == null || pendingJob?.isActive != true) {
                     pendingJob = connectionScope.launch(Dispatchers.IO) {
@@ -136,14 +169,15 @@ class DeviceWriteManager(
         }
         val currentWriteTime = System.currentTimeMillis()
         lastWriteTime = currentWriteTime
+        val cmdHex = cmdToWrite.bytes.joinToString("") { String.format("%02X", it) }
 
         charac.writeType = writeType
         try {
             val success = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(charac, cmdToWrite, writeType) == android.bluetooth.BluetoothStatusCodes.SUCCESS
+                gatt.writeCharacteristic(charac, cmdToWrite.bytes, writeType) == android.bluetooth.BluetoothStatusCodes.SUCCESS
             } else {
                 @Suppress("DEPRECATION")
-                charac.value = cmdToWrite
+                charac.value = cmdToWrite.bytes
                 @Suppress("DEPRECATION")
                 gatt.writeCharacteristic(charac)
             }
@@ -152,12 +186,12 @@ class DeviceWriteManager(
                 Log.w("BleWriteQueue", "writeCharacteristic() returned false for $address")
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
-                    "writeCharacteristic() returned false (write failure) for $address. (${diagAttribution(address)})"
+                    "writeCharacteristic() returned false (write failure) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
                 )
             } else {
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
-                    "writeCharacteristic() initiated (write success) for $address. (${diagAttribution(address)})"
+                    "writeCharacteristic() initiated (write success) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
                 )
             }
         } catch (e: Exception) {

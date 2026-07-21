@@ -61,6 +61,8 @@ class RgbDatabaseRepositoryImplTest {
         override suspend fun deleteSavedDevice(macAddress: String) {}
         override suspend fun updateAutoConnect(macAddress: String, enabled: Boolean) {}
         override suspend fun updateActiveControl(macAddress: String, enabled: Boolean) {}
+        override suspend fun updateDeviceRole(macAddress: String, role: String) {}
+        override suspend fun updateHueOffsetDegrees(macAddress: String, degrees: Float) {}
 
         override fun getAllCustomModes(): Flow<List<CustomMode>> = flowOf(emptyList())
         override suspend fun insertCustomMode(customMode: CustomMode) {}
