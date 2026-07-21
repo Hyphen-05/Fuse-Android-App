@@ -515,96 +515,17 @@ class RgbControllerViewModel(
         }
     }
 
-    fun getCalibrationMatrices(calibration: ColorCalibration): Map<Float, FloatArray> {
-        val map = mutableMapOf<Float, FloatArray>()
-        try {
-            val json = org.json.JSONObject(calibration.samplesJson)
-            if (json.optBoolean("is_multi_brightness", false)) {
-                val matricesObj = json.getJSONObject("matrices")
-                val keys = matricesObj.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val keyFloat = key.toFloatOrNull() ?: continue
-                    val arr = matricesObj.getJSONArray(key)
-                    val matrix = FloatArray(9)
-                    for (i in 0..8) {
-                        matrix[i] = arr.getDouble(i).toFloat()
-                    }
-                    map[keyFloat] = matrix
-                }
-            }
-        } catch (e: Exception) {
-            // Error parsing multi-brightness matrices
-        }
-        
-        // If empty, populate with the single matrix from ColorCalibration fields
-        if (map.isEmpty()) {
-            map[100f] = floatArrayOf(
-                calibration.m11, calibration.m12, calibration.m13,
-                calibration.m21, calibration.m22, calibration.m23,
-                calibration.m31, calibration.m32, calibration.m33
-            )
-        }
-        return map
-    }
-
-    fun interpolateMatrices(brightnessPercent: Float, matrices: Map<Float, FloatArray>): FloatArray {
-        if (matrices.isEmpty()) {
-            return floatArrayOf(
-                1f, 0f, 0f,
-                0f, 1f, 0f,
-                0f, 0f, 1f
-            )
-        }
-        if (matrices.size == 1) {
-            return matrices.values.first()
-        }
-        
-        val sortedLevels = matrices.keys.sorted()
-        val minLevel = sortedLevels.first()
-        val maxLevel = sortedLevels.last()
-        
-        if (brightnessPercent <= minLevel) {
-            return matrices[minLevel] ?: matrices.values.first()
-        }
-        if (brightnessPercent >= maxLevel) {
-            return matrices[maxLevel] ?: matrices.values.first()
-        }
-        
-        var lower = minLevel
-        var upper = maxLevel
-        for (i in 0 until sortedLevels.size - 1) {
-            val l1 = sortedLevels[i]
-            val l2 = sortedLevels[i+1]
-            if (brightnessPercent >= l1 && brightnessPercent <= l2) {
-                lower = l1
-                upper = l2
-                break
-            }
-        }
-        
-        val m1 = matrices[lower] ?: return matrices.values.first()
-        val m2 = matrices[upper] ?: return m1
-        
-        val t = (brightnessPercent - lower) / (upper - lower)
-        val result = FloatArray(9)
-        for (i in 0..8) {
-            result[i] = m1[i] * (1f - t) + m2[i] * t
-        }
-        return result
-    }
-
-    fun applyCalibrationIfRequired(address: String, cmd: ByteArray): ByteArray {
-        // Old full-spectrum RGB calibration is entirely disabled per scope change
-        return cmd
-    }
+    // getCalibrationMatrices, interpolateMatrices, and applyCalibrationIfRequired were moved
+    // verbatim to com.example.core.calibration.CalibrationMatrixOps as part of Phase 6 (pure
+    // calibration-matrix math extraction) — see processCommandWithCalibration below for the
+    // remaining call site.
 
     fun processCommandWithCalibration(address: String, command: ByteArray): ByteArray {
         if (command.size % 9 != 0) return command
         val result = ByteArray(command.size)
         for (i in 0 until command.size step 9) {
             val chunk = command.copyOfRange(i, i + 9)
-            val processed = applyCalibrationIfRequired(address, chunk)
+            val processed = com.example.core.calibration.CalibrationMatrixOps.applyCalibrationIfRequired(address, chunk)
             System.arraycopy(processed, 0, result, i, 9)
         }
         return result
@@ -2157,12 +2078,9 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.DeleteColorCalibration(macAddress))
     }
 
-    fun fit3x3Matrix(
-        targets: List<IntArray>,
-        measured: List<IntArray>
-    ): FloatArray {
-        return com.example.core.calibration.CalibrationMatrixSolver.fit3x3Matrix(targets, measured)
-    }
+    // fit3x3Matrix wrapper removed (Phase 6): it had zero call sites anywhere in the app or test
+    // tree — all callers already use com.example.core.calibration.CalibrationMatrixSolver.fit3x3Matrix
+    // directly (see CoreExtractionTest.kt / CalibrationMatrixSolverTest.kt).
 
     fun applyPreset(preset: RgbPreset) {
         _uiState.update {
