@@ -393,7 +393,9 @@ class RgbControllerViewModel(
             is com.example.presentation.AudioSideEffect.RestoreDeviceState -> restoreDeviceState(effect.address, effect.automationType)
             is com.example.presentation.AudioSideEffect.ClearDeviceAutomationMode -> deviceAutomationMode.remove(effect.address)
             is com.example.presentation.AudioSideEffect.StopMusicSyncInternal -> stopMusicSyncInternal(effect.keepServiceRunning)
-            is com.example.presentation.AudioSideEffect.StartAudioEngine -> startAudioRecording(effect.mode)
+            is com.example.presentation.AudioSideEffect.StartAudioEngine -> {
+                viewModelScope.launch(Dispatchers.IO) { startAudioRecording(effect.mode) }
+            }
         }
     }
 
@@ -2276,39 +2278,47 @@ class RgbControllerViewModel(
     // startAudioEngine's shape: construct a fresh simulator per run, tick it on the same 23ms
     // cadence, and publish each result through the same publishAudioDspResult() the real capture
     // pipeline uses.
+    // Dispatch-safe by construction, not by caller convention: this function owns a blocking
+    // `while` loop with a real `Thread.sleep`, so it launches its own Dispatchers.IO coroutine
+    // rather than trusting every call site to have already hopped off the calling thread. This
+    // matters because one of its two callers (the on-device/Visualizer error fallback in
+    // startAudioEngine) can otherwise run synchronously on the main thread — see the
+    // "StartAudioEngine dispatch fix" note in CLAUDE.md.
     private fun runAudioSimulationEngine() {
-        addLog("Starting DSP audio simulation engine...")
-        com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: SIMULATION started successfully")
+        viewModelScope.launch(Dispatchers.IO) {
+            addLog("Starting DSP audio simulation engine...")
+            com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: SIMULATION started successfully")
 
-        val simulator = com.example.core.audio.DemoAudioDspSimulator()
-        val intervalMs = 23L
-        var lastSimTime = 0L
+            val simulator = com.example.core.audio.DemoAudioDspSimulator()
+            val intervalMs = 23L
+            var lastSimTime = 0L
 
-        while (!Thread.currentThread().isInterrupted && _uiState.value.audioSettings.isAudioSyncRunning) {
-            val nowElapsed = android.os.SystemClock.elapsedRealtime()
-            if (lastSimTime != 0L) {
-                val interval = nowElapsed - lastSimTime
-                com.example.DiagnosticLogger.log(
-                    "AudioCapture",
-                    "Simulation tick interval: ${interval}ms, mode=simulation"
-                )
-            }
-            lastSimTime = nowElapsed
-
-            val startTime = System.currentTimeMillis()
-            val result = simulator.process(_uiState.value.audioSettings)
-            publishAudioDspResult(result)
-
-            val elapsed = System.currentTimeMillis() - startTime
-            val sleepTime = intervalMs - elapsed
-            if (sleepTime > 0) {
-                try {
-                    Thread.sleep(sleepTime)
-                } catch (e: InterruptedException) {
-                    break
+            while (!Thread.currentThread().isInterrupted && _uiState.value.audioSettings.isAudioSyncRunning) {
+                val nowElapsed = android.os.SystemClock.elapsedRealtime()
+                if (lastSimTime != 0L) {
+                    val interval = nowElapsed - lastSimTime
+                    com.example.DiagnosticLogger.log(
+                        "AudioCapture",
+                        "Simulation tick interval: ${interval}ms, mode=simulation"
+                    )
                 }
-            } else {
-                Thread.yield()
+                lastSimTime = nowElapsed
+
+                val startTime = System.currentTimeMillis()
+                val result = simulator.process(_uiState.value.audioSettings)
+                publishAudioDspResult(result)
+
+                val elapsed = System.currentTimeMillis() - startTime
+                val sleepTime = intervalMs - elapsed
+                if (sleepTime > 0) {
+                    try {
+                        Thread.sleep(sleepTime)
+                    } catch (e: InterruptedException) {
+                        break
+                    }
+                } else {
+                    Thread.yield()
+                }
             }
         }
     }
