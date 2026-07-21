@@ -18,6 +18,21 @@ import com.example.DiagnosticLogger
  * thread is spawned here, matching the original), so [start] does its permission/init work
  * synchronously and returns the real success/failure result — unlike [AudioRecordCaptureSource],
  * whose checks originally happened inside a background thread.
+ *
+ * **First-activation-silent-attach watchdog (2026-07-21, addresses "on-device backend doesn't
+ * activate on first click, works after toggling off/on").** No on-device Logcat trace of this
+ * could be captured in the environment this fix was written in (no adb/device attached) — this
+ * is a source-level fix for a real, documented Android platform quirk, not a trace-confirmed root
+ * cause; flagged here explicitly, same as the item-14 `StartAudioEngine` freeze fix in CLAUDE.md.
+ * `Visualizer(0)` (session 0 = the device's global output mix) can silently receive zero
+ * `onFftDataCapture` callbacks if it is attached at a moment when the output mix hasn't
+ * stabilized (a known characteristic of session-0 Visualizer attach, not something `enabled =
+ * true` reports as an error — no exception is thrown, `start()` returns `true`, the object just
+ * never calls back). Manually toggling the "On Device" card off and back on works around this by
+ * releasing and re-constructing the `Visualizer`, which re-attaches once the mix has settled.
+ * This class now does that automatically: a one-shot watchdog fires [WATCHDOG_TIMEOUT_MS] after
+ * `enabled = true` and, if zero frames have arrived and capture is still supposed to be running,
+ * tears down and reconstructs exactly once (see [retried]) — this cannot loop indefinitely.
  */
 class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource {
 
@@ -25,11 +40,23 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
 
     @Volatile private var activeVisualizer: Visualizer? = null
 
+    companion object {
+        const val WATCHDOG_TIMEOUT_MS = 1500L
+    }
+
     override fun start(
         onFrame: (AudioCaptureFrame) -> Unit,
         onLog: (String) -> Unit,
         isRunning: () -> Boolean,
         onError: (Throwable) -> Unit
+    ): Boolean = attemptStart(onFrame, onLog, isRunning, onError, retried = false)
+
+    private fun attemptStart(
+        onFrame: (AudioCaptureFrame) -> Unit,
+        onLog: (String) -> Unit,
+        isRunning: () -> Boolean,
+        onError: (Throwable) -> Unit,
+        retried: Boolean
     ): Boolean {
         val hasPermission = ContextCompat.checkSelfPermission(
             context,
@@ -44,17 +71,19 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
 
         try {
             val vis = Visualizer(0)
-            DiagnosticLogger.log("AudioCapture", "Active Engine: ON_DEVICE initialized")
+            DiagnosticLogger.log("AudioCapture", "Active Engine: ON_DEVICE initialized (retry=$retried)")
             vis.captureSize = Visualizer.getCaptureSizeRange()[1]
 
             var lastFftTime = 0L
             var loggedBackendInfo = false
+            val receivedAnyFrame = java.util.concurrent.atomic.AtomicBoolean(false)
 
             vis.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                 override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
 
                 override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
                     if (fft == null || !isRunning()) return
+                    receivedAnyFrame.set(true)
 
                     if (!loggedBackendInfo) {
                         loggedBackendInfo = true
@@ -108,6 +137,36 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
             vis.enabled = true
             activeVisualizer = vis
             onLog("System Visualizer initialized successfully for on-device sync (direct FFT).")
+
+            if (!retried) {
+                Thread {
+                    try {
+                        Thread.sleep(WATCHDOG_TIMEOUT_MS)
+                    } catch (e: InterruptedException) {
+                        return@Thread
+                    }
+                    // Only act if this watchdog's own Visualizer is still the live one (a real
+                    // stop() or a subsequent start() may have already superseded it) and capture
+                    // is still supposed to be active.
+                    if (!receivedAnyFrame.get() && activeVisualizer === vis && isRunning()) {
+                        DiagnosticLogger.log(
+                            "AudioCapture",
+                            "on_device: no frames received within ${WATCHDOG_TIMEOUT_MS}ms of attach, reconstructing Visualizer once"
+                        )
+                        try {
+                            vis.enabled = false
+                            vis.release()
+                        } catch (e: Exception) {}
+                        if (activeVisualizer === vis) activeVisualizer = null
+                        attemptStart(onFrame, onLog, isRunning, onError, retried = true)
+                    }
+                }.apply {
+                    name = "VisualizerAttachWatchdog"
+                    isDaemon = true
+                    start()
+                }
+            }
+
             return true
         } catch (e: Exception) {
             onLog("Failed to initialize Visualizer: ${e.message}. Running simulation.")

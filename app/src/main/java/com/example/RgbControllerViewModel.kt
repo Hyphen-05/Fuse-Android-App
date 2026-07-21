@@ -2169,15 +2169,19 @@ class RgbControllerViewModel(
     // here now lives in com.example.core.audio.AudioDspProcessor. This ViewModel is now the
     // orchestrator: construct the right capture source + a fresh processor, wire callbacks that
     // reproduce the exact _uiState/_telemetry/queueCommand writes the original inline code made.
-    private var audioCaptureSource: com.example.hardware.audio.AudioCaptureSource? = null
-    private var audioDspProcessor: com.example.core.audio.AudioDspProcessor? = null
+    // @Volatile: startAudioEngine() (which writes these) runs on Dispatchers.IO via the
+    // StartAudioEngine side effect, while stopMusicSyncInternal() (which reads/nulls them) runs
+    // synchronously on whatever thread dispatch() was called from (typically main) — no
+    // happens-before edge otherwise connects the two threads for these fields.
+    @Volatile private var audioCaptureSource: com.example.hardware.audio.AudioCaptureSource? = null
+    @Volatile private var audioDspProcessor: com.example.core.audio.AudioDspProcessor? = null
 
     // Thread-safe state for transmission
     @Volatile private var latestR = 0
     @Volatile private var latestG = 0
     @Volatile private var latestB = 0
 
-    private var transmissionThread: Thread? = null
+    @Volatile private var transmissionThread: Thread? = null
 
     fun startMusicSync(mode: String) {
         dispatch(RgbIntent.StartMusicSync(mode))

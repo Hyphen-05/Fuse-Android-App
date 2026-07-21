@@ -82,8 +82,15 @@ private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset
     "Smooth Flow" -> VisualizerConfig(
         attack = 0.25f, decay = 0.08f, flash = 0.00f, gamma = 0.45f, idleDelay = 2800L,
         noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.1f, highGain = 1.0f, paletteCycling = true,
-        beatMult = 1.8f, minBrightness = 0.18f, colorSpeed = 1.2f, beatFlashDecayMs = 300f,
-        ambientCapFraction = 0.45f, midFluxWeight = 0.30f,
+        beatMult = 1.8f, minBrightness = 0.35f, colorSpeed = 1.2f, beatFlashDecayMs = 300f,
+        // Brightness tuning pass (2026-07-21): still read as too dim after the first pass raised
+        // ambientCapFraction/minBrightness from 0.45f/0.18f to 0.65f/0.30f — confirmed on-device.
+        // Pushed to match Ambient Chill's 0.75f/0.35f exactly, since Smooth Flow has no beat flash
+        // (flash = 0.00f, same as Ambient Chill) and these two fields are the only brightness
+        // levers available to a no-flash preset. Smooth Flow's identity is preserved by its other
+        // fields (drift/breath hue motion, beatMult = 1.8f vs Ambient Chill's 2.5f), not by
+        // holding these two lower.
+        ambientCapFraction = 0.75f, midFluxWeight = 0.30f,
         // Never advances the anchor on beats — the tempo-lock showcase: all color motion is
         // continuous, clocked to hueDegreesPerBeat, with hueDriftDegPerSec as the fallback rate
         // before/without a BPM lock.

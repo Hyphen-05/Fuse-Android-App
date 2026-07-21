@@ -47,6 +47,16 @@ class AudioCaptureSourceTest {
     }
 
     @Test
+    fun `VisualizerCaptureSource watchdog timeout is a small, bounded positive window`() {
+        // Regression guard for the 2026-07-21 "on-device backend doesn't activate on first
+        // click" fix: the silent-attach watchdog (see VisualizerCaptureSource's start/attemptStart
+        // doc comment) must fire within a short, human-perceptible window — not so short it
+        // reconstructs a Visualizer that just hasn't received its first frame yet, not so long
+        // the toggle-and-wait workaround it replaces still feels faster than just waiting.
+        assertTrue(VisualizerCaptureSource.WATCHDOG_TIMEOUT_MS in 500L..5000L)
+    }
+
+    @Test
     fun `fake source records start and forwards emitted frames`() {
         val fake = FakeAudioCaptureSource(backend = AudioBackend.AUDIO_RECORD)
         val received = mutableListOf<AudioCaptureFrame>()
