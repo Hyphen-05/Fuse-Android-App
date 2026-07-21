@@ -3,6 +3,7 @@ package com.example.ambiance
 import android.content.Context
 import android.media.ImageReader
 import android.util.Log
+import com.example.core.color.ColorConverter
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.pow
@@ -68,7 +69,7 @@ class AmbianceProcessor(
 
             fun getLum(x: Int, y: Int): Int {
                 val (r, g, b) = getRgb(x, y)
-                return (0.2126 * r + 0.7152 * g + 0.0722 * b).toInt()
+                return ColorConverter.luminance(r.toDouble(), g.toDouble(), b.toDouble()).toInt()
             }
 
             var top = 0; var bottom = height - 1; var left = 0; var right = width - 1
@@ -129,15 +130,15 @@ class AmbianceProcessor(
                         for (i in 0 until samples) {
                             val x = (cellL + (i + 0.5) * (cellW / samples)).toInt().coerceIn(left, right)
                             val (r, g, b) = getRgb(x, y)
-                            sumR += srgbToLinear(r)
-                            sumG += srgbToLinear(g)
-                            sumB += srgbToLinear(b)
+                            sumR += ColorConverter.srgbToLinear(r)
+                            sumG += ColorConverter.srgbToLinear(g)
+                            sumB += ColorConverter.srgbToLinear(b)
                         }
                     }
                     val totalSamples = samples * samples
-                    val rawR = linearToSrgb(sumR / totalSamples)
-                    val rawG = linearToSrgb(sumG / totalSamples)
-                    val rawB = linearToSrgb(sumB / totalSamples)
+                    val rawR = ColorConverter.linearToSrgb(sumR / totalSamples)
+                    val rawG = ColorConverter.linearToSrgb(sumG / totalSamples)
+                    val rawB = ColorConverter.linearToSrgb(sumB / totalSamples)
 
                     val idx = row * gridCols + col
                     rawColors[idx] = Triple(rawR, rawG, rawB)
@@ -146,17 +147,17 @@ class AmbianceProcessor(
 
             var sumLinR = 0.0; var sumLinG = 0.0; var sumLinB = 0.0
             for ((r, g, b) in rawColors) {
-                sumLinR += srgbToLinear(r)
-                sumLinG += srgbToLinear(g)
-                sumLinB += srgbToLinear(b)
+                sumLinR += ColorConverter.srgbToLinear(r)
+                sumLinG += ColorConverter.srgbToLinear(g)
+                sumLinB += ColorConverter.srgbToLinear(b)
             }
-            val aggRawR = linearToSrgb(sumLinR / 16.0)
-            val aggRawG = linearToSrgb(sumLinG / 16.0)
-            val aggRawB = linearToSrgb(sumLinB / 16.0)
+            val aggRawR = ColorConverter.linearToSrgb(sumLinR / 16.0)
+            val aggRawG = ColorConverter.linearToSrgb(sumLinG / 16.0)
+            val aggRawB = ColorConverter.linearToSrgb(sumLinB / 16.0)
 
-            val emaSrgbR = linearToSrgb(emaState.emaLinR)
-            val emaSrgbG = linearToSrgb(emaState.emaLinG)
-            val emaSrgbB = linearToSrgb(emaState.emaLinB)
+            val emaSrgbR = ColorConverter.linearToSrgb(emaState.emaLinR)
+            val emaSrgbG = ColorConverter.linearToSrgb(emaState.emaLinG)
+            val emaSrgbB = ColorConverter.linearToSrgb(emaState.emaLinB)
 
             val aggDelta = (abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)) / 3.0
             val isSceneCut = aggDelta > sceneCutSensitivity
@@ -165,11 +166,11 @@ class AmbianceProcessor(
             var newEmaLinR: Double; var newEmaLinG: Double; var newEmaLinB: Double
 
             if (isSceneCut) {
-                newEmaLinR = srgbToLinear(aggRawR)
-                newEmaLinG = srgbToLinear(aggRawG)
-                newEmaLinB = srgbToLinear(aggRawB)
+                newEmaLinR = ColorConverter.srgbToLinear(aggRawR)
+                newEmaLinG = ColorConverter.srgbToLinear(aggRawG)
+                newEmaLinB = ColorConverter.srgbToLinear(aggRawB)
             } else {
-                val lum = (0.2126 * emaSrgbR + 0.7152 * emaSrgbG + 0.0722 * emaSrgbB) / 255.0
+                val lum = ColorConverter.luminance(emaSrgbR.toDouble(), emaSrgbG.toDouble(), emaSrgbB.toDouble()) / 255.0
                 val dynamicThreshold = (5.0 + 10.0 * lum + 15.0 * (1.0 - lum).pow(2)) * deadbandMultiplier
                 val diff = abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)
                 if (diff <= dynamicThreshold) {
@@ -177,15 +178,15 @@ class AmbianceProcessor(
                     newEmaLinG = emaState.emaLinG
                     newEmaLinB = emaState.emaLinB
                 } else {
-                    val rawLum = (0.2126 * aggRawR + 0.7152 * aggRawG + 0.0722 * aggRawB) / 255.0
+                    val rawLum = ColorConverter.luminance(aggRawR.toDouble(), aggRawG.toDouble(), aggRawB.toDouble()) / 255.0
                     val effectiveAlpha = if (rawLum < lum) {
                         (1.0 - (1.0 - alpha).pow(2.2)).coerceIn(0.01, 1.0)
                     } else {
                         alpha
                     }
-                    newEmaLinR = emaState.emaLinR + effectiveAlpha * (srgbToLinear(aggRawR) - emaState.emaLinR)
-                    newEmaLinG = emaState.emaLinG + effectiveAlpha * (srgbToLinear(aggRawG) - emaState.emaLinG)
-                    newEmaLinB = emaState.emaLinB + effectiveAlpha * (srgbToLinear(aggRawB) - emaState.emaLinB)
+                    newEmaLinR = emaState.emaLinR + effectiveAlpha * (ColorConverter.srgbToLinear(aggRawR) - emaState.emaLinR)
+                    newEmaLinG = emaState.emaLinG + effectiveAlpha * (ColorConverter.srgbToLinear(aggRawG) - emaState.emaLinG)
+                    newEmaLinB = emaState.emaLinB + effectiveAlpha * (ColorConverter.srgbToLinear(aggRawB) - emaState.emaLinB)
                 }
             }
 
@@ -195,11 +196,11 @@ class AmbianceProcessor(
             val compG = (newEmaLinG * brightnessCompensation).coerceIn(0.0, 1.0)
             val compB = (newEmaLinB * brightnessCompensation).coerceIn(0.0, 1.0)
 
-            val sR = linearToSrgb(compR)
-            val sG = linearToSrgb(compG)
-            val sB = linearToSrgb(compB)
+            val sR = ColorConverter.linearToSrgb(compR)
+            val sG = ColorConverter.linearToSrgb(compG)
+            val sB = ColorConverter.linearToSrgb(compB)
 
-            val lumLinear = 0.2126 * newEmaLinR + 0.7152 * newEmaLinG + 0.0722 * newEmaLinB
+            val lumLinear = ColorConverter.luminance(newEmaLinR, newEmaLinG, newEmaLinB)
             // Previous threshold of 0.1 was in LINEAR space, which corresponds to 
             // roughly 38% PERCEPTUAL brightness due to gamma — meaning most 
             // ordinary dim/mid-brightness content was having its saturation boost 
@@ -259,9 +260,6 @@ class AmbianceProcessor(
         emaState = EmaState(0.0, 0.0, 0.0)
     }
 
-    private fun srgbToLinear(srgb: Int): Double = (srgb / 255.0).pow(2.2)
-    private fun linearToSrgb(linear: Double): Int = (linear.pow(1.0 / 2.2) * 255.0).roundToInt().coerceIn(0, 255)
-
     private fun rgbToHsv(r: Int, g: Int, b: Int): Triple<Float, Float, Float> {
         val rP = r / 255f; val gP = g / 255f; val bP = b / 255f
         val max = maxOf(rP, gP, bP); val min = minOf(rP, gP, bP)
@@ -275,6 +273,9 @@ class AmbianceProcessor(
         return Triple(h, s, max)
     }
 
+    // Not merged into ColorConverter.hsvToRgb: that version additionally applies a cubic
+    // perceptual-brightness correction (r/g/b -> (x/255)^3*255) which this ambiance path
+    // has never had. Unifying them would visibly darken ambiance output on every frame.
     private fun hsvToRgb(h: Float, s: Float, v: Float): Triple<Int, Int, Int> {
         val c = v * s
         val x = c * (1f - abs((h / 60f) % 2f - 1f))
