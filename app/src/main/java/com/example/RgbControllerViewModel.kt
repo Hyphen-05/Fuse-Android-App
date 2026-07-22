@@ -2358,6 +2358,21 @@ class RgbControllerViewModel(
 
         // 1. Audio Capture and Processing
         if (mode == "on_device") {
+            // Bug fix (2026-07-21): MusicScreen calls AudioCaptureService.start(context, mode)
+            // then immediately viewModel.startMusicSync(mode) -- but start() only *posts* the
+            // service's startup Intent to the main thread; onStartCommand()/startForeground()
+            // hasn't necessarily run by the time this coroutine (already on Dispatchers.IO, so it
+            // races the main thread rather than following it) reaches here. Android's
+            // background-audio-capture restrictions gate whether Visualizer(0) receives real
+            // capture callbacks on whether the process is *already* an eligible foreground-audio
+            // client at the moment it attaches -- attaching a beat early silently produces a
+            // Visualizer that reports enabled=true but never calls back, and no amount of tearing
+            // down/reconstructing that same Visualizer later fixes it, since the eligibility check
+            // happens at attach time. This bounded wait (up to 500ms, the service promotion is
+            // normally near-instant) closes that race at its source instead of retrying after the
+            // fact. Safe to block here: this function only ever runs on Dispatchers.IO (see
+            // AudioSideEffect.StartAudioEngine's executor), never the main thread.
+            com.example.AudioCaptureService.awaitForeground(500L)
             val source = com.example.hardware.audio.VisualizerCaptureSource(getApplication())
             val processor = com.example.core.audio.AudioDspProcessor(source.backend)
             audioCaptureSource = source
