@@ -35,7 +35,15 @@ data class AudioDspResult(
     val isBeat: Boolean = false,
     // 0..1 band levels for BandSplit (P4): one device following bass, the other mid/high.
     val bassLevel: Float = 0f,
-    val midHighLevel: Float = 0f
+    val midHighLevel: Float = 0f,
+    // True only on the exact frame a flash (predictive or fast-causal) actually rendered its peak
+    // (visualizer-review-2026-07-22.md A1/A2/A4). Since P1, that is NOT the same frame as `isBeat`
+    // -- detection confirms/corrects a flash that already fired up to ~180ms+flashTimingOffsetMs
+    // earlier. Anything that needs to key off of "the visible flash is happening right now" (the
+    // wire's pacing-bypass priority, AlternatingFlash's device round-robin, the P0 diagnostic log)
+    // must use this instead of `isBeat`, or it fires ~200-300ms late against a mostly-decayed
+    // envelope.
+    val flashFiredThisFrame: Boolean = false
 )
 
 /**
@@ -86,7 +94,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private var enterCandidateSinceMs = 0L
     private var exitCandidateSinceMs = 0L
     private var sustainActive = false
-    private var sustainStateChangedAtMs = 0L
+    // visualizer-review-2026-07-22.md A5: sustainIntensity used to be derived fresh each frame from
+    // (nowMs - sustainStateChangedAtMs), which meant a state flip mid-ramp reset the timer AND
+    // flipped which branch of the if/else computed intensity -- e.g. deactivating at 40% ramped-in
+    // jumped instantly to 1.0 (the "1f - rampProgress" branch's value at rampProgress=0) before
+    // decaying, a visible brightness step in the wrong direction. Now a stored field that moves
+    // toward its target by dtMs/sustainRampMs each frame, so a flip mid-ramp reverses smoothly from
+    // wherever it actually was instead of snapping.
+    private var sustainIntensity = 0f
 
     private val bassHistory = FloatArray(86)
     private var bassHistoryIdx = 0
@@ -309,17 +324,20 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
         if (!sustainActive && rawSustainEnter && enterCandidateSinceMs != 0L && nowMs - enterCandidateSinceMs >= 400L) {
             sustainActive = true
-            sustainStateChangedAtMs = nowMs
         } else if (sustainActive && rawSustainExit && exitCandidateSinceMs != 0L && nowMs - exitCandidateSinceMs >= 800L) {
             sustainActive = false
-            sustainStateChangedAtMs = nowMs
         }
-        val sustainRampProgress = if (state.sustainRampMs <= 0f) {
-            1f
+        val sustainTarget = if (sustainActive) 1f else 0f
+        sustainIntensity = if (state.sustainRampMs <= 0f) {
+            sustainTarget
         } else {
-            ((nowMs - sustainStateChangedAtMs).toFloat() / state.sustainRampMs).coerceIn(0f, 1f)
+            val step = dtMs.toFloat() / state.sustainRampMs
+            if (sustainTarget > sustainIntensity) {
+                (sustainIntensity + step).coerceAtMost(sustainTarget)
+            } else {
+                (sustainIntensity - step).coerceAtLeast(sustainTarget)
+            }
         }
-        val sustainIntensity = if (sustainActive) sustainRampProgress else (1f - sustainRampProgress)
 
         val bassAlpha = if (bassVal > smoothedBass) state.audioSmoothingAttack else state.audioSmoothingDecay
         smoothedBass = bassAlpha * bassVal + (1f - bassAlpha) * smoothedBass
@@ -374,21 +392,19 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val highRatio = if (activeTotal > 0) smoothedHigh / activeTotal else 0.0f
         val bassRatio = if (activeTotal > 0) smoothedBass / activeTotal else 0.0f
 
+        // visualizer-review-2026-07-22.md A4: white-flash desaturation used to be set here, keyed
+        // on detection (isBeat), which fires up to ~180ms+flashTimingOffsetMs after the predictive
+        // scheduler below already rendered the brightness flash -- the white "pop" landed visibly
+        // after the color pop it's supposed to be part of. Depth is now written at the same trigger
+        // sites (below) that set beatPulsePeak, using the carried strength/confidence values, so
+        // both halves of a "white flash" render on the same frame.
+        val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
+
         anchorMovedThisFrame = false
         if (isBeat) {
-            // Detection stays the sole authority for anchor moves, confidence, and white-flash
-            // depth -- only the flash *trigger* itself (beatPulsePeak/lastBeatFlashTime) moved to
-            // the predictive scheduler below. This block is otherwise unchanged in shape from
-            // before P1.
-            val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
-            if (useWhiteFlash) {
-                // Analog white-flash depth (proposal §4): desaturation depth tracks how hard the
-                // beat actually hit (strength·confidence) instead of every beat snapping to the
-                // same binary full-white — a weak beat gives a pale wash, a locked-in downbeat
-                // gives the full white pop.
-                val depth = (result.strength * result.confidence.coerceIn(0f, 1f)).coerceIn(0f, 1f)
-                whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
-            }
+            // Detection stays the sole authority for anchor moves and confidence -- only the flash
+            // *trigger* itself (beatPulsePeak/lastBeatFlashTime/whiteHotFlashOffset) moved to the
+            // predictive scheduler below.
 
             // Anchor moves are confidence-gated (proposal §4): a low-confidence beat still flashes
             // (above) but doesn't recolor — flash is cheap and reversible, recoloring is the
@@ -403,6 +419,10 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 }
             }
         }
+
+        // visualizer-review-2026-07-22.md A1/A2/A4: true only on the frame a flash actually
+        // rendered its peak (either trigger mechanism below), not on detection's isBeat frame.
+        var flashFiredThisFrame = false
 
         // --- P1 predictive flash scheduling / fast causal trigger orchestration ---
         // Mechanism selection crossfades by bpmConfidence: once tempo-locked, schedule the flash
@@ -429,16 +449,29 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             scheduledFlashSettled = true
         }
 
-        if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && predictiveWeight > 0.15f) {
+        // visualizer-review-2026-07-22.md B1: bound how late a scheduled flash is allowed to fire.
+        // Without this, if predictiveWeight only crosses 0.15 well after scheduledFlashAtMs (grid
+        // jitter, a confidence dip that recovers late), the flash fires immediately at that later
+        // moment instead of being skipped -- unbounded lateness, not just unbounded earliness.
+        val flashIsStale = scheduledFlashAtMs != 0L && (nowMs - scheduledFlashAtMs) > 80L
+        if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && !flashIsStale && predictiveWeight > 0.15f) {
             // Peak uses the *carried* strength/confidence from the most recent detection, not
             // this frame's `result` -- detection for this exact beat hasn't arrived yet (that's
-            // the whole point of scheduling ahead of it). Scaled by predictiveWeight so the
-            // schedule fades in smoothly as bpmConfidence rises, rather than switching on at full
-            // strength the instant a schedule merely exists.
-            val peak = (state.flashFloor + state.flashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
+            // the whole point of scheduling ahead of it). visualizer-review-2026-07-22.md A3: only
+            // the variable flashRange portion is scaled by predictiveWeight -- the flashFloor
+            // guarantee stays whole once a flash decides to fire at all, so a mid-confidence song
+            // (bpmConfidence ~0.5, or the first several seconds of any song before lock) doesn't
+            // get a systematically halved flash. Previously the whole sum was scaled, silently
+            // breaking the item-16 "every detected beat gets a minimum visible pulse" guarantee.
+            val peak = state.flashFloor + (state.flashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
             if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                 scheduledFlashFired = true
+                flashFiredThisFrame = true
                 scheduledFlashConfirmDeadlineMs = nowMs + 150L
+                if (useWhiteFlash) {
+                    val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
+                    whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+                }
                 DiagnosticLogger.log("FlashSchedule", "fired mechanism=predictive backend=${backend.name} atMs=$nowMs targetMs=$scheduledFlashAtMs peak=$peak weight=$predictiveWeight")
             }
         }
@@ -486,9 +519,20 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
                 // detection's strength/confidence, since mechanism 2 fires ahead of/instead of
                 // the centered detector) scaled down further by how little we trust "not locked."
-                val peak = (state.flashFloor + state.flashRange * 0.5f) * fastWeight
+                // visualizer-review-2026-07-22.md A3: same floor-preservation fix as mechanism 1 --
+                // only the variable flashRange·0.5 portion is damped by fastWeight, not the floor.
+                val peak = state.flashFloor + (state.flashRange * 0.5f) * fastWeight
                 if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                     lastFastTriggerFlashAtMs = nowMs
+                    flashFiredThisFrame = true
+                    if (useWhiteFlash) {
+                        // No detection-confirmed strength/confidence exists yet for this trigger
+                        // (mechanism 2 fires ahead of/instead of the centered detector) -- reuse
+                        // the same carried values mechanism 1 uses, damped by fastWeight so an
+                        // unlocked, low-trust trigger doesn't pop to full white.
+                        val depth = (carriedFlashStrength * carriedFlashConfidence * fastWeight).coerceIn(0f, 1f)
+                        whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+                    }
                 }
             }
         }
@@ -744,7 +788,8 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             ambientValue = ambientValue,
             isBeat = isBeat,
             bassLevel = bc,
-            midHighLevel = midContribution
+            midHighLevel = midContribution,
+            flashFiredThisFrame = flashFiredThisFrame
         )
     }
 

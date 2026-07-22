@@ -1810,10 +1810,23 @@ class RgbControllerViewModel(
 
     private fun broadcastAudioResultDirect(result: com.example.core.audio.AudioDspResult) {
         val targetAddresses = getCurrentlyControlledDeviceAddresses()
-        if (result.isBeat) alternatingFlashBeatCounter++
+        // visualizer-review-2026-07-22.md A2: used to increment on result.isBeat, which since P1
+        // fires ~180ms+flashTimingOffsetMs after the frame that actually rendered the flash peak --
+        // device A would show the flash's rising/peak envelope, then mid-decay the target would
+        // switch to device B, which never got the peak. flashFiredThisFrame is true on the same
+        // frame the visible flash starts, so the handoff now lines up with what's on screen.
+        if (result.flashFiredThisFrame) alternatingFlashBeatCounter++
 
         val alternatingAddresses = targetAddresses.filter { deviceRoleFor(it) == "AlternatingFlash" }
         val bandSplitAddresses = targetAddresses.filter { deviceRoleFor(it) == "BandSplit" }
+
+        // visualizer-review-2026-07-22.md A7: DemoAudioDspSimulator constructs AudioDspResult with
+        // the defaulted P4 fields (sat=0f, value=0f -- it has no role-transform math). Without this
+        // check, any non-Mirror-role device renders hsvToRgb(_, 0f, 0f) = pure black the moment real
+        // capture fails and the demo engine takes over, while Mirror devices keep animating --
+        // reading as a broken lamp rather than a degraded mode. Fall back to Mirror (plain r/g/b)
+        // behavior whenever the result carries no real HSV components.
+        val hasHsvComponents = !(result.sat == 0f && result.value == 0f)
 
         targetAddresses.forEach { address ->
             sceneRunners[address]?.release()
@@ -1821,7 +1834,8 @@ class RgbControllerViewModel(
 
             if (activeExcludedMacs.contains(address)) return@forEach
 
-            val (r, g, b) = when (deviceRoleFor(address)) {
+            val effectiveRole = if (hasHsvComponents) deviceRoleFor(address) else "Mirror"
+            val (r, g, b) = when (effectiveRole) {
                 "HueOffset" -> {
                     val offset = savedDevices.value.find { it.macAddress == address }?.hueOffsetDegrees ?: 180f
                     ColorConverter.hsvToRgb((result.hue + offset + 360f) % 360f, result.sat, result.value)
@@ -1848,7 +1862,11 @@ class RgbControllerViewModel(
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
                 }
             } else {
-                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.isBeat)
+                // visualizer-review-2026-07-22.md A1: bypassPacing used to key on result.isBeat,
+                // which fires after the flash-peak frame under P1's predictive scheduling -- the
+                // pacing-skip landed on an already-decayed frame instead of the one carrying the
+                // peak, defeating P2's wire-priority fix for exactly the flashes P1 made primary.
+                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.flashFiredThisFrame)
             }
         }
     }
@@ -2334,10 +2352,15 @@ class RgbControllerViewModel(
         latestG = result.g
         latestB = result.b
 
-        if (result.isBeat) {
-            // P0 (visualizer-review-2026-07-21.md): detection timestamp, correlatable against
-            // DeviceWriteManager's "Write enqueued"/"writeCharacteristic() initiated" log lines by
-            // matching cmdHex (exact only for Mirror-role devices, which is the common case).
+        if (result.flashFiredThisFrame) {
+            // P0 (visualizer-review-2026-07-21.md), re-keyed per visualizer-review-2026-07-22.md
+            // A1: this used to gate on result.isBeat, the detection frame -- ~180ms+
+            // flashTimingOffsetMs after the frame that actually carries the flash-peak cmdHex under
+            // P1's predictive scheduling, so it was correlating against the wrong write in
+            // DeviceWriteManager's logs. flashFiredThisFrame is the frame the peak is actually
+            // computed on. Correlatable against DeviceWriteManager's "Write enqueued"/
+            // "writeCharacteristic() initiated" log lines by matching cmdHex (exact only for
+            // Mirror-role devices, which is the common case).
             val cmdHex = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
                 .joinToString("") { String.format("%02X", it) }
             DiagnosticLogger.log("AudioSync", "Beat peak frame detected: cmdHex=$cmdHex value=${result.value}")

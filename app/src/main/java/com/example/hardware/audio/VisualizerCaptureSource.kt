@@ -196,6 +196,34 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
             )
             if (!alreadyEnabledElsewhere) {
                 vis.captureSize = Visualizer.getCaptureSizeRange()[1]
+            } else if (vis.captureSize / 2 < 349) {
+                // visualizer-review-2026-07-22.md A6: when attaching to an already-enabled shared
+                // session-0 client, we inherit whatever captureSize that other client configured --
+                // we cannot call captureSize= ourselves (that's the whole reason this branch
+                // exists). If that inherited size is small enough that every frame's numBins falls
+                // under the callback's own `numBins < 349` guard, every single frame gets silently
+                // dropped downstream in AudioDspProcessor -- but the attach watchdog's
+                // receivedRealSignal check only looks at raw FFT byte content, which is still
+                // genuinely nonzero, so it never fires. Net effect without this check: capture
+                // reports success, real signal is flowing, and zero frames ever reach the DSP --
+                // a permanently dark visualizer with no error and no fallback. Treat this exactly
+                // like a failed attach: release our wrapper (do NOT touch `enabled` -- it's a
+                // shared handle, disabling it would affect the other client) and retry/give up
+                // through the same attachRetryCount path the real watchdog uses.
+                DiagnosticLogger.log(
+                    "AudioCapture",
+                    "on_device: inherited shared-session captureSize=${vis.captureSize} yields numBins=${vis.captureSize / 2} (<349), " +
+                        "treating as failed attach (attempt ${attachRetryCount + 1}/$MAX_ATTACH_RETRIES)"
+                )
+                try {
+                    vis.release()
+                } catch (re: Exception) {}
+                if (attachRetryCount < MAX_ATTACH_RETRIES) {
+                    return attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount + 1, exceptionRetryCount = exceptionRetryCount)
+                }
+                onLog("Visualizer's shared session capture size is too small after $MAX_ATTACH_RETRIES attempts. Running simulation.")
+                onError(IllegalStateException("Visualizer(0) shared-session captureSize never yielded enough bins after $MAX_ATTACH_RETRIES attempts"))
+                return false
             }
 
             var lastFftTime = 0L
