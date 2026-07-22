@@ -3,6 +3,7 @@ package com.example
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.example.domain.AdbControlSink
 import com.example.domain.AmbianceCommandSink
 import com.example.domain.ConnectionManager
 import com.example.domain.repository.AppPreferencesRepository
@@ -17,7 +18,8 @@ class RgbControllerViewModelFactory(
     private val connectionManager: ConnectionManager,
     private val bleScanTransport: BleScanTransport,
     private val bleGattTransport: BleGattTransport,
-    private val ambianceCommandSink: AmbianceCommandSink
+    private val ambianceCommandSink: AmbianceCommandSink,
+    private val adbControlSink: AdbControlSink
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(RgbControllerViewModel::class.java)) {
@@ -29,7 +31,8 @@ class RgbControllerViewModelFactory(
                 connectionManager,
                 bleScanTransport,
                 bleGattTransport,
-                ambianceCommandSink
+                ambianceCommandSink,
+                adbControlSink
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

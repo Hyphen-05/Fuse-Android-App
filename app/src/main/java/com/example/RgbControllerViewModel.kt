@@ -151,8 +151,9 @@ class RgbControllerViewModel(
     private val connectionManager: com.example.domain.ConnectionManager,
     private val bleScanTransport: com.example.hardware.ble.BleScanTransport,
     private val bleGattTransport: com.example.hardware.ble.BleGattTransport,
-    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink
-) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener {
+    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink,
+    private val adbControlSink: com.example.domain.AdbControlSink
+) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener, com.example.domain.AdbControlSink.Listener {
 
     private fun getApplication(): android.app.Application = application as android.app.Application
 
@@ -820,6 +821,7 @@ class RgbControllerViewModel(
         )
 
         ambianceCommandSink.listener = this
+        adbControlSink.listener = this
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
 
@@ -2475,9 +2477,20 @@ class RgbControllerViewModel(
     // com.example.hardware.audio.Fft (internal object, algorithm unchanged) — its only caller,
     // the AudioRecord capture loop, now lives in AudioRecordCaptureSource.
 
+    override fun onAdbStartMusicSync(mode: String) {
+        startMusicSync(mode)
+    }
+
+    override fun onAdbStopMusicSync() {
+        stopMusicSync()
+    }
+
     override fun onCleared() {
         if (ambianceCommandSink.listener === this) {
             ambianceCommandSink.listener = null
+        }
+        if (adbControlSink.listener === this) {
+            adbControlSink.listener = null
         }
         super.onCleared()
         stopMusicSyncInternal()

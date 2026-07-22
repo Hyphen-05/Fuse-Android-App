@@ -47,6 +47,10 @@ object DiagnosticLogger {
         return recording
     }
 
+    fun currentExcludedTags(): Set<String> {
+        return excludedTags
+    }
+
     fun log(tag: String, message: String) {
         if (!recording) return
         if (tag in excludedTags) return

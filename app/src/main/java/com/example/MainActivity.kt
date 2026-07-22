@@ -188,7 +188,8 @@ fun MainScreen() {
         appContainer.connectionManager,
         appContainer.bleScanTransport,
         appContainer.bleGattTransport,
-        appContainer.ambianceCommandSink
+        appContainer.ambianceCommandSink,
+        appContainer.adbControlSink
     )
     val viewModel: RgbControllerViewModel = viewModel(factory = factory)
     val aiSceneGeneratorViewModel: com.example.ui.components.AiSceneGeneratorViewModel = viewModel()
