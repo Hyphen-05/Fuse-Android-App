@@ -151,8 +151,9 @@ class RgbControllerViewModel(
     private val connectionManager: com.example.domain.ConnectionManager,
     private val bleScanTransport: com.example.hardware.ble.BleScanTransport,
     private val bleGattTransport: com.example.hardware.ble.BleGattTransport,
-    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink
-) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener {
+    private val ambianceCommandSink: com.example.domain.AmbianceCommandSink,
+    private val adbControlSink: com.example.domain.AdbControlSink
+) : androidx.lifecycle.ViewModel(), com.example.domain.AmbianceCommandSink.Listener, com.example.domain.AdbControlSink.Listener {
 
     private fun getApplication(): android.app.Application = application as android.app.Application
 
@@ -208,6 +209,7 @@ class RgbControllerViewModel(
                 // that has already elapsed by the time a beat is reported, not an additional delay
                 // to apply going forward.
                 totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
+                flashTimingOffsetMs = prefsRepo.getAppStatePrefInt("flash_timing_offset_ms", 100),
                 visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
                 audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
@@ -819,6 +821,7 @@ class RgbControllerViewModel(
         )
 
         ambianceCommandSink.listener = this
+        adbControlSink.listener = this
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
 
@@ -2083,6 +2086,10 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetBluetoothDelayMs(value))
     }
 
+    fun setFlashTimingOffsetMs(value: Int) {
+        dispatch(RgbIntent.SetFlashTimingOffsetMs(value))
+    }
+
     fun resetAudioPipelineSettings() {
         dispatch(RgbIntent.ResetAudioPipelineSettings)
     }
@@ -2353,6 +2360,21 @@ class RgbControllerViewModel(
 
         // 1. Audio Capture and Processing
         if (mode == "on_device") {
+            // Bug fix (2026-07-21): MusicScreen calls AudioCaptureService.start(context, mode)
+            // then immediately viewModel.startMusicSync(mode) -- but start() only *posts* the
+            // service's startup Intent to the main thread; onStartCommand()/startForeground()
+            // hasn't necessarily run by the time this coroutine (already on Dispatchers.IO, so it
+            // races the main thread rather than following it) reaches here. Android's
+            // background-audio-capture restrictions gate whether Visualizer(0) receives real
+            // capture callbacks on whether the process is *already* an eligible foreground-audio
+            // client at the moment it attaches -- attaching a beat early silently produces a
+            // Visualizer that reports enabled=true but never calls back, and no amount of tearing
+            // down/reconstructing that same Visualizer later fixes it, since the eligibility check
+            // happens at attach time. This bounded wait (up to 500ms, the service promotion is
+            // normally near-instant) closes that race at its source instead of retrying after the
+            // fact. Safe to block here: this function only ever runs on Dispatchers.IO (see
+            // AudioSideEffect.StartAudioEngine's executor), never the main thread.
+            com.example.AudioCaptureService.awaitForeground(500L)
             val source = com.example.hardware.audio.VisualizerCaptureSource(getApplication())
             val processor = com.example.core.audio.AudioDspProcessor(source.backend)
             audioCaptureSource = source
@@ -2455,9 +2477,20 @@ class RgbControllerViewModel(
     // com.example.hardware.audio.Fft (internal object, algorithm unchanged) — its only caller,
     // the AudioRecord capture loop, now lives in AudioRecordCaptureSource.
 
+    override fun onAdbStartMusicSync(mode: String) {
+        startMusicSync(mode)
+    }
+
+    override fun onAdbStopMusicSync() {
+        stopMusicSync()
+    }
+
     override fun onCleared() {
         if (ambianceCommandSink.listener === this) {
             ambianceCommandSink.listener = null
+        }
+        if (adbControlSink.listener === this) {
+            adbControlSink.listener = null
         }
         super.onCleared()
         stopMusicSyncInternal()

@@ -33,6 +33,66 @@ import com.example.DiagnosticLogger
  * This class now does that automatically: a one-shot watchdog fires [WATCHDOG_TIMEOUT_MS] after
  * `enabled = true` and, if zero frames have arrived and capture is still supposed to be running,
  * tears down and reconstructs exactly once (see [retried]) — this cannot loop indefinitely.
+ *
+ * **Correction (2026-07-22): the above watchdog was never the actual bug.** An on-device
+ * diagnostic capture showed "Active Engine: ON_DEVICE initialized" immediately followed (~1ms
+ * later) by the app falling back to "Active Engine: SIMULATION started successfully", with
+ * `retry=true` never appearing anywhere in the capture -- meaning the watchdog's own reconstruction
+ * path never even ran. That sequencing only happens if the `try` block in [attemptStart] throws and
+ * `onError` fires synchronously, immediately, with no retry at all on that path.
+ *
+ * **Second correction (2026-07-22): it isn't a timing/release race either.** A second capture
+ * gave the actual exception text: `IllegalStateException: setCaptureSize() called in wrong state:
+ * 2` (2 = `STATE_ENABLED`) — on a brand-new `Visualizer` object this class never called
+ * `.enabled = true` on. Confirmed by the developer to reproduce even on a freshly force-stopped
+ * and relaunched app process, i.e. with zero prior activity from this app in that process at all —
+ * ruling out any theory involving this app's own session lifecycle, leaked resources, or async
+ * release timing, all of which assume the interference comes from *our own* earlier attempts.
+ * Session 0 is the device's *shared* global output mix; Android explicitly supports multiple
+ * independent `Visualizer` clients attaching to it at once (native setup can legitimately return
+ * `ALREADY_EXISTS` rather than `SUCCESS`), which is how multiple visualizer/equalizer apps can
+ * watch the same output simultaneously. If some other, already-running `Visualizer(0)` client —
+ * another app, or a persistent system/vendor audio-effects component, either way outside this
+ * app's control — is already enabled on this session, a brand-new wrapper here attaches to that
+ * same shared native handle and inherits its current `ENABLED` state, making `captureSize=`
+ * illegal (Android requires `STATE_INITIALIZED`) no matter how many times or how long this class
+ * retries it. The actual fix: detect `vis.enabled` immediately after construction and skip the
+ * capture-size/enable calls entirely when it's already true, registering only our own listener
+ * against whatever the shared effect is already configured with. See the `alreadyEnabledElsewhere`
+ * branches in [attemptStart]. The bounded exception-retry loop ([MAX_EXCEPTION_RETRIES]) and the
+ * watchdog above are both left in place as defensive fallbacks for a genuinely transient failure,
+ * but neither was the actual cause here.
+ *
+ * **Real root cause (2026-07-22), found via the self-driving adb harness (CLAUDE.md item 25) and
+ * confirmed by the developer's own real-world usage pattern ("sometimes it works fine, sometimes
+ * it doesn't; toggling off and back on a few times eventually gets it working" — i.e.
+ * intermittent, not permanent, and self-heals under exactly the retry behavior this class already
+ * had for a *different* symptom).** The watchdog above only ever checked "did `onFftDataCapture`
+ * fire at all" ([receivedAnyFrame]) — but on-device diagnostic captures showed the callback firing
+ * on schedule, at the right size, for the *entire* session, with the raw FFT `ByteArray` itself
+ * genuinely all zero bytes every time (confirmed by logging the raw callback payload directly,
+ * before any of this class's own magnitude/flux reconstruction runs). `receivedAnyFrame` is set
+ * `true` on the very first callback regardless of content, so the watchdog always saw "frames are
+ * flowing" and never fired its reconstruction path — structurally blind to exactly the failure
+ * mode actually occurring. This matches a real, if under-documented, `Visualizer(session=0)`
+ * characteristic: attaching while the primary output thread is idle/in-standby (no active
+ * playback yet, or between tracks) can bind the effect to that thread's current (soon-to-be-
+ * replaced-or-reactivated) state; when real playback later starts, the callback keeps firing on
+ * the original binding but never receives the new stream's samples. There is nothing to catch or
+ * retry synchronously — no exception, no state change Java can observe — which is exactly why a
+ * few *manual* toggles (each one a fresh release+reconstruct, landing at a new, uncorrelated
+ * moment relative to whatever the output thread is doing) eventually lands on a good attach purely
+ * by chance, and why this always looked intermittent rather than deterministic.
+ *
+ * **Fix:** track real signal content, not just callback occurrence — [receivedRealSignal] is set
+ * only once a callback's `fft` bytes contain at least one nonzero value. The watchdog now checks
+ * *that* flag instead of [receivedAnyFrame], and — unlike the original one-shot watchdog — retries
+ * up to [MAX_ATTACH_RETRIES] times (each attempt gets its own fresh [WATCHDOG_TIMEOUT_MS] window),
+ * mirroring what manually mashing the toggle a few times already did, just automatically and
+ * faster. If real signal still hasn't shown up after all retries are exhausted, this now calls
+ * [onError] to trigger the existing demo-simulation fallback rather than silently leaving a
+ * permanently-mute `Visualizer` running and reporting "success" forever — the prior behavior for
+ * this exact exhaustion case, which the original one-shot design never handled either.
  */
 class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource {
 
@@ -42,6 +102,38 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
 
     companion object {
         const val WATCHDOG_TIMEOUT_MS = 1500L
+        // Bug fix (2026-07-22): an on-device diagnostic capture confirmed the real on_device
+        // "doesn't activate" failure is NOT the silent-zero-callback scenario the watchdog below
+        // targets -- the log shows "Active Engine: ON_DEVICE initialized" immediately followed
+        // (~1ms later) by "Active Engine: SIMULATION started successfully", with no watchdog log
+        // line ("no frames received...") anywhere in the capture. That sequencing only happens if
+        // the try block below throws synchronously and onError() fires immediately -- there was no
+        // retry at all on that path before now. Root cause: stop() releases the previous
+        // Visualizer's native AudioEffect resources synchronously from the Java side, but
+        // AudioEffect.release() only *requests* native teardown -- Android does not guarantee it
+        // completes before the call returns. Re-selecting on_device shortly after last disabling
+        // it (or after a StopMusicSyncInternal→StartAudioEngine mode switch) can construct/enable a
+        // new Visualizer(0) while the old one's native session-0 attachment is still tearing down,
+        // which throws. A short bounded retry directly on the exception (not a longer "no frames"
+        // timeout, a different failure mode) is what actually recovers from this.
+        //
+        // Correction (2026-07-22), from a second capture: a flat 3x200ms retry failed identically
+        // all 3/3 times -- but that capture also proved the retry loop itself was leaking a native
+        // Visualizer on every failed attempt (see the catch block in attemptStart), which by itself
+        // could fully explain 3/3 identical failures regardless of how long the real teardown
+        // takes. Now that every failed attempt properly releases before retrying, the backoff is
+        // widened from a flat 200ms to exponential (200ms/400ms/800ms/1600ms/3200ms, ~6.2s total
+        // worst case) to give real headroom for a genuine native-teardown race, since the previous
+        // fixed 600ms total window was never actually tested without the leak confounding it.
+        const val MAX_EXCEPTION_RETRIES = 5
+        const val EXCEPTION_RETRY_BASE_DELAY_MS = 200L
+
+        // Bug fix (2026-07-22): bounds how many times the watchdog will release+reconstruct the
+        // Visualizer while it's producing callbacks with no real signal content (see the
+        // "Real root cause" doc comment above). Each retry gets its own WATCHDOG_TIMEOUT_MS
+        // window, so worst case this takes MAX_ATTACH_RETRIES * WATCHDOG_TIMEOUT_MS (~7.5s) before
+        // falling back to simulation -- comparable to the few manual toggles this replaces.
+        const val MAX_ATTACH_RETRIES = 5
     }
 
     override fun start(
@@ -49,14 +141,15 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
         onLog: (String) -> Unit,
         isRunning: () -> Boolean,
         onError: (Throwable) -> Unit
-    ): Boolean = attemptStart(onFrame, onLog, isRunning, onError, retried = false)
+    ): Boolean = attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = 0, exceptionRetryCount = 0)
 
     private fun attemptStart(
         onFrame: (AudioCaptureFrame) -> Unit,
         onLog: (String) -> Unit,
         isRunning: () -> Boolean,
         onError: (Throwable) -> Unit,
-        retried: Boolean
+        attachRetryCount: Int,
+        exceptionRetryCount: Int
     ): Boolean {
         val hasPermission = ContextCompat.checkSelfPermission(
             context,
@@ -69,14 +162,51 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
             return false
         }
 
+        // Set the instant construction succeeds, so the catch block below can release it on any
+        // later failure in this same attempt -- see the bug fix note there for why that matters.
+        // (Kept separate from the `val vis` used in the try body itself so `vis` can stay a
+        // non-null local the whole way through, rather than forcing null-checks/!! everywhere.)
+        var constructedVis: Visualizer? = null
         try {
             val vis = Visualizer(0)
-            DiagnosticLogger.log("AudioCapture", "Active Engine: ON_DEVICE initialized (retry=$retried)")
-            vis.captureSize = Visualizer.getCaptureSizeRange()[1]
+            constructedVis = vis
+            // Bug fix (2026-07-22): confirmed via two on-device diagnostic captures that this
+            // reproduces even on a fresh app process (force-stopped and relaunched, zero prior
+            // activity of our own) -- ruling out any theory involving our own app's session
+            // lifecycle, leaked resources, or async release races entirely. Session 0 is the
+            // device's *shared* global output mix; Android explicitly allows multiple independent
+            // Visualizer clients to attach to it simultaneously (native setup can legitimately
+            // return ALREADY_EXISTS rather than SUCCESS), which is exactly how e.g. multiple
+            // visualizer/equalizer apps can watch the same output at once. If some other,
+            // already-running Visualizer(0) client (another app, or a persistent system/vendor
+            // audio-effects component -- outside this app's control either way) is already enabled
+            // on this session, our brand-new Java wrapper attaches to that same shared native
+            // handle and inherits its current ENABLED state -- explaining "setCaptureSize() called
+            // in wrong state: 2" (2 = STATE_ENABLED) on an object we never called .enabled=true on
+            // ourselves. Android requires STATE_INITIALIZED (not STATE_ENABLED) to change
+            // captureSize, so that call is simply illegal here, no matter how many times or how
+            // long we wait to retry it -- there is nothing transient to wait out. The actual fix:
+            // detect this up front and skip straight to registering our own listener against
+            // whatever the shared effect is already configured with, instead of trying (and
+            // retrying) to reconfigure an effect that was never ours to configure.
+            val alreadyEnabledElsewhere = vis.enabled
+            DiagnosticLogger.log(
+                "AudioCapture",
+                "Active Engine: ON_DEVICE initialized (attachRetryCount=$attachRetryCount, alreadyEnabledElsewhere=$alreadyEnabledElsewhere)"
+            )
+            if (!alreadyEnabledElsewhere) {
+                vis.captureSize = Visualizer.getCaptureSizeRange()[1]
+            }
 
             var lastFftTime = 0L
+            var lastRawFftLogMs = 0L
             var loggedBackendInfo = false
             val receivedAnyFrame = java.util.concurrent.atomic.AtomicBoolean(false)
+            // Bug fix (2026-07-22): distinct from receivedAnyFrame -- set only once a callback's
+            // fft bytes actually contain nonzero content, not just on the callback firing at all.
+            // See the "Real root cause" doc comment above for why receivedAnyFrame alone was blind
+            // to this failure mode.
+            val receivedRealSignal = java.util.concurrent.atomic.AtomicBoolean(false)
 
             vis.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                 override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
@@ -85,11 +215,34 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                     if (fft == null || !isRunning()) return
                     receivedAnyFrame.set(true)
 
+                    // Bug fix (2026-07-22): cheap unthrottled scan (only runs until the first
+                    // nonzero byte is ever seen this attempt) so the watchdog below can tell a
+                    // genuinely-signal-carrying attach apart from one that's only producing
+                    // correctly-shaped but all-zero callbacks -- see the "Real root cause" doc
+                    // comment above.
+                    if (!receivedRealSignal.get()) {
+                        var sawNonZero = false
+                        for (b in fft) {
+                            if (b.toInt() != 0) {
+                                sawNonZero = true
+                                break
+                            }
+                        }
+                        if (sawNonZero) receivedRealSignal.set(true)
+                    }
+
                     if (!loggedBackendInfo) {
                         loggedBackendInfo = true
+                        // Bug fix (2026-07-22): Android's Visualizer.OnFftDataCapture documents
+                        // samplingRate as milliHertz, not Hertz -- this line was logging the raw
+                        // value with a "Hz" suffix (e.g. "48000000Hz" for a perfectly normal
+                        // 48kHz capture), which is exactly the ambiguity CLAUDE.md flagged as
+                        // unconfirmed when this instrumentation was first added. Logging both the
+                        // raw milliHz value and the converted Hz value removes the ambiguity
+                        // without discarding anything a future diagnostic pass might want.
                         DiagnosticLogger.log(
                             "BackendInfo",
-                            "backend=on_device samplingRate=${samplingRate}Hz captureSize=${vis.captureSize} numBins=${fft.size / 2}"
+                            "backend=on_device samplingRateMilliHz=$samplingRate samplingRateHz=${samplingRate / 1000} captureSize=${vis.captureSize} numBins=${fft.size / 2}"
                         )
                     }
 
@@ -102,6 +255,27 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                         )
                     }
                     lastFftTime = nowElapsed
+
+                    // Diagnostic-only (2026-07-22, on_device signal-zero investigation): confirms
+                    // whether the raw FFT byte array itself carries real content at the source, or
+                    // is coming back all-zero from Visualizer/session 0 directly -- distinguishes
+                    // "our own magnitude/flux math is discarding real data" from "Visualizer(0)
+                    // genuinely never sees this app's own AudioTrack output." Throttled to ~1.5s,
+                    // same cadence as AudioDspProcessor's SignalLevel/BeatConfidence sampling.
+                    if (nowElapsed - lastRawFftLogMs >= 1500L) {
+                        lastRawFftLogMs = nowElapsed
+                        var nonZeroCount = 0
+                        var maxAbsByte = 0
+                        for (b in fft) {
+                            val v = b.toInt()
+                            if (v != 0) nonZeroCount++
+                            if (Math.abs(v) > maxAbsByte) maxAbsByte = Math.abs(v)
+                        }
+                        DiagnosticLogger.log(
+                            "RawFft",
+                            "backend=on_device fftLen=${fft.size} nonZeroBytes=$nonZeroCount maxAbsByte=$maxAbsByte"
+                        )
+                    }
 
                     val len = fft.size
                     val numBins = len / 2
@@ -134,41 +308,86 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                 }
             }, Visualizer.getMaxCaptureRate(), false, true)
 
-            vis.enabled = true
+            if (!alreadyEnabledElsewhere) {
+                vis.enabled = true
+            }
             activeVisualizer = vis
             onLog("System Visualizer initialized successfully for on-device sync (direct FFT).")
 
-            if (!retried) {
-                Thread {
-                    try {
-                        Thread.sleep(WATCHDOG_TIMEOUT_MS)
-                    } catch (e: InterruptedException) {
-                        return@Thread
+            Thread {
+                try {
+                    Thread.sleep(WATCHDOG_TIMEOUT_MS)
+                } catch (e: InterruptedException) {
+                    return@Thread
+                }
+                // Only act if this watchdog's own Visualizer is still the live one (a real
+                // stop() or a subsequent start() may have already superseded it) and capture
+                // is still supposed to be active.
+                if (!receivedRealSignal.get() && activeVisualizer === vis && isRunning()) {
+                    val reason = if (!receivedAnyFrame.get()) {
+                        "no frames received at all"
+                    } else {
+                        "frames received on schedule but with zero signal content (session-0 " +
+                            "attach likely bound to a stale/inactive output thread)"
                     }
-                    // Only act if this watchdog's own Visualizer is still the live one (a real
-                    // stop() or a subsequent start() may have already superseded it) and capture
-                    // is still supposed to be active.
-                    if (!receivedAnyFrame.get() && activeVisualizer === vis && isRunning()) {
+                    try {
+                        vis.enabled = false
+                        vis.release()
+                    } catch (e: Exception) {}
+                    if (activeVisualizer === vis) activeVisualizer = null
+
+                    if (attachRetryCount < MAX_ATTACH_RETRIES) {
                         DiagnosticLogger.log(
                             "AudioCapture",
-                            "on_device: no frames received within ${WATCHDOG_TIMEOUT_MS}ms of attach, reconstructing Visualizer once"
+                            "on_device: $reason within ${WATCHDOG_TIMEOUT_MS}ms (attempt " +
+                                "${attachRetryCount + 1}/$MAX_ATTACH_RETRIES), reconstructing Visualizer"
                         )
-                        try {
-                            vis.enabled = false
-                            vis.release()
-                        } catch (e: Exception) {}
-                        if (activeVisualizer === vis) activeVisualizer = null
-                        attemptStart(onFrame, onLog, isRunning, onError, retried = true)
+                        attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount + 1, exceptionRetryCount = exceptionRetryCount)
+                    } else {
+                        DiagnosticLogger.log(
+                            "AudioCapture",
+                            "on_device: $reason, gave up after $MAX_ATTACH_RETRIES reconstruction attempts, falling back to simulation"
+                        )
+                        onLog("Visualizer never produced real signal after $MAX_ATTACH_RETRIES attempts. Running simulation.")
+                        onError(IllegalStateException("Visualizer(0) attach never produced real signal after $MAX_ATTACH_RETRIES attempts"))
                     }
-                }.apply {
-                    name = "VisualizerAttachWatchdog"
-                    isDaemon = true
-                    start()
                 }
+            }.apply {
+                name = "VisualizerAttachWatchdog"
+                isDaemon = true
+                start()
             }
 
             return true
         } catch (e: Exception) {
+            // Bug fix (2026-07-22), found from a second on-device capture: the previous version of
+            // this catch block never released `vis` if construction succeeded but a later setup
+            // call (captureSize/listener/enabled) threw -- e.g. the actual observed exception,
+            // "setCaptureSize() called in wrong state: 2" (state 2 = ENABLED on a *freshly
+            // constructed* Visualizer, which only happens if this session-0 attach is colliding
+            // with a native AudioEffect resource that was never released). Retrying without
+            // releasing meant every retry constructed and abandoned yet another native Visualizer,
+            // compounding the exact resource collision it was trying to recover from -- which is
+            // almost certainly why the retry added last time failed identically all 3/3 times
+            // instead of ever recovering. Releasing here before any retry/give-up is the actual
+            // fix; the retry loop by itself was not.
+            try {
+                constructedVis?.enabled = false
+                constructedVis?.release()
+            } catch (re: Exception) {}
+            if (exceptionRetryCount < MAX_EXCEPTION_RETRIES && isRunning()) {
+                val delayMs = EXCEPTION_RETRY_BASE_DELAY_MS shl exceptionRetryCount
+                DiagnosticLogger.log(
+                    "AudioCapture",
+                    "on_device: init threw ${e.javaClass.simpleName}: ${e.message}, retrying in ${delayMs}ms (${exceptionRetryCount + 1}/$MAX_EXCEPTION_RETRIES)"
+                )
+                try {
+                    Thread.sleep(delayMs)
+                } catch (ie: InterruptedException) {
+                    return false
+                }
+                return attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount, exceptionRetryCount = exceptionRetryCount + 1)
+            }
             onLog("Failed to initialize Visualizer: ${e.message}. Running simulation.")
             onError(e)
             return false

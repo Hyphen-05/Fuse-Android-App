@@ -107,6 +107,14 @@ data class AudioSettingsState(
     val isLogarithmicScalingEnabled: Boolean = true,
     val bluetoothDelayMs: Int = 0,
     val totalVisualDelayMs: Int = 0,
+    // Predictive flash scheduling (P1, mapping-proposal-audio-to-led-2026-07-21.md §4):
+    // subtracted from BeatDetector.nextPredictedBeatMs to get the scheduled render time for the
+    // next flash, so it renders ahead of the ~180ms-late centered detector instead of reacting to
+    // it. Same by-ear calibration pattern as bluetoothDelayMs above — no hardcoded/measured
+    // transport-latency constant, tuned via its own Settings slider while a steady-beat preset
+    // plays. Default (100ms) is a reasonable starting guess for BLE write + cheap MCU firmware
+    // render, not a measured value.
+    val flashTimingOffsetMs: Int = 100,
     val visualizerPreset: String = "Default",
     val audioGammaExponent: Float = 0.45f,
     val audioFlashStrength: Float = 0.3f,
@@ -310,6 +318,7 @@ sealed interface RgbIntent {
     data class SetPaletteCyclingEnabled(val value: Boolean) : RgbIntent
     data class SetLogarithmicScalingEnabled(val value: Boolean) : RgbIntent
     data class SetBluetoothDelayMs(val value: Int) : RgbIntent
+    data class SetFlashTimingOffsetMs(val value: Int) : RgbIntent
     object ResetAudioPipelineSettings : RgbIntent
     // beatFlashDecayMs, ambientCapFraction, midFluxWeight, totalVisualDelayMs have
     // no dedicated setter in RgbControllerViewModel (verified) — read-only fields,

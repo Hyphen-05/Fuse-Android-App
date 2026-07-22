@@ -21,6 +21,7 @@ class AudioCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val mode = intent?.getStringExtra("mode") ?: "phone_mic"
         promoteToForeground(mode)
+        isForegroundActive = true
         return START_NOT_STICKY
     }
 
@@ -73,8 +74,21 @@ class AudioCaptureService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "audio_capture_channel"
-        
+
+        // Set once onStartCommand() has actually promoted this service to the foreground, cleared
+        // on every start()/stop(). Real capture (Visualizer(0) attaching to the global output mix)
+        // is gated by Android's background-audio-capture restrictions on whether this process is
+        // already an eligible foreground-audio-capture client -- but start() here only *requests*
+        // that promotion asynchronously (posts an Intent to the main thread's Service dispatch);
+        // it does not wait for onStartCommand()/startForeground() to actually run. The caller
+        // (RgbControllerViewModel.startAudioEngine, on_device branch) awaits this flag with a
+        // bounded timeout before constructing the Visualizer, closing the race where capture
+        // attaches while the app is still (from the platform's point of view) a background process
+        // -- see awaitForeground().
+        @Volatile private var isForegroundActive = false
+
         fun start(context: Context, mode: String) {
+            isForegroundActive = false
             val intent = Intent(context, AudioCaptureService::class.java).apply {
                 putExtra("mode", mode)
             }
@@ -86,8 +100,23 @@ class AudioCaptureService : Service() {
         }
 
         fun stop(context: Context) {
+            isForegroundActive = false
             val intent = Intent(context, AudioCaptureService::class.java)
             context.stopService(intent)
+        }
+
+        // Blocks the calling thread (must not be the main thread) until onStartCommand() has
+        // actually promoted this service to the foreground, or timeoutMs elapses, whichever comes
+        // first -- never hangs indefinitely on a failed/slow promotion.
+        fun awaitForeground(timeoutMs: Long) {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (!isForegroundActive && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(15L)
+                } catch (e: InterruptedException) {
+                    return
+                }
+            }
         }
     }
 }
