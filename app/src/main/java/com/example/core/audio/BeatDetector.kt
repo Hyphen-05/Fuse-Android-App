@@ -1,5 +1,7 @@
 package com.example.core.audio
 
+import com.example.DiagnosticLogger
+
 // Phase 5, part B: moved verbatim out of RgbControllerViewModel.kt (was `internal class
 // BeatDetector` at file scope there since Phase 4, when it was widened from `private` so
 // AudioDspProcessor could reuse it). Only the package changed — no logic touched. Lives
@@ -12,12 +14,29 @@ internal class BeatDetector(
     private val peakWindowMs: Long = 60L,
     private val tempoHistoryMs: Long = 8000L,
     private val tempoUpdateIntervalMs: Long = 1500L,
-    private val minBpm: Float = 60f,
+    // Bug fix (2026-07-22): a 60bpm floor put any real tempo below it (a 50bpm metronome test,
+    // slow ballads) completely outside the autocorrelation search range in updateTempoAndGrid
+    // (minLag/maxLag below are derived directly from minBpm/maxBpm) -- the algorithm could not
+    // find the true period even in principle, so it locked onto whatever weak noise-driven local
+    // peak survived the preferredBpm Gaussian prior instead. Confirmed on-device: a steady 50bpm
+    // metronome locked to bogus, non-harmonic values (176.47/136.36/132.95 bpm across separate
+    // sessions) with bpmConfidence pinned near zero the entire time -- exactly what "no real
+    // correlation peak in range" looks like, not a wrong-octave lock (which would show a clean
+    // 2x/3x/4x multiple). 40bpm gives headroom below the 50bpm repro case.
+    private val minBpm: Float = 40f,
     private val maxBpm: Float = 200f,
     private val preferredBpm: Float = 120f,
     private val octaveToleranceRatio: Float = 0.85f,
     private val transitionPenalty: Float = 100f
 ) {
+    companion object {
+        // See the two "Bug fix (2026-07-22)" comments at their use sites in process() below.
+        // Lowered from 0.1f/0.3f -- a modest first reduction, meant to be retested against the
+        // same 120bpm soft-material capture before going further, not a final tuned value.
+        private const val NOISE_FLOOR_MAD_SCALE = 0.07f
+        private const val NOISE_FLOOR_ABSOLUTE = 0.22f
+    }
+
     data class FluxSample(val timestampMs: Long, val flux: Float)
 
     // (a) Why the buffer is time-based rather than count-based:
@@ -67,6 +86,20 @@ internal class BeatDetector(
     private var previousCandidateBpm = 0f
     private var lockedBpmConfidence = 0f
     private var gridBeats = listOf<Long>()
+
+    // Consecutive updateTempoAndGrid() cycles (each ~tempoUpdateIntervalMs apart) with
+    // effectively zero signal to autocorrelate against (zeroLagAc below its own near-zero guard).
+    // Without this, lockedBpm/lockedBpmConfidence/gridBeats simply freeze at whatever they were
+    // the instant real signal disappears -- updateTempoAndGrid's own `if (zeroLagAc < 1e-6f)
+    // return` bails out before touching any of them, and nothing else in this class ever resets
+    // them. That means a lock established during a song persists indefinitely after playback
+    // stops entirely: nextPredictedBeatMs keeps extrapolating forward off the old grid at the old
+    // BPM forever, and bpmConfidence (AudioDspProcessor's predictiveWeight) never drops, so the
+    // P1 predictive scheduler keeps firing scheduled flashes on a dead tempo with zero real audio
+    // behind them. Dropping the lock after a couple of silent cycles (~3s) is what actually makes
+    // nextPredictedBeatMs go null again, which is the condition the "lost tempo lock" handling in
+    // AudioDspProcessor.process() already expects but could structurally never reach before.
+    private var silentTempoUpdateStreak = 0
 
     data class BeatResult(
         val isBeat: Boolean,
@@ -213,7 +246,23 @@ internal class BeatDetector(
         for (i in 0 until numSteps) {
             zeroLagAc += resampled[i] * resampled[i]
         }
-        if (zeroLagAc < 1e-6f) return
+        if (zeroLagAc < 1e-6f) {
+            // No signal at all in this window (e.g. playback stopped outright, not just a quiet
+            // passage -- a quiet-but-real passage still has nonzero flux and won't hit this
+            // branch). Require a couple of consecutive silent cycles (~3s total) before dropping
+            // the lock, so a single momentary dropout/silence-gap mid-song doesn't discard a
+            // perfectly good lock.
+            silentTempoUpdateStreak++
+            if (silentTempoUpdateStreak >= 2 && lockedBpm != 0f) {
+                lockedBpm = 0f
+                lockedBpmConfidence = 0f
+                gridBeats = listOf()
+                candidateStreakCount = 0
+                previousCandidateBpm = 0f
+            }
+            return
+        }
+        silentTempoUpdateStreak = 0
 
         val autocorrelations = FloatArray(maxLag + 1)
         for (lag in minLag..maxLag) {
@@ -428,6 +477,14 @@ internal class BeatDetector(
         // valid from the very first frame. Reuses `thresholdMultiplier` (the same tuning knob the
         // centered detector uses) rather than inventing a second one. Cheap: the trailing window
         // is the same medianWindowMs duration, just anchored at `now` instead of `evalTimestamp`.
+        //
+        // Must go through the same `madReference` noise floor (item 17 in CLAUDE.md) as the
+        // centered detector below, not a bare causalScaledMad -- otherwise this path re-collapses
+        // its own threshold toward zero during a quiet stretch (e.g. between songs) exactly the
+        // way the centered detector used to before madReference existed, and ambient noise reads
+        // as a beat again. madReference itself is only updated further down (it needs the
+        // centered detector's subset), so this reads last frame's value, which is fine since it's
+        // a slow-release EMA anyway.
         val causalWindowStart = now - medianWindowMs
         val causalSubset = fluxBuffer.filter { it.timestampMs in causalWindowStart..now }
         val causalFlux: Float
@@ -439,8 +496,12 @@ internal class BeatDetector(
             val causalFluxes = causalSubset.map { it.flux }
             val causalMedian = getMedian(causalFluxes)
             val causalMad = getMedian(causalFluxes.map { kotlin.math.abs(it - causalMedian) })
-            val causalScaledMad = maxOf(causalMad * 1.4826f, 0.1f)
-            val causalThreshold = maxOf(causalMedian + thresholdMultiplier * causalScaledMad, 0.3f)
+            // Bug fix (2026-07-22): floors lowered from 0.1f/0.3f (see the matching centered-path
+            // comment below for the full rationale -- both paths must move together per the
+            // existing madReference-sharing comment above).
+            val causalScaledMad = maxOf(causalMad * 1.4826f, NOISE_FLOOR_MAD_SCALE)
+            val causalEffectiveMad = maxOf(causalScaledMad, madReference * 0.25f)
+            val causalThreshold = maxOf(causalMedian + thresholdMultiplier * causalEffectiveMad, NOISE_FLOOR_ABSOLUTE)
             causalFlux = flux
             causalIsCandidate = flux > causalThreshold
         }
@@ -479,8 +540,18 @@ internal class BeatDetector(
         val absoluteDeviations = subsetFluxes.map { kotlin.math.abs(it - medianFlux) }
         val mad = getMedian(absoluteDeviations)
 
-        // 1.4826 standard scale factor for normal distribution matching, with noise protection
-        val scaledMad = maxOf(mad * 1.4826f, 0.1f)
+        // 1.4826 standard scale factor for normal distribution matching, with noise protection.
+        // Bug fix (2026-07-22): floors lowered 0.1f -> NOISE_FLOOR_MAD_SCALE (0.07f) and, further
+        // down, the absolute threshold floor 0.3f -> NOISE_FLOOR_ABSOLUTE (0.22f). On-device
+        // diagnostic data (CLAUDE.md item 17 methodology) showed a confirmed ~120bpm soft/quiet
+        // passage missing ~36-38% of expected beats, with detected-beat strength clustering
+        // 0.2-0.5 (vs. 0.95-0.98 on a loud metronome) -- consistent with quiet transients sitting
+        // right at these fixed floors regardless of how quiet the surrounding material actually is.
+        // A modest (~25-30%) reduction, not an aggressive one, per the explicit ask to retest
+        // before going further -- this trades toward catching more quiet hits at some risk of
+        // ambient-noise false positives, the exact tension madReference (item 17) already manages;
+        // it is untouched here, only the fixed floors it and effectiveMad get maxOf'd against.
+        val scaledMad = maxOf(mad * 1.4826f, NOISE_FLOOR_MAD_SCALE)
 
         // Slow-release reference for scaledMad: tracks the loudest recent scaledMad instantly
         // (attack), but decays over a few seconds (release) rather than collapsing the moment a
@@ -493,7 +564,7 @@ internal class BeatDetector(
         madReference = if (scaledMad > madReference) scaledMad else madReference * 0.995f + scaledMad * 0.005f
         val effectiveMad = maxOf(scaledMad, madReference * 0.25f)
 
-        val threshold = maxOf(medianFlux + thresholdMultiplier * effectiveMad, 0.3f)
+        val threshold = maxOf(medianFlux + thresholdMultiplier * effectiveMad, NOISE_FLOOR_ABSOLUTE)
 
         // 4. Local peak-picking: find the sample closest to evalTimestamp
         val evalSample = fluxBuffer.minByOrNull { kotlin.math.abs(it.timestampMs - evalTimestamp) }
@@ -545,9 +616,28 @@ internal class BeatDetector(
             val periodMs = 60000f / lockedBpm
             val nearestBeat = gridBeats.minByOrNull { kotlin.math.abs(it - evalTimestamp) }
             if (nearestBeat != null) {
-                val deviation = kotlin.math.abs(nearestBeat - evalTimestamp).toFloat()
+                val signedDeviationMs = nearestBeat - evalTimestamp
+                val deviation = kotlin.math.abs(signedDeviationMs).toFloat()
                 val maxDeviation = periodMs / 4f
                 phaseAgreement = if (deviation >= maxDeviation) 0f else 1f - (deviation / maxDeviation)
+
+                // Diagnostic-only (2026-07-22, investigating the Flash Timing Offset early-fire
+                // report): signedDeviationMs is nearestBeat - evalTimestamp, in the SAME
+                // coordinate space nextPredictedBeatMs is extrapolated in (gridBeats' own
+                // timestamps, unshifted by lookaheadMs). evalTimestamp is the centered detector's
+                // confirmed onset time for *this* real beat. If the DP grid node closest to a real
+                // confirmed beat is itself consistently negative here (nearestBeat earlier than
+                // the true onset) by roughly the same ~200-250ms the field investigation measured
+                // between FlashSchedule and AudioSync, that pins the bias on gridBeats/DP placement
+                // itself rather than on the extrapolation or on lookaheadMs bookkeeping. No logic
+                // reads this value -- confirmation only, ahead of touching the DP scoring math.
+                if (isBeat) {
+                    DiagnosticLogger.log(
+                        "BeatGridPhase",
+                        "evalTimestampMs=$evalTimestamp nearestGridBeatMs=$nearestBeat " +
+                            "signedDeviationMs=$signedDeviationMs periodMs=$periodMs lockedBpm=$lockedBpm"
+                    )
+                }
             }
         }
 
