@@ -357,6 +357,17 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 "backend=${backend.name} isBeat=$isBeat strength=${result.strength} confidence=${result.confidence} " +
                     "bpm=${result.bpm} bpmConfidence=${result.bpmConfidence}"
             )
+            // Diagnostic-only (2026-07-22, on_device signal-zero investigation): confirms whether
+            // real signal energy is even reaching the DSP pipeline before BeatDetector runs, since
+            // strength/confidence/bpm sitting at exactly 0.0 for an entire on_device session is
+            // consistent with either (a) no real audio energy in the reconstructed FFT bins at
+            // all, or (b) energy present but never clearing the noise gate / beat threshold. This
+            // line distinguishes the two without touching any decision logic.
+            DiagnosticLogger.log(
+                "SignalLevel",
+                "backend=${backend.name} frameAvgMag=$frameAvgMag noiseFloor=$noiseFloor totalEnergy=$totalEnergy " +
+                    "bassVal=$bassVal midVal=$midVal highVal=$highVal noiseGateThreshold=${state.noiseGateThreshold}"
+            )
         }
         val activeTotal = smoothedBass + smoothedMid + smoothedHigh
         val midRatio = if (activeTotal > 0) smoothedMid / activeTotal else 0.0f
@@ -458,7 +469,18 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // here is cheap -- it just self-erases via the normal decay envelope -- unlike a wrong
         // anchor move, so this stays gated purely on the causal onset check, its own cooldown,
         // and (1 - predictiveWeight); it never looks at isBeat/the centered detector at all.
-        if (result.causalIsCandidate && nowMs - lastFastTriggerFlashAtMs > 150L) {
+        //
+        // Bug fix (2026-07-22): causalIsCandidate is purely a *relative* statistical check (this
+        // frame's flux vs. its own recent median/MAD) -- it has no absolute floor on whether
+        // there's any real signal to react to at all. The centered detector's own `isBeat` above
+        // is never trusted without also clearing `totalEnergy >= state.noiseGateThreshold`; this
+        // path was missing that same gate entirely. That's exactly what let it fire indiscriminately
+        // during genuine silence (not just a quiet passage): with nothing to lock onto,
+        // predictiveWeight is 0 so fastWeight is 1.0 (fully undamped, the *most* trusting this
+        // mechanism ever is), and ordinary statistical noise in near-zero flux readings routinely
+        // crosses its own adaptive threshold by chance. Requiring real absolute energy first closes
+        // that hole without touching the relative onset math itself.
+        if (result.causalIsCandidate && totalEnergy >= state.noiseGateThreshold && nowMs - lastFastTriggerFlashAtMs > 150L) {
             val fastWeight = 1f - predictiveWeight
             if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
