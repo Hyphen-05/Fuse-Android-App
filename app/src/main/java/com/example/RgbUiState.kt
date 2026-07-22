@@ -110,11 +110,12 @@ data class AudioSettingsState(
     // Predictive flash scheduling (P1, mapping-proposal-audio-to-led-2026-07-21.md §4):
     // subtracted from BeatDetector.nextPredictedBeatMs to get the scheduled render time for the
     // next flash, so it renders ahead of the ~180ms-late centered detector instead of reacting to
-    // it. Same by-ear calibration pattern as bluetoothDelayMs above — no hardcoded/measured
-    // transport-latency constant, tuned via its own Settings slider while a steady-beat preset
-    // plays. Default (100ms) is a reasonable starting guess for BLE write + cheap MCU firmware
-    // render, not a measured value.
-    val flashTimingOffsetMs: Int = 100,
+    // it. visualizer-review-2026-07-22.md C4/B3: no longer an independent by-ear slider — always
+    // set equal to bluetoothDelayMs (see AudioSettingsReducer.SetBluetoothDelayMs's doc comment
+    // for the derivation: the photon only lands exactly on the predicted beat when this equals
+    // the transmit+render delay that's added back after scheduling). Default 0 to match
+    // bluetoothDelayMs's own default, not an independent guess.
+    val flashTimingOffsetMs: Int = 0,
     val visualizerPreset: String = "Default",
     val audioGammaExponent: Float = 0.45f,
     val audioFlashStrength: Float = 0.3f,

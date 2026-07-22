@@ -677,19 +677,19 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
+                        // visualizer-review-2026-07-22.md C4/B3: this used to be its own
+                        // independent by-ear slider (0-300ms), tuned separately from Bluetooth
+                        // Delay above with no reason to land on the same value. It's now always
+                        // equal to Bluetooth Delay by construction (see
+                        // AudioSettingsReducer.SetBluetoothDelayMs's doc comment for the math), so
+                        // it's a read-only mirror here — the "Calibrate" button above is the one
+                        // guided measurement that sets both.
                         Text(
-                            text = "Fine-tunes when the music-sync flash renders relative to the predicted beat. " +
-                                "Play a steady-beat visualizer preset and adjust by ear/eye until the flash lands " +
-                                "exactly on the beat — this is tuned by feel, not measured.",
+                            text = "How far ahead of the predicted beat the flash is scheduled, to cancel out the " +
+                                "Bluetooth Delay above being added back before the color reaches the light. Always " +
+                                "matches Bluetooth Delay — use \"Calibrate\" above to set both together.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        HapticBouncySlider(
-                            value = state.audioSettings.flashTimingOffsetMs.toFloat(),
-                            onValueChange = { viewModel.setFlashTimingOffsetMs(it.toInt()) },
-                            valueRange = 0f..300f,
-                            totalSteps = 300,
-                            modifier = Modifier.fillMaxWidth().testTag("flash_timing_offset_slider")
                         )
                     }
                 }

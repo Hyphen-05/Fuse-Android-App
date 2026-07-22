@@ -68,6 +68,24 @@ data class AudioDspResult(
  */
 class AudioDspProcessor(private val backend: AudioBackend) {
 
+    // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
+    // conversion to exp(-dtMs/tau), chosen so the decay reduces to the original per-frame
+    // multiplicative constant at phone_mic's reference ~23ms/frame interval (i.e. phone_mic
+    // behavior is unchanged; Visualizer's ~50ms/frame cadence now decays the correct amount of
+    // real time instead of only half as much). tau = -REF_DT_MS / ln(originalPerFrameFactor).
+    private val AUTO_GAIN_FAST_TAU_MS = 755f  // from the original 0.97f/frame
+    private val AUTO_GAIN_SLOW_TAU_MS = 2864f // from the original 0.992f/frame
+    private val UI_AMPLITUDE_DECAY_TAU_MS = 1138f // from the original 0.98f/frame
+
+    // visualizer-review-2026-07-22.md C5 (P3 macro-dynamics): see the ceiling/floor tracker and
+    // drop detector inside process() for the mechanism. 45s sits in the review's suggested
+    // 30-60s range.
+    private val MACRO_TAU_MS = 45000f
+    private var macroLoudnessCeiling = 0f
+    private var macroLoudnessFloor = 0f
+    private var lastDropFiredAtMs = 0L
+    private var dropFlashRangeBoostUntilMs = 0L
+
     // --- DSP state (function-local vars in the original, now instance fields) ---
     private var smoothedBass = 0.0f
     private var smoothedMid = 0.0f
@@ -166,6 +184,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
     private var smoothedHue = 0.0f
 
+    // visualizer-review-2026-07-22.md C7/P5: EMA-smoothed spectral crest (peak/mean magnitude
+    // ratio), consumed by the saturation calculation further down in process(). Starts at 1.0 --
+    // "flat spectrum," the crestRatio value for a silent/uniform first frame.
+    private var smoothedCrest = 1.0f
+
     private val energyWindowSize = 250 // ~6 seconds
     private val energyHistory = FloatArray(energyWindowSize)
     private var energyHistoryIdx = 0
@@ -219,15 +242,26 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val realBins = frame.realBins
         val imagBins = frame.imagBins
 
-        // Calculate frame average magnitude (excluding DC, up to minOf(349, numBins))
+        // Calculate frame average magnitude (excluding DC, up to minOf(349, numBins)). Also tracks
+        // the frame's peak bin magnitude in the same pass -- visualizer-review-2026-07-22.md
+        // C7/P5 uses peak/mean ("spectral crest") further down to give saturation a third moving
+        // dimension. No extra pass over the spectrum needed; this loop already visits every bin.
         val searchLimit = minOf(349, numBins)
         var magnitudeSum = 0.0f
         var magnitudeCount = 0
+        var magnitudePeak = 0.0f
         for (k in 1 until searchLimit) {
             magnitudeSum += magnitude[k]
             magnitudeCount++
+            if (magnitude[k] > magnitudePeak) magnitudePeak = magnitude[k]
         }
         val frameAvgMag = if (magnitudeCount > 0) magnitudeSum / magnitudeCount else 0.0f
+        // Crest ratio: 1.0 for a flat/noisy spectrum, higher for a peaky/tonal one. Smoothed with
+        // a fixed-rate EMA (independent of audioSmoothingAttack/Decay, which are tuned for
+        // band-energy dynamics, not spectral shape) so per-frame FFT bin jitter doesn't make
+        // saturation flicker.
+        val crestRatio = if (frameAvgMag > 0.001f) magnitudePeak / frameAvgMag else 1f
+        smoothedCrest = 0.15f * crestRatio + 0.85f * smoothedCrest
 
         // Update rolling buffer
         noiseHistory[noiseHistoryIdx] = frameAvgMag
@@ -291,6 +325,53 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val rollingMean = if (energyHistoryCount > 0) energyHistorySum / energyHistoryCount else 0.0f
         val rollingMeanSq = if (energyHistoryCount > 0) energyHistorySqSum / energyHistoryCount else 0.0f
         val rollingVariance = maxOf(0.0f, rollingMeanSq - (rollingMean * rollingMean))
+
+        // --- P3 macro-dynamics (visualizer-review-2026-07-22.md C5) ---
+        // A slow (~45s) loudness ceiling/floor derived from the existing 6s rollingMean -- cheap
+        // (no new rolling buffer, no per-frame sort, unlike a literal percentile tracker, which
+        // would add exactly the kind of per-frame allocation/sort churn B5 flags) way to tell
+        // "chorus" from "verse": ceiling attacks instantly and releases over ~45s, floor is the
+        // mirror image (drops instantly, releases upward over ~45s). macroPercentile is where
+        // the current rollingMean sits within that recent dynamic range.
+        macroLoudnessCeiling = if (rollingMean > macroLoudnessCeiling) {
+            rollingMean
+        } else {
+            val release = kotlin.math.exp(-dtMs.toFloat() / MACRO_TAU_MS)
+            macroLoudnessCeiling * release + rollingMean * (1f - release)
+        }
+        macroLoudnessFloor = if (macroLoudnessFloor == 0f || rollingMean < macroLoudnessFloor) {
+            rollingMean
+        } else {
+            val release = kotlin.math.exp(-dtMs.toFloat() / MACRO_TAU_MS)
+            macroLoudnessFloor * release + rollingMean * (1f - release)
+        }
+        val macroLoudnessRange = maxOf(macroLoudnessCeiling - macroLoudnessFloor, 1f)
+        val macroPercentile = ((rollingMean - macroLoudnessFloor) / macroLoudnessRange).coerceIn(0f, 1f)
+
+        // Drop detector: a sudden spike well above the established ~45s ceiling. Gated on a real
+        // ceiling actually existing yet (not startup silence) and a 30s refractory so a loud song
+        // doesn't retrigger every few seconds. 2.5x is a judgment call, not a measured value --
+        // large enough that ordinary chorus-level loudness (already captured by macroPercentile
+        // above) doesn't itself qualify as a "drop."
+        var dropFiredThisFrame = false
+        if (totalEnergy > macroLoudnessCeiling * 2.5f &&
+            macroLoudnessCeiling > state.noiseGateThreshold &&
+            nowMs - lastDropFiredAtMs > 30000L
+        ) {
+            lastDropFiredAtMs = nowMs
+            dropFlashRangeBoostUntilMs = nowMs + 2000L
+            // Uniform white blast, not gated by useWhiteFlash (unlike the regular per-beat white
+            // pop below) -- a drop is meant to read as a moment regardless of preset. Reuses the
+            // existing whiteHotFlashOffset recovery mechanic (per-preset whiteFlashRecoveryMs)
+            // rather than inventing a second decay, so it fades back at whatever rate the current
+            // preset is already tuned for.
+            whiteHotFlashOffset = 0f
+            dropFiredThisFrame = true
+            DiagnosticLogger.log(
+                "MacroDrop",
+                "backend=${backend.name} atMs=$nowMs totalEnergy=$totalEnergy ceiling=$macroLoudnessCeiling floor=$macroLoudnessFloor"
+            )
+        }
 
         // 2. Add totalEnergy to 1-second window for detecting sustain
         val oldShort = shortHistory[shortHistoryIdx]
@@ -400,7 +481,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // both halves of a "white flash" render on the same frame.
         val useWhiteFlash = state.visualizerPreset == "Strobe Blast" || state.visualizerPreset == "Beat Only" || state.visualizerPreset == "Laser Sharp"
 
-        anchorMovedThisFrame = false
+        // A drop's anchor jump is guaranteed -- unlike a regular beat's confidence-gated move,
+        // there's no "was this really a beat" question here, the energy spike itself is the
+        // trigger. Bypasses hueJumpConfidenceGate entirely.
+        if (dropFiredThisFrame) {
+            hueAnchor = (hueAnchor + state.hueAnchorJumpDeg) % 360f
+            beatsSinceAnchorMove = 0
+            lastAnchorMoveMs = nowMs
+        }
+        anchorMovedThisFrame = dropFiredThisFrame
         if (isBeat) {
             // Detection stays the sole authority for anchor moves and confidence -- only the flash
             // *trigger* itself (beatPulsePeak/lastBeatFlashTime/whiteHotFlashOffset) moved to the
@@ -449,6 +538,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             scheduledFlashSettled = true
         }
 
+        // visualizer-review-2026-07-22.md C5: for ~2s after a macro-dynamics drop fires, both
+        // trigger mechanisms get a temporarily widened dynamic range -- part of the drop "moment"
+        // alongside the guaranteed anchor jump and white blast above.
+        val dropBoostedFlashRange = if (nowMs < dropFlashRangeBoostUntilMs) state.flashRange * 1.5f else state.flashRange
+
         // visualizer-review-2026-07-22.md B1: bound how late a scheduled flash is allowed to fire.
         // Without this, if predictiveWeight only crosses 0.15 well after scheduledFlashAtMs (grid
         // jitter, a confidence dip that recovers late), the flash fires immediately at that later
@@ -463,7 +557,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // (bpmConfidence ~0.5, or the first several seconds of any song before lock) doesn't
             // get a systematically halved flash. Previously the whole sum was scaled, silently
             // breaking the item-16 "every detected beat gets a minimum visible pulse" guarantee.
-            val peak = state.flashFloor + (state.flashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
+            val peak = state.flashFloor + (dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
             if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                 scheduledFlashFired = true
                 flashFiredThisFrame = true
@@ -521,7 +615,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 // the centered detector) scaled down further by how little we trust "not locked."
                 // visualizer-review-2026-07-22.md A3: same floor-preservation fix as mechanism 1 --
                 // only the variable flashRange·0.5 portion is damped by fastWeight, not the floor.
-                val peak = state.flashFloor + (state.flashRange * 0.5f) * fastWeight
+                val peak = state.flashFloor + (dropBoostedFlashRange * 0.5f) * fastWeight
                 if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                     lastFastTriggerFlashAtMs = nowMs
                     flashFiredThisFrame = true
@@ -617,11 +711,30 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
 
         if (state.isAutoGainEnabled) {
-            // Aggressive dual-rate auto-gain: rapid decay in low-amplitude states to boost quiet sections instantly
-            val decayFactorBass = if (bassVal < avgBass) 0.97f else 0.992f
+            // Aggressive dual-rate auto-gain: rapid decay in low-amplitude states to boost quiet
+            // sections instantly. visualizer-review-2026-07-22.md C8/B4: the original per-frame
+            // multiplicative constants (0.97f/0.992f) were tuned against phone_mic's ~43Hz cadence
+            // (~23ms/frame) -- applied unchanged on Visualizer's ~20Hz cadence (~50ms/frame), the
+            // SAME nominal factor decays roughly twice as much real time per frame, so auto-gain
+            // adapts to loudness changes about half as fast on that backend. Converted to a
+            // continuous exponential decay (exp(-dtMs/tau)) using dtMs (already available since
+            // stage 1) with tau chosen so this reduces to the original per-frame factor at
+            // phone_mic's reference ~23ms interval -- i.e. behavior is unchanged on phone_mic,
+            // fixed on Visualizer. dtMs=0 on the first frame yields a decay factor of 1.0 (no
+            // decay), matching this class's existing "0 on first frame" convention elsewhere.
+            val dtF = dtMs.toFloat()
+            val decayFactorBass = if (bassVal < avgBass) {
+                kotlin.math.exp(-dtF / AUTO_GAIN_FAST_TAU_MS)
+            } else {
+                kotlin.math.exp(-dtF / AUTO_GAIN_SLOW_TAU_MS)
+            }
             maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
 
-            val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) 0.97f else 0.992f
+            val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) {
+                kotlin.math.exp(-dtF / AUTO_GAIN_FAST_TAU_MS)
+            } else {
+                kotlin.math.exp(-dtF / AUTO_GAIN_SLOW_TAU_MS)
+            }
             maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
         } else {
             maxObservedBass = 100.0f
@@ -642,7 +755,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 (smoothedMid / 100.0f).coerceIn(0.0f, 1.0f)
             }
         }
-        var sat = (baseSat * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
+        // visualizer-review-2026-07-22.md C7/P5: saturation gets a third moving dimension from
+        // spectral crest (peak/mean magnitude ratio) instead of being driven only by mid-band
+        // energy -- a tonal/peaky passage (high crest) reads more saturated than a noisy/broadband
+        // one at the same loudness. Uniform across all presets (not a per-preset knob), same
+        // rationale as stage 4's pre-dip: bounded (0-0.15) and additive so it nudges baseSat's
+        // existing backend-branched dynamic range rather than fighting it. crestRatio is exactly
+        // 1.0 (no boost) for a perfectly flat/uniform spectrum.
+        val crestBoost = ((smoothedCrest - 1f).coerceIn(0f, 4f) / 4f) * 0.15f
+        var sat = ((baseSat + crestBoost) * whiteHotFlashOffset).coerceIn(0.0f, 1.0f)
         if (state.sustainResponse == "SAT_BOOST") {
             // No magnitude is specified in the proposal doc for this response (only HUE_SHIFT's
             // 120° and BRIGHTNESS_SWELL's +0.10 are given numerically) — 0.3f is a judgment call
@@ -673,13 +794,22 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
         val valBase = maxOf(bc, midContribution * 0.3f)
 
+        // visualizer-review-2026-07-22.md C5: modest brightness boost/cut (0.85x-1.15x) tracking
+        // macroPercentile, so a chorus reads visibly brighter than a verse at the same
+        // beat-to-beat dynamics. Deliberately does not touch the beat-flash envelope itself
+        // (beatEnvelope/beatPulsePeak) -- that already has its own P1/P2/A3/B1 timing/intensity
+        // treatment; this only shapes the ongoing ambient/ (for Beat Only) flash-magnitude level.
+        // 0.85/0.30 are judgment calls, not measured -- chosen to be a real, felt difference
+        // without blowing out the preset's own tuned dynamic range.
+        val macroBoost = 0.85f + 0.30f * macroPercentile
+
         var value: Float
         var ambientValue: Float
         if (state.visualizerPreset == "Beat Only") {
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / activeFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-            value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength)).coerceIn(0f, 1f))
+            value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength) * macroBoost).coerceIn(0f, 1f))
             // Beat Only has no ambient term at all — its floor is the closest thing to "no flash."
             ambientValue = state.visualizerMinBrightness
         } else {
@@ -707,7 +837,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             } else {
                 0f
             }
-            val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip)
+            val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip) * macroBoost
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / activeFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
@@ -758,10 +888,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 uiAmplitudes8[band] = (if (endBin > startBin) peak else magnitude[startBin]) * weight
             }
 
-            maxUiObserved *= 0.98f
+            // visualizer-review-2026-07-22.md C8/B4: same fixed-per-frame-factor-to-tau conversion
+            // as the auto-gain trackers above.
+            val uiDecayFactor = kotlin.math.exp(-dtMs.toFloat() / UI_AMPLITUDE_DECAY_TAU_MS)
+            maxUiObserved *= uiDecayFactor
             var currentGlobalMax = 0.0f
             for (band in 0 until 8) {
-                maxPerBandObserved[band] *= 0.98f
+                maxPerBandObserved[band] *= uiDecayFactor
                 maxPerBandObserved[band] = maxOf(maxPerBandObserved[band], uiAmplitudes8[band], 2.0f)
                 currentGlobalMax = maxOf(currentGlobalMax, uiAmplitudes8[band])
             }
