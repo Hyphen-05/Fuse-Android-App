@@ -64,7 +64,7 @@ class DeviceWriteManager(
      * it's actually sent, at which point normal latest-wins resumes. [bypassPacing] marks the exact
      * frame a flash fires so [tryWrite] can skip the pacing wait for that one write.
      */
-    fun updateCommand(command: ByteArray, priority: Float = 0f, bypassPacing: Boolean = false) {
+    fun updateCommand(command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false) {
         val processed = calibrate(address, command)
 
         val type = if (processed.size >= 3) processed[2] else null

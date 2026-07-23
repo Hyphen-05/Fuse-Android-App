@@ -134,7 +134,28 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
         // window, so worst case this takes MAX_ATTACH_RETRIES * WATCHDOG_TIMEOUT_MS (~7.5s) before
         // falling back to simulation -- comparable to the few manual toggles this replaces.
         const val MAX_ATTACH_RETRIES = 5
+
+        // Bug fix (2026-07-23): "on_device active, pause media for a while, resume -> LEDs never
+        // come back". Root cause: MAX_ATTACH_RETRIES/WATCHDOG_TIMEOUT_MS above bound only the very
+        // *first* attach attempt of a start() call -- once real signal has been seen even once,
+        // a later stall (the exact same session-0-binds-to-a-stale-output-thread quirk described
+        // in the class doc comment, just triggered by the output track pausing/restarting instead
+        // of initial attach) still only gets MAX_ATTACH_RETRIES (5) reconnect attempts, each
+        // bounded by WATCHDOG_TIMEOUT_MS (1.5s) -- about 7.5s -- before giving up and calling
+        // onError(), which permanently falls back to the demo/simulation engine for the rest of
+        // the session. A real pause (switching tracks, a phone call, just stopping to talk) can
+        // easily outlast 7.5s, so this reads as "never recovers" even though the mechanism that
+        // fixed first-activation was right there. Once real signal has been confirmed at least
+        // once this session, reconnect attempts must never permanently give up -- silence just
+        // means "no music right now," not "capture is broken." See [everReceivedRealSignal].
+        const val STALL_RECHECK_INTERVAL_MS = 4000L
     }
+
+    // Sticky for the lifetime of this VisualizerCaptureSource instance (one per on_device
+    // start()/stop() cycle, but NOT per external media pause/resume -- capture keeps running
+    // continuously across those). Once true, the attach/stall watchdog below switches from
+    // "bounded retries then give up" to "retry forever, more gently" -- see STALL_RECHECK_INTERVAL_MS.
+    @Volatile private var everReceivedRealSignal = false
 
     override fun start(
         onFrame: (AudioCaptureFrame) -> Unit,
@@ -256,7 +277,10 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                                 break
                             }
                         }
-                        if (sawNonZero) receivedRealSignal.set(true)
+                        if (sawNonZero) {
+                            receivedRealSignal.set(true)
+                            everReceivedRealSignal = true
+                        }
                     }
 
                     if (!loggedBackendInfo) {
@@ -343,8 +367,14 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
             onLog("System Visualizer initialized successfully for on-device sync (direct FFT).")
 
             Thread {
+                // Bug fix (2026-07-23): once this session has ever seen real signal, this
+                // watchdog re-checks on the gentler STALL_RECHECK_INTERVAL_MS cadence instead of
+                // the fast first-activation WATCHDOG_TIMEOUT_MS -- see STALL_RECHECK_INTERVAL_MS's
+                // doc comment. Captured before the sleep so a stall discovered *during* this wait
+                // still uses the interval appropriate to whether we'd already succeeded going in.
+                val alreadySucceededThisSession = everReceivedRealSignal
                 try {
-                    Thread.sleep(WATCHDOG_TIMEOUT_MS)
+                    Thread.sleep(if (alreadySucceededThisSession) STALL_RECHECK_INTERVAL_MS else WATCHDOG_TIMEOUT_MS)
                 } catch (e: InterruptedException) {
                     return@Thread
                 }
@@ -364,13 +394,20 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                     } catch (e: Exception) {}
                     if (activeVisualizer === vis) activeVisualizer = null
 
-                    if (attachRetryCount < MAX_ATTACH_RETRIES) {
+                    // Bug fix (2026-07-23): once real signal has been confirmed at least once
+                    // this session, a stall (e.g. the external media player being paused) must
+                    // never permanently exhaust the retry budget and fall back to simulation --
+                    // that reads as "the visualizer never recovers when I resume playback." Reset
+                    // the retry count instead, so reconnect attempts continue indefinitely at the
+                    // STALL_RECHECK_INTERVAL_MS cadence until real signal returns.
+                    if (everReceivedRealSignal || attachRetryCount < MAX_ATTACH_RETRIES) {
+                        val nextAttachRetryCount = if (everReceivedRealSignal) 0 else attachRetryCount + 1
                         DiagnosticLogger.log(
                             "AudioCapture",
-                            "on_device: $reason within ${WATCHDOG_TIMEOUT_MS}ms (attempt " +
-                                "${attachRetryCount + 1}/$MAX_ATTACH_RETRIES), reconstructing Visualizer"
+                            "on_device: $reason (everReceivedRealSignal=$everReceivedRealSignal, attempt " +
+                                "${attachRetryCount + 1}${if (everReceivedRealSignal) "" else "/$MAX_ATTACH_RETRIES"}), reconstructing Visualizer"
                         )
-                        attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount + 1, exceptionRetryCount = exceptionRetryCount)
+                        attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = nextAttachRetryCount, exceptionRetryCount = if (everReceivedRealSignal) 0 else exceptionRetryCount)
                     } else {
                         DiagnosticLogger.log(
                             "AudioCapture",
@@ -403,18 +440,25 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                 constructedVis?.enabled = false
                 constructedVis?.release()
             } catch (re: Exception) {}
-            if (exceptionRetryCount < MAX_EXCEPTION_RETRIES && isRunning()) {
-                val delayMs = EXCEPTION_RETRY_BASE_DELAY_MS shl exceptionRetryCount
+            // Bug fix (2026-07-23): same "never permanently give up once we've proven real
+            // capture works this session" reasoning as the watchdog's give-up branch below --
+            // a reconnect attempt triggered by a stall (e.g. after the external media player was
+            // paused and resumed) can hit this same construction exception, and exhausting the
+            // exception-retry budget here would fall back to simulation just as wrongly.
+            if (everReceivedRealSignal || (exceptionRetryCount < MAX_EXCEPTION_RETRIES && isRunning())) {
+                if (!isRunning()) return false
+                val delayMs = if (everReceivedRealSignal) STALL_RECHECK_INTERVAL_MS else EXCEPTION_RETRY_BASE_DELAY_MS shl exceptionRetryCount
                 DiagnosticLogger.log(
                     "AudioCapture",
-                    "on_device: init threw ${e.javaClass.simpleName}: ${e.message}, retrying in ${delayMs}ms (${exceptionRetryCount + 1}/$MAX_EXCEPTION_RETRIES)"
+                    "on_device: init threw ${e.javaClass.simpleName}: ${e.message}, retrying in ${delayMs}ms " +
+                        "(everReceivedRealSignal=$everReceivedRealSignal, attempt ${exceptionRetryCount + 1}${if (everReceivedRealSignal) "" else "/$MAX_EXCEPTION_RETRIES"})"
                 )
                 try {
                     Thread.sleep(delayMs)
                 } catch (ie: InterruptedException) {
                     return false
                 }
-                return attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount, exceptionRetryCount = exceptionRetryCount + 1)
+                return attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount, exceptionRetryCount = if (everReceivedRealSignal) 0 else exceptionRetryCount + 1)
             }
             onLog("Failed to initialize Visualizer: ${e.message}. Running simulation.")
             onError(e)
