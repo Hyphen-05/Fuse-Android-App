@@ -113,6 +113,9 @@ class CalibrationFlowReducerTest {
                 CalibrationSideEffect.SaveCalibrationDelayPrefInt("AA:BB:CC", 55),
                 CalibrationSideEffect.Log("Saved calibrated delay of 55 ms for device: My Earbuds"),
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 55),
+                // visualizer-review-2026-07-22.md C4/B3: this tap-to-sync flow now sets
+                // flashTimingOffsetMs too — see AudioSettingsReducer's doc comment for the math.
+                CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 55),
                 CalibrationSideEffect.CancelMetronome,
                 CalibrationSideEffect.Log("Calibration Mode stopped.")
             ),
@@ -120,6 +123,7 @@ class CalibrationFlowReducerTest {
         )
         assertEquals(55, newState.audioSettings.bluetoothDelayMs)
         assertEquals(55, newState.audioSettings.totalVisualDelayMs)
+        assertEquals(55, newState.audioSettings.flashTimingOffsetMs)
         assertFalse(newState.calibrationFlow.showCalibrationPrompt)
         assertFalse(newState.calibrationFlow.isCalibrationModeActive)
     }
@@ -137,6 +141,7 @@ class CalibrationFlowReducerTest {
         assertTrue(effects.contains(CalibrationSideEffect.SaveCalibrationDelayPrefInt("default_delay", 20)))
         assertTrue(effects.contains(CalibrationSideEffect.Log("Saved default calibrated delay of 20 ms")))
         assertTrue(effects.contains(CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 20)))
+        assertTrue(effects.contains(CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 20)))
     }
 
     // ========================================================================
@@ -212,7 +217,7 @@ class CalibrationFlowReducerTest {
     fun resetCalibrationSettings_resetsStateFieldsAcrossSlices() {
         val initial = RgbUiState().let {
             it.copy(
-                audioSettings = it.audioSettings.copy(bluetoothDelayMs = 99, totalVisualDelayMs = 500),
+                audioSettings = it.audioSettings.copy(bluetoothDelayMs = 99, totalVisualDelayMs = 500, flashTimingOffsetMs = 99),
                 calibrationFlow = it.calibrationFlow.copy(calibrationDelayOffsetMs = 77),
                 connectivity = it.connectivity.copy(devicePacingMs = mapOf("A1" to 20, "A2" to 30))
             )
@@ -221,6 +226,8 @@ class CalibrationFlowReducerTest {
 
         assertEquals(0, newState.audioSettings.bluetoothDelayMs)
         assertEquals(0, newState.audioSettings.totalVisualDelayMs)
+        // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs.
+        assertEquals(0, newState.audioSettings.flashTimingOffsetMs)
         assertEquals(0, newState.calibrationFlow.calibrationDelayOffsetMs)
         assertEquals(mapOf("A1" to 100, "A2" to 100), newState.connectivity.devicePacingMs)
     }
@@ -236,6 +243,7 @@ class CalibrationFlowReducerTest {
                 CalibrationSideEffect.ClearPacingPrefs,
                 CalibrationSideEffect.ResetAllDeviceManagerPacing,
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 0),
+                CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 0),
                 CalibrationSideEffect.Log(
                     "Reset Calibration Defaults: bluetooth audio delay compensation set to 0, " +
                         "per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared."

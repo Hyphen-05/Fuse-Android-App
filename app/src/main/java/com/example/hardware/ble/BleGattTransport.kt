@@ -88,10 +88,26 @@ interface BleGattTransport {
      * (visualizer-review-2026-07-21.md P2): a higher-priority queued command of the same type
      * survives a lower-priority one trying to replace it until it's actually been written, and
      * [bypassPacing] skips the pacing wait for this one write (used on the exact frame a beat
-     * flash fires). Defaults (0f/false) reproduce the prior dedupe-by-latest behavior exactly for
-     * every non-audio command path.
+     * flash fires).
+     *
+     * Bug fix (2026-07-23): the default used to be 0f, on the assumption that left every
+     * non-audio command path's behavior unchanged relative to the old unconditional
+     * dedupe-by-latest rule. That's only true when comparing two non-audio writes against each
+     * other -- it breaks the moment a non-audio write (e.g. RgbControllerViewModel's
+     * restoreDeviceState(), fired when stopping music sync) needs to supersede an
+     * already-queued *audio* command of the same type byte (audio color commands share
+     * DuoCoProtocol's type byte with plain color commands) that was enqueued with
+     * `priority = result.value` (0f..1f) and hasn't been written yet. Because
+     * DeviceWriteManager.updateCommand's supersede check is a *strict* `>`, a queued audio
+     * command with any priority above 0f would win against a default-0f restore write and
+     * silently drop it -- leaving the device stuck showing the last live beat-flash color
+     * (e.g. a saturated pink) instead of the state that should have been restored. The one and
+     * only call site that intentionally wants a *bounded, comparable* priority is the audio
+     * pipeline itself (RgbControllerViewModel.broadcastAudioResultDirect, which explicitly
+     * passes `priority = result.value`); every other path just wants "always wins, always
+     * enqueues" -- Float.MAX_VALUE guarantees that regardless of what's currently queued.
      */
-    fun writeCommand(address: String, command: ByteArray, priority: Float = 0f, bypassPacing: Boolean = false)
+    fun writeCommand(address: String, command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false)
 
     /** Forward a GATT write-complete ack to the device's write manager. */
     fun notifyWriteCompleted(address: String)

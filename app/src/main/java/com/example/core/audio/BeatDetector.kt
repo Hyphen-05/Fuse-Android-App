@@ -614,30 +614,45 @@ internal class BeatDetector(
         var phaseAgreement = 0f
         if (gridBeats.isNotEmpty() && lockedBpm > 0f) {
             val periodMs = 60000f / lockedBpm
-            val nearestBeat = gridBeats.minByOrNull { kotlin.math.abs(it - evalTimestamp) }
-            if (nearestBeat != null) {
-                val signedDeviationMs = nearestBeat - evalTimestamp
-                val deviation = kotlin.math.abs(signedDeviationMs).toFloat()
-                val maxDeviation = periodMs / 4f
-                phaseAgreement = if (deviation >= maxDeviation) 0f else 1f - (deviation / maxDeviation)
 
-                // Diagnostic-only (2026-07-22, investigating the Flash Timing Offset early-fire
-                // report): signedDeviationMs is nearestBeat - evalTimestamp, in the SAME
-                // coordinate space nextPredictedBeatMs is extrapolated in (gridBeats' own
-                // timestamps, unshifted by lookaheadMs). evalTimestamp is the centered detector's
-                // confirmed onset time for *this* real beat. If the DP grid node closest to a real
-                // confirmed beat is itself consistently negative here (nearestBeat earlier than
-                // the true onset) by roughly the same ~200-250ms the field investigation measured
-                // between FlashSchedule and AudioSync, that pins the bias on gridBeats/DP placement
-                // itself rather than on the extrapolation or on lookaheadMs bookkeeping. No logic
-                // reads this value -- confirmation only, ahead of touching the DP scoring math.
-                if (isBeat) {
-                    DiagnosticLogger.log(
-                        "BeatGridPhase",
-                        "evalTimestampMs=$evalTimestamp nearestGridBeatMs=$nearestBeat " +
-                            "signedDeviationMs=$signedDeviationMs periodMs=$periodMs lockedBpm=$lockedBpm"
-                    )
-                }
+            // visualizer-review-2026-07-22.md A8, root-caused via a real on-device 120bpm metronome
+            // capture (BeatGridPhase log against the adb test harness): the raw
+            // `gridBeats.minByOrNull { abs(it - evalTimestamp) }` lookup this used to do only
+            // considers whatever's literally IN the list -- but gridBeats is only rebuilt once
+            // every tempoUpdateIntervalMs (1500ms) by updateTempoAndGrid(). Real captures showed
+            // signedDeviationMs starting near zero (noise-level, +/-~100-200ms) right after each
+            // rebuild, then growing steadily MORE NEGATIVE -- to over -1000ms -- as later real
+            // beats within the same 1500ms window kept comparing against the same now-stale last
+            // grid node, because the list simply had no newer node to offer. That sawtooth, not a
+            // genuine fixed early-bias in the DP's own beat placement, is what the previously
+            // recorded "~200-220ms early" average was actually measuring (the time-average of a
+            // 0-to-(-1400ms) sawtooth over one rebuild cycle). Right after each rebuild the grid's
+            // own placement tracks real onsets closely -- there is no evidence here of the DP
+            // scoring itself (transitionPenalty, search-window flex) being systematically early.
+            //
+            // Fix: extrapolate the periodic grid to the nearest period-aligned instant to
+            // evalTimestamp -- the same idea nextPredictedBeatMs already uses to project forward
+            // past a stale gridBeats.last(), just allowed to move in either direction here since
+            // this is a "nearest," not "next," lookup. This keeps phaseAgreement/confidence stable
+            // across a whole rebuild cycle instead of degrading between updates.
+            val lastGrid = gridBeats.last()
+            val periodsAway = Math.round((evalTimestamp - lastGrid) / periodMs)
+            val nearestBeat = lastGrid + (periodsAway * periodMs).toLong()
+
+            val signedDeviationMs = nearestBeat - evalTimestamp
+            val deviation = kotlin.math.abs(signedDeviationMs).toFloat()
+            val maxDeviation = periodMs / 4f
+            phaseAgreement = if (deviation >= maxDeviation) 0f else 1f - (deviation / maxDeviation)
+
+            // Diagnostic (2026-07-22): kept post-fix to confirm on future captures that
+            // signedDeviationMs now stays within noise range across a whole rebuild cycle instead
+            // of sawtoothing down to -1000ms+.
+            if (isBeat) {
+                DiagnosticLogger.log(
+                    "BeatGridPhase",
+                    "evalTimestampMs=$evalTimestamp nearestGridBeatMs=$nearestBeat " +
+                        "signedDeviationMs=$signedDeviationMs periodMs=$periodMs lockedBpm=$lockedBpm"
+                )
             }
         }
 

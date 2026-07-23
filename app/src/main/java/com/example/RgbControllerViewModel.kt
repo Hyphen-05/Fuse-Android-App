@@ -43,6 +43,7 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -209,7 +210,12 @@ class RgbControllerViewModel(
                 // that has already elapsed by the time a beat is reported, not an additional delay
                 // to apply going forward.
                 totalVisualDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
-                flashTimingOffsetMs = prefsRepo.getAppStatePrefInt("flash_timing_offset_ms", 100),
+                // visualizer-review-2026-07-22.md C4/B3: read from the same bluetooth_delay_ms
+                // pref, not its own separate "flash_timing_offset_ms" key -- see
+                // AudioSettingsReducer.SetBluetoothDelayMs's doc comment for why these must be
+                // the same number. The old pref key is no longer written to, so this also
+                // silently migrates any device that previously had the two independently tuned.
+                flashTimingOffsetMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
                 visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
                 audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
@@ -1324,12 +1330,16 @@ class RgbControllerViewModel(
                 if (state.audioSettings.bluetoothDelayMs != savedDelay) {
                     addLog("Detected active Bluetooth audio: $name. Automatically applied saved delay profile of $savedDelay ms.")
                 }
+                // visualizer-review-2026-07-22.md C4/B3: flashTimingOffsetMs mirrors
+                // bluetoothDelayMs at every site that sets it — see
+                // AudioSettingsReducer.SetBluetoothDelayMs's doc comment.
                 state.copy(
                     audioSettings = state.audioSettings.copy(
                         detectedAudioDeviceName = name,
                         activeAudioDeviceIdentifier = identifier,
                         bluetoothDelayMs = savedDelay,
-                        totalVisualDelayMs = savedDelay
+                        totalVisualDelayMs = savedDelay,
+                        flashTimingOffsetMs = savedDelay
                     ),
                     calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
                 )
@@ -1342,7 +1352,8 @@ class RgbControllerViewModel(
                         detectedAudioDeviceName = name,
                         activeAudioDeviceIdentifier = identifier,
                         bluetoothDelayMs = 0,
-                        totalVisualDelayMs = 0
+                        totalVisualDelayMs = 0,
+                        flashTimingOffsetMs = 0
                     ),
                     calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = true)
                 )
@@ -1360,7 +1371,8 @@ class RgbControllerViewModel(
                     detectedAudioDeviceName = null,
                     activeAudioDeviceIdentifier = null,
                     bluetoothDelayMs = 0,
-                    totalVisualDelayMs = 0
+                    totalVisualDelayMs = 0,
+                    flashTimingOffsetMs = 0
                 ),
                 calibrationFlow = state.calibrationFlow.copy(showCalibrationPrompt = false)
             )
@@ -1766,16 +1778,46 @@ class RgbControllerViewModel(
 
     // --- COMMAND TRANSMISSION & OUTBOUND QUEUE ---
 
+    // visualizer-review-2026-07-22.md B2: queueCommand/queueAudioResult used to launch one
+    // independent viewModelScope.launch(Dispatchers.Default) { delay(...); broadcast... } per
+    // frame when totalVisualDelayMs > 0. At ~43 frames/sec (phone_mic) that's up to dozens of
+    // concurrently in-flight coroutines at any moment, each racing the dispatcher's own scheduling
+    // -- nothing actually guaranteed they'd resume and broadcast in the same order they were
+    // launched in, so two adjacent frames could occasionally land out of order (a 1-frame color
+    // flicker). A single consumer draining an ordered channel makes ordering structural instead of
+    // incidental: every delayed broadcast (from either queueCommand or queueAudioResult) is
+    // enqueued with its own absolute fire-at timestamp, and the one consumer coroutine processes
+    // the channel strictly FIFO, waiting out whatever's left of each item's delay before moving to
+    // the next -- so submission order and execution order are always the same, regardless of
+    // dispatcher jitter.
+    private data class DelayedBroadcast(val fireAtMs: Long, val action: () -> Unit)
+    private val delayedBroadcastChannel = Channel<DelayedBroadcast>(Channel.UNLIMITED)
+    private var delayedBroadcastConsumerStarted = false
+
+    private fun ensureDelayedBroadcastConsumer() {
+        if (delayedBroadcastConsumerStarted) return
+        delayedBroadcastConsumerStarted = true
+        viewModelScope.launch(Dispatchers.Default) {
+            for (item in delayedBroadcastChannel) {
+                val waitMs = item.fireAtMs - System.currentTimeMillis()
+                if (waitMs > 0) delay(waitMs)
+                item.action()
+            }
+        }
+    }
+
     fun queueCommand(command: ByteArray) {
         if (!_uiState.value.audioSettings.isAudioSyncRunning) return
 
         val delayMs = _uiState.value.audioSettings.totalVisualDelayMs
         if (delayMs > 0) {
-            viewModelScope.launch(Dispatchers.Default) {
-                delay(delayMs.toLong())
-                if (!_uiState.value.audioSettings.isAudioSyncRunning) return@launch
-                broadcastCommandDirect(command)
-            }
+            ensureDelayedBroadcastConsumer()
+            val fireAtMs = System.currentTimeMillis() + delayMs
+            delayedBroadcastChannel.trySend(
+                DelayedBroadcast(fireAtMs) {
+                    if (_uiState.value.audioSettings.isAudioSyncRunning) broadcastCommandDirect(command)
+                }
+            )
         } else {
             broadcastCommandDirect(command)
         }
@@ -1798,11 +1840,16 @@ class RgbControllerViewModel(
 
         val delayMs = _uiState.value.audioSettings.totalVisualDelayMs
         if (delayMs > 0) {
-            viewModelScope.launch(Dispatchers.Default) {
-                delay(delayMs.toLong())
-                if (!_uiState.value.audioSettings.isAudioSyncRunning) return@launch
-                broadcastAudioResultDirect(result)
-            }
+            // visualizer-review-2026-07-22.md B2: shares the same ordered channel/consumer as
+            // queueCommand -- see its doc comment for why. At ~43 frames/sec this is the path the
+            // finding was actually about.
+            ensureDelayedBroadcastConsumer()
+            val fireAtMs = System.currentTimeMillis() + delayMs
+            delayedBroadcastChannel.trySend(
+                DelayedBroadcast(fireAtMs) {
+                    if (_uiState.value.audioSettings.isAudioSyncRunning) broadcastAudioResultDirect(result)
+                }
+            )
         } else {
             broadcastAudioResultDirect(result)
         }
@@ -1810,10 +1857,23 @@ class RgbControllerViewModel(
 
     private fun broadcastAudioResultDirect(result: com.example.core.audio.AudioDspResult) {
         val targetAddresses = getCurrentlyControlledDeviceAddresses()
-        if (result.isBeat) alternatingFlashBeatCounter++
+        // visualizer-review-2026-07-22.md A2: used to increment on result.isBeat, which since P1
+        // fires ~180ms+flashTimingOffsetMs after the frame that actually rendered the flash peak --
+        // device A would show the flash's rising/peak envelope, then mid-decay the target would
+        // switch to device B, which never got the peak. flashFiredThisFrame is true on the same
+        // frame the visible flash starts, so the handoff now lines up with what's on screen.
+        if (result.flashFiredThisFrame) alternatingFlashBeatCounter++
 
         val alternatingAddresses = targetAddresses.filter { deviceRoleFor(it) == "AlternatingFlash" }
         val bandSplitAddresses = targetAddresses.filter { deviceRoleFor(it) == "BandSplit" }
+
+        // visualizer-review-2026-07-22.md A7: DemoAudioDspSimulator constructs AudioDspResult with
+        // the defaulted P4 fields (sat=0f, value=0f -- it has no role-transform math). Without this
+        // check, any non-Mirror-role device renders hsvToRgb(_, 0f, 0f) = pure black the moment real
+        // capture fails and the demo engine takes over, while Mirror devices keep animating --
+        // reading as a broken lamp rather than a degraded mode. Fall back to Mirror (plain r/g/b)
+        // behavior whenever the result carries no real HSV components.
+        val hasHsvComponents = !(result.sat == 0f && result.value == 0f)
 
         targetAddresses.forEach { address ->
             sceneRunners[address]?.release()
@@ -1821,7 +1881,8 @@ class RgbControllerViewModel(
 
             if (activeExcludedMacs.contains(address)) return@forEach
 
-            val (r, g, b) = when (deviceRoleFor(address)) {
+            val effectiveRole = if (hasHsvComponents) deviceRoleFor(address) else "Mirror"
+            val (r, g, b) = when (effectiveRole) {
                 "HueOffset" -> {
                     val offset = savedDevices.value.find { it.macAddress == address }?.hueOffsetDegrees ?: 180f
                     ColorConverter.hsvToRgb((result.hue + offset + 360f) % 360f, result.sat, result.value)
@@ -1848,7 +1909,11 @@ class RgbControllerViewModel(
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
                 }
             } else {
-                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.isBeat)
+                // visualizer-review-2026-07-22.md A1: bypassPacing used to key on result.isBeat,
+                // which fires after the flash-peak frame under P1's predictive scheduling -- the
+                // pacing-skip landed on an already-decayed frame instead of the one carrying the
+                // peak, defeating P2's wire-priority fix for exactly the flashes P1 made primary.
+                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.flashFiredThisFrame)
             }
         }
     }
@@ -2334,10 +2399,15 @@ class RgbControllerViewModel(
         latestG = result.g
         latestB = result.b
 
-        if (result.isBeat) {
-            // P0 (visualizer-review-2026-07-21.md): detection timestamp, correlatable against
-            // DeviceWriteManager's "Write enqueued"/"writeCharacteristic() initiated" log lines by
-            // matching cmdHex (exact only for Mirror-role devices, which is the common case).
+        if (result.flashFiredThisFrame) {
+            // P0 (visualizer-review-2026-07-21.md), re-keyed per visualizer-review-2026-07-22.md
+            // A1: this used to gate on result.isBeat, the detection frame -- ~180ms+
+            // flashTimingOffsetMs after the frame that actually carries the flash-peak cmdHex under
+            // P1's predictive scheduling, so it was correlating against the wrong write in
+            // DeviceWriteManager's logs. flashFiredThisFrame is the frame the peak is actually
+            // computed on. Correlatable against DeviceWriteManager's "Write enqueued"/
+            // "writeCharacteristic() initiated" log lines by matching cmdHex (exact only for
+            // Mirror-role devices, which is the common case).
             val cmdHex = DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b)
                 .joinToString("") { String.format("%02X", it) }
             DiagnosticLogger.log("AudioSync", "Beat peak frame detected: cmdHex=$cmdHex value=${result.value}")

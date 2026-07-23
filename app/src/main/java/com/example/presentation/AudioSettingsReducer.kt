@@ -563,21 +563,39 @@ fun audioSettingsReducer(
         // entirely, so the calibrated value already IS the full delay to apply. Only
         // bluetooth_delay_ms is persisted — totalVisualDelayMs is not written to prefs
         // in the source either.
+        //
+        // visualizer-review-2026-07-22.md C4/B3: flashTimingOffsetMs is now derived from this
+        // same value too, not tuned independently. The math: AudioDspProcessor schedules a
+        // predictive flash's calculation at `nextPredictedBeatMs - flashTimingOffsetMs`, and
+        // queueAudioResult then delays that frame's broadcast by `totalVisualDelayMs`
+        // (== bluetoothDelayMs) before it ever reaches the wire. The photon therefore actually
+        // appears at `nextPredictedBeatMs - flashTimingOffsetMs + bluetoothDelayMs` -- which only
+        // lands exactly on the predicted true beat when flashTimingOffsetMs == bluetoothDelayMs.
+        // Previously these were two independently by-ear-tuned sliders (bluetoothDelayMs via the
+        // existing tap-to-sync calibration flow, flashTimingOffsetMs via its own raw 0-300ms
+        // Settings slider) that had no reason to ever land on the same value by accident -- tuning
+        // one without retuning the other by exactly the same amount reintroduced a timing offset.
+        // They're now the same measured number by construction; the standalone
+        // SetFlashTimingOffsetMs intent below is left in place (unused by UI as of this fix) as a
+        // programmatic override, not removed outright.
         is RgbIntent.SetBluetoothDelayMs -> {
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = intent.value,
-                    totalVisualDelayMs = intent.value
+                    totalVisualDelayMs = intent.value,
+                    flashTimingOffsetMs = intent.value
                 )
             )
             val effects = listOf(
-                AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", intent.value)
+                AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", intent.value),
+                AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", intent.value)
             )
             newState to effects
         }
 
         // Same by-ear calibration pattern as SetBluetoothDelayMs above — see the field's doc
-        // comment on AudioSettingsState for what it drives.
+        // comment on AudioSettingsState for what it drives. Unused by UI as of C4/B3 (see
+        // SetBluetoothDelayMs above) -- kept as a programmatic override, not removed.
         is RgbIntent.SetFlashTimingOffsetMs -> {
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(flashTimingOffsetMs = intent.value)
@@ -606,7 +624,9 @@ fun audioSettingsReducer(
                     isLogarithmicScalingEnabled = true,
                     bluetoothDelayMs = 0,
                     totalVisualDelayMs = 0,
-                    flashTimingOffsetMs = 100,
+                    // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs (was
+                    // 100, its own independent default) — see SetBluetoothDelayMs's doc comment.
+                    flashTimingOffsetMs = 0,
                     visualizerPreset = "Default",
                     audioGammaExponent = 0.45f,
                     audioFlashStrength = 0.3f,
@@ -647,7 +667,8 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefBoolean("is_palette_cycling_enabled", true),
                 AudioSideEffect.SaveAudioPrefBoolean("is_logarithmic_scaling_enabled", true),
                 AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 0),
-                AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 100),
+                // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs (was 100).
+                AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 0),
                 AudioSideEffect.SaveAudioPrefString("visualizer_preset", "Default"),
                 AudioSideEffect.SaveAudioPrefFloat("audio_gamma_exponent", 0.45f),
                 AudioSideEffect.SaveAudioPrefFloat("audio_flash_strength", 0.3f),

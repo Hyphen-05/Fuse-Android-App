@@ -133,10 +133,17 @@ fun calibrationFlowReducer(
             // IS the full delay the user tuned against the metronome click — adding the
             // 180ms lookahead on top would double-count detection latency that has
             // already elapsed by the time a beat is ever reported.
+            // visualizer-review-2026-07-22.md C4/B3: this is now the ONE guided measurement that
+            // sets both delay knobs -- the existing tap-to-sync metronome flow this action exits
+            // already produces the single number that matters (audio onset -> photon), so
+            // flashTimingOffsetMs is derived from it too instead of needing its own separate
+            // calibration. See AudioSettingsReducer.SetBluetoothDelayMs's doc comment for the
+            // derivation.
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = currentDelay,
-                    totalVisualDelayMs = currentDelay
+                    totalVisualDelayMs = currentDelay,
+                    flashTimingOffsetMs = currentDelay
                 ),
                 calibrationFlow = state.calibrationFlow.copy(
                     showCalibrationPrompt = false,
@@ -147,6 +154,7 @@ fun calibrationFlowReducer(
                 CalibrationSideEffect.SaveCalibrationDelayPrefInt(deviceKey, currentDelay),
                 CalibrationSideEffect.Log(saveLogMessage),
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", currentDelay),
+                CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", currentDelay),
                 // stopCalibrationMode() tail call, preserved exactly
                 CalibrationSideEffect.CancelMetronome,
                 CalibrationSideEffect.Log("Calibration Mode stopped.")
@@ -177,7 +185,9 @@ fun calibrationFlowReducer(
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(
                     bluetoothDelayMs = 0,
-                    totalVisualDelayMs = 0
+                    totalVisualDelayMs = 0,
+                    // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs.
+                    flashTimingOffsetMs = 0
                 ),
                 calibrationFlow = state.calibrationFlow.copy(calibrationDelayOffsetMs = 0),
                 connectivity = state.connectivity.copy(
@@ -193,6 +203,7 @@ fun calibrationFlowReducer(
                 // do not unify into one.
                 CalibrationSideEffect.ResetAllDeviceManagerPacing,
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 0),
+                CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 0),
                 CalibrationSideEffect.Log(
                     "Reset Calibration Defaults: bluetooth audio delay compensation set to 0, " +
                         "per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared."
