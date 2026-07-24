@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -1436,49 +1437,102 @@ fun LazyListScope.SettingsTabContent(
     }
     }
 
-    item { Spacer(modifier = Modifier.height(16.dp)) }
+    item { Spacer(modifier = Modifier.height(8.dp)) }
 
     item {
-        val footerContext = LocalContext.current
         var tapCount by remember { mutableStateOf(0) }
         var lastTapAtMs by remember { mutableStateOf(0L) }
+        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+        val githubUrl = "https://github.com/Hyphen-05/Fuse-Android-App"
 
-        Text(
-            text = "Fuse ${com.example.BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    // Same gesture as stock Android's "tap Build number 7 times" — unlocks on the
-                    // 7th tap, and the same sequence hides it again since this just toggles.
-                    val now = System.currentTimeMillis()
-                    tapCount = if (now - lastTapAtMs > 1500L) 1 else tapCount + 1
-                    lastTapAtMs = now
-                    val tapsLeft = 7 - tapCount
-                    when {
-                        tapsLeft in 1..3 -> android.widget.Toast.makeText(
-                            footerContext,
-                            "$tapsLeft more tap${if (tapsLeft == 1) "" else "s"} to ${if (experimentalUnlocked) "hide" else "unlock"} experimental settings",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                        tapsLeft <= 0 -> {
-                            tapCount = 0
-                            onToggleExperimentalUnlocked()
-                            android.widget.Toast.makeText(
-                                footerContext,
-                                if (!experimentalUnlocked) "Experimental settings unlocked" else "Experimental settings hidden",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Fuse",
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            // Same gesture as stock Android's "tap Build number 7 times" — unlocks on the
+                            // 7th tap, and the same sequence hides it again since this just toggles.
+                            // Deliberately silent (no Toast) so the gesture stays undiscoverable.
+                            val now = System.currentTimeMillis()
+                            tapCount = if (now - lastTapAtMs > 1500L) 1 else tapCount + 1
+                            lastTapAtMs = now
+                            if (tapCount >= 7) {
+                                tapCount = 0
+                                onToggleExperimentalUnlocked()
+                            }
                         }
-                    }
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Version ${com.example.BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
                 }
-                .padding(vertical = 12.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Fuse talks Bluetooth LE directly to MELK, ELK-BLEDOM, and other compatible RGB strip controllers — colour, ambiance sync, and audio-reactive lighting with no cloud, account, excessive permissions, or tracking.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                val githubInteractionSource = remember { MutableInteractionSource() }
+                Button(
+                    onClick = { uriHandler.openUri(githubUrl) },
+                    interactionSource = githubInteractionSource,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .joyfulPress(githubInteractionSource),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Code,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "View source on GitHub",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
     }
 
     item { Spacer(modifier = Modifier.height(24.dp)) }

@@ -5,51 +5,36 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Glowing Background Aura (Perfectly Symmetric Circle) -->
+    <!-- Bulb head -->
     <path
-        android:fillColor="#38BDF8"
-        android:fillAlpha="0.15"
-        android:pathData="M 54, 54 m -30, 0 a 30,30 0 1,1 60,0 a 30,30 0 1,1 -60,0" />
+        android:fillColor="#AEC6FF"
+        android:pathData="M 54,43.5 m -16,0 a 16,16 0 1,1 32,0 a 16,16 0 1,1 -32,0" />
 
+    <!-- Neck -->
     <path
-        android:fillColor="#38BDF8"
-        android:fillAlpha="0.08"
-        android:pathData="M 54, 54 m -42, 0 a 42,42 0 1,1 84,0 a 42,42 0 1,1 -84,0" />
+        android:fillColor="#93B4FA"
+        android:pathData="M 46,57.5 H 62 V 69.5 H 46 Z" />
 
-    <!-- Symmetrical Outer Bulb/Fuse Glass Outline -->
+    <!-- Base cap -->
     <path
-        android:fillColor="#38BDF8"
-        android:pathData="M 54,26 C 39.5,26 29,36.5 29,51 C 29,60 33.5,66 38,70 L 42,70 L 42,74 L 66,74 L 66,70 L 70,70 C 74.5,66 79,60 79,51 C 79,36.5 68.5,26 54,26 Z M 54,32 C 65,32 73,40 73,51 C 73,57.5 69.5,62.5 65.5,66 L 62,66 L 62,70 L 46,70 L 46,66 L 42.5,66 C 38.5,62.5 35,57.5 35,51 C 35,40 43,32 54,32 Z" />
+        android:fillColor="#E1E3ED"
+        android:pathData="M 47,69.5 H 61 V 74.5 H 47 Z" />
+    <path
+        android:fillColor="#C7CADC"
+        android:pathData="M 49,74.5 H 59 V 78.5 H 49 Z" />
+    <path
+        android:fillColor="#9CA2B8"
+        android:pathData="M 50,78.5 C 50,81 58,81 58,78.5 Z" />
 
-    <!-- Perfectly Symmetrical Filament / LED Column -->
+    <!-- RGB filament cluster -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 53,49 H 55 V 63 H 53 Z" />
+        android:fillColor="#F2545B"
+        android:pathData="M 48,38.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 54,37 L 60,45 L 54,49 L 48,45 Z" />
-
-    <!-- Symmetrical Base / Cap (Screws) -->
-    <!-- Row 1 of base -->
+        android:fillColor="#5BC98D"
+        android:pathData="M 60,38.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
     <path
-        android:fillColor="#F1F5F9"
-        android:pathData="M 44,76 H 64 V 79 H 44 Z" />
-
-    <!-- Row 2 of base -->
-    <path
-        android:fillColor="#CBD5E1"
-        android:pathData="M 47,80 H 61 V 83 H 47 Z" />
-
-    <!-- Bottom Contact -->
-    <path
-        android:fillColor="#94A3B8"
-        android:pathData="M 50,84 C 50,86 58,86 58,84 Z" />
-
-    <!-- Symmetrical Rays -->
-    <path
-        android:strokeColor="#38BDF8"
-        android:strokeWidth="2.5"
-        android:strokeLineCap="round"
-        android:pathData="M 54,18 V 10 M 86,51 H 94 M 14,51 H 22 M 79.5,28.5 L 86.5,21.5 M 28.5,28.5 L 21.5,21.5" />
+        android:fillColor="#4C8DFF"
+        android:pathData="M 54,49.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
 
 </vector>
