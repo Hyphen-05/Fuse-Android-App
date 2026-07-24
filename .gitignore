@@ -38,3 +38,7 @@ debug.keystore.base64
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Local dev notes (not for public repo)
+CLAUDE.md
+HISTORY.md
