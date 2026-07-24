@@ -130,7 +130,9 @@ fun LazyListScope.SettingsTabContent(
     state: RgbUiState,
     telemetry: TelemetryState,
     viewModel: RgbControllerViewModel,
-    onOpenModeCapture: () -> Unit = {}
+    onOpenModeCapture: () -> Unit = {},
+    experimentalUnlocked: Boolean = false,
+    onToggleExperimentalUnlocked: () -> Unit = {}
 ) {
     if (state.calibrationFlow.showCalibrationPrompt && state.audioSettings.detectedAudioDeviceName != null) {
         item {
@@ -610,7 +612,7 @@ fun LazyListScope.SettingsTabContent(
                 
                 val calibrateSliderInteractionSource = remember { MutableInteractionSource() }
                 ExpandableCategoryCard(
-                    title = "Latency & Transmission Speed",
+                    title = "Bluetooth Sync Delay",
                     icon = Icons.Default.Timer,
                     iconTint = MaterialTheme.colorScheme.primary,
                     initiallyExpanded = false
@@ -621,7 +623,7 @@ fun LazyListScope.SettingsTabContent(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Bluetooth Audio Delay Compensation",
+                                text = "Delay",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -632,7 +634,7 @@ fun LazyListScope.SettingsTabContent(
                             )
                         }
                         Text(
-                            text = "Delays the light transmission to perfectly sync with lagging Bluetooth speakers.",
+                            text = "Delays LED updates to stay in sync with Bluetooth speaker lag.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -661,41 +663,6 @@ fun LazyListScope.SettingsTabContent(
                                 Text("Calibrate")
                             }
                         }
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 12.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Flash Timing Offset",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "${state.audioSettings.flashTimingOffsetMs} ms",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                        // visualizer-review-2026-07-22.md C4/B3: this used to be its own
-                        // independent by-ear slider (0-300ms), tuned separately from Bluetooth
-                        // Delay above with no reason to land on the same value. It's now always
-                        // equal to Bluetooth Delay by construction (see
-                        // AudioSettingsReducer.SetBluetoothDelayMs's doc comment for the math), so
-                        // it's a read-only mirror here — the "Calibrate" button above is the one
-                        // guided measurement that sets both.
-                        Text(
-                            text = "How far ahead of the predicted beat the flash is scheduled, to cancel out the " +
-                                "Bluetooth Delay above being added back before the color reaches the light. Always " +
-                                "matches Bluetooth Delay — use \"Calibrate\" above to set both together.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
 
@@ -1192,11 +1159,12 @@ fun LazyListScope.SettingsTabContent(
         }
     }
 
+    if (experimentalUnlocked) {
     item {
         val context = LocalContext.current
         var isExporting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
-        
+
         ExpandableCategoryCard(
             title = "Experimental",
             icon = Icons.Default.Science,
@@ -1466,10 +1434,52 @@ fun LazyListScope.SettingsTabContent(
             }
         }
     }
+    }
 
     item { Spacer(modifier = Modifier.height(16.dp)) }
 
+    item {
+        val footerContext = LocalContext.current
+        var tapCount by remember { mutableStateOf(0) }
+        var lastTapAtMs by remember { mutableStateOf(0L) }
 
+        Text(
+            text = "Fuse ${com.example.BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    // Same gesture as stock Android's "tap Build number 7 times" — unlocks on the
+                    // 7th tap, and the same sequence hides it again since this just toggles.
+                    val now = System.currentTimeMillis()
+                    tapCount = if (now - lastTapAtMs > 1500L) 1 else tapCount + 1
+                    lastTapAtMs = now
+                    val tapsLeft = 7 - tapCount
+                    when {
+                        tapsLeft in 1..3 -> android.widget.Toast.makeText(
+                            footerContext,
+                            "$tapsLeft more tap${if (tapsLeft == 1) "" else "s"} to ${if (experimentalUnlocked) "hide" else "unlock"} experimental settings",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        tapsLeft <= 0 -> {
+                            tapCount = 0
+                            onToggleExperimentalUnlocked()
+                            android.widget.Toast.makeText(
+                                footerContext,
+                                if (!experimentalUnlocked) "Experimental settings unlocked" else "Experimental settings hidden",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+                .padding(vertical = 12.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
 
     item { Spacer(modifier = Modifier.height(24.dp)) }
 }

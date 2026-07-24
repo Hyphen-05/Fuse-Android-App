@@ -1425,12 +1425,21 @@ class RgbControllerViewModel(
             ?: result.device.name
             ?: return
 
+        // Prefixes for the wider ELK-BLEDOM-protocol clone family this app's wire protocol
+        // matches byte-for-byte (see README's compatibility section) — only MELK-/DuoCo-branded
+        // hardware has actually been tested; the rest are surfaced on the strength of matching
+        // publicly documented protocol reverse-engineering, not first-hand verification.
         val supported = listOf(
             "MELK-",
             "ELK-",
             "ELK-BLEDOM",
             "BLEDOM",
-            "DuoCo"
+            "DuoCo",
+            "LEDBLE",
+            "LED-",
+            "JACKYLED",
+            "XROCKER",
+            "DMRRBA-007"
         )
 
         if (!supported.any { name.startsWith(it) }) {

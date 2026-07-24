@@ -119,6 +119,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -276,6 +277,12 @@ fun MainScreen() {
 
     var selectedTab by remember { mutableStateOf(0) }
     var showModeCaptureScreen by remember { mutableStateOf(false) }
+    // Unlocked by tapping the version footer at the bottom of Settings 7 times, same gesture as
+    // stock Android's "tap Build number to enable Developer options" — familiar to anyone who'd
+    // recognize the pattern, invisible to everyone else. Tapping the same sequence again re-hides
+    // it. rememberSaveable so it survives rotation but intentionally not persisted to prefs —
+    // this is a manual reveal, not a setting.
+    var experimentalUnlocked by rememberSaveable { mutableStateOf(false) }
 
     var liveFps by remember { mutableStateOf(32) }
     if (uiState.coreControl.showFpsTracker && uiState.coreControl.isPowerOn) {
@@ -527,7 +534,9 @@ fun MainScreen() {
                         state = uiState,
                         telemetry = telemetry,
                         viewModel = viewModel,
-                        onOpenModeCapture = { showModeCaptureScreen = true }
+                        onOpenModeCapture = { showModeCaptureScreen = true },
+                        experimentalUnlocked = experimentalUnlocked,
+                        onToggleExperimentalUnlocked = { experimentalUnlocked = !experimentalUnlocked }
                     )
                 }
             }
