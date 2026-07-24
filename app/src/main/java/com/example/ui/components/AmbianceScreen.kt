@@ -8,6 +8,14 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -32,10 +40,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
-import androidx.lifecycle.Lifecycle
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.LifecycleEventObserver
-import kotlinx.coroutines.delay
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +49,7 @@ import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 import com.example.ambiance.AmbianceCaptureService
 import com.example.ambiance.AmbianceCaptureState
+import com.example.ambiance.ZoneColor
 import androidx.core.graphics.ColorUtils as AndroidColorUtils
 
 data class AmbiancePreset(
@@ -103,6 +108,25 @@ fun derivePaletteFromParameters(
         // Convert HSL to Android Color Int, then to Compose Color
         val colorInt = AndroidColorUtils.HSLToColor(floatArrayOf(h, baseSat, l))
         Color(colorInt)
+    }
+}
+
+// Averages the real 4x4 captured zone grid (AmbianceProcessor's raw per-cell samples) down to
+// four quadrant colors (TL, TR, BL, BR) for the live preview gradient.
+fun computeQuadrantColors(zones: List<ZoneColor>): List<Color> {
+    if (zones.isEmpty()) return emptyList()
+    val quadrants = listOf(
+        zones.filter { it.row < 2 && it.col < 2 },
+        zones.filter { it.row < 2 && it.col >= 2 },
+        zones.filter { it.row >= 2 && it.col < 2 },
+        zones.filter { it.row >= 2 && it.col >= 2 }
+    )
+    return quadrants.mapNotNull { group ->
+        if (group.isEmpty()) return@mapNotNull null
+        val r = group.sumOf { it.r } / group.size
+        val g = group.sumOf { it.g } / group.size
+        val b = group.sumOf { it.b } / group.size
+        Color(red = r / 255f, green = g / 255f, blue = b / 255f)
     }
 }
 
@@ -197,88 +221,24 @@ fun AmbianceScreen(
 
     val scrollState = rememberScrollState()
 
-    // --- LIFECYCLE OBSERVATION FOR BATTERY EFFICIENCY ---
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var isAppResumed by remember { mutableStateOf(true) }
+    // Smooth continuous gradient drift. Duration maps to smoothnessMs so slower smoothing
+    // settings drift more slowly, echoing the real capture's response feel — but the motion
+    // itself is always one steady linear sweep, never stepping/snapping/jumping, since nothing
+    // in the real ambiance pipeline moves that way (AmbianceOutputInterpolator.easeStep just
+    // exponentially eases toward a target color; there's no rotation or spring bounce).
+    val gradientDurationMs = (2000f + (uiState.ambianceSettings.ambianceSmoothnessMs.toFloat() / 350f).coerceIn(0f, 1f) * 8000f).toInt()
+    val infiniteTransition = rememberInfiniteTransition(label = "ambiance_gradient")
+    val angleProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = gradientDurationMs, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ambiance_gradient_angle"
+    )
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isAppResumed = true
-            } else if (event == Lifecycle.Event.ON_PAUSE) {
-                isAppResumed = false
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    // Animation progress (0f..1f)
-    var t by remember { mutableStateOf(0f) }
-
-    // Coroutine loop for continuous drifting (controlled inversely by smoothnessMs)
-    LaunchedEffect(isAppResumed, uiState.ambianceSettings.ambianceSmoothnessMs) {
-        if (!isAppResumed) return@LaunchedEffect
-        
-        // Map smoothnessMs (real range 0..350) to animation duration range of 2s to 10s
-        // Lower smoothnessMs = faster animation, higher smoothnessMs = slower animation
-        val durationMs = 2000f + ((uiState.ambianceSettings.ambianceSmoothnessMs.toFloat() - 0f) / 350f).coerceIn(0f, 1f) * 8000f
-        
-        val startTime = System.nanoTime()
-        val startT = t
-        
-        while (true) {
-            val elapsedMs = (System.nanoTime() - startTime) / 1_000_000L
-            t = (startT + (elapsedMs.toFloat() / durationMs)) % 1f
-            delay(16L) // target ~60fps
-        }
-    }
-
-    // Motion character (continuous drift vs settle-and-jump): tied to noiseDeadband
-    // Map noiseDeadband (real range 0.0f..0.5f) to deadband factor
-    val deadbandFactor = ((uiState.ambianceSettings.ambianceNoiseDeadband - 0.0f) / 0.5f).coerceIn(0f, 1f)
-    val steps = 4f
-    val stepFraction = (t * steps) % 1f
-    val transitionStart = 0.8f
-    val smoothStep = if (stepFraction < transitionStart) {
-        0f
-    } else {
-        val rawFrac = (stepFraction - transitionStart) / (1f - transitionStart)
-        rawFrac * rawFrac * (3f - 2f * rawFrac)
-    }
-    val steppedT = ((t * steps).toInt().toFloat() + smoothStep) / steps
-    val tModified = t + (steppedT - t) * deadbandFactor
-
-    // Occasional "scene cut" flourish Animatable
-    val flourishAnim = remember { androidx.compose.animation.core.Animatable(0f) }
-
-    // Loop for randomized scene cut flourishes tied to scene_cut_sensitivity
-    LaunchedEffect(isAppResumed, uiState.ambianceSettings.ambianceSceneCutSensitivity) {
-        if (!isAppResumed) return@LaunchedEffect
-        
-        // Map sceneCutSensitivity (real range 10.0f..150.0f) to average interval:
-        // higher sensitivity = more frequent = smaller delay (3s at 150, 15s at 10)
-        val avgDelayMs = 15000f - ((uiState.ambianceSettings.ambianceSceneCutSensitivity - 10f) / 140f).coerceIn(0f, 1f) * 12000f
-        
-        while (true) {
-            val delayMs = (avgDelayMs * (0.5f + Math.random().toFloat())).toLong().coerceAtLeast(1000L)
-            delay(delayMs)
-            
-            // Trigger rapid/sharp spring transition to a new angle offset
-            val targetValue = flourishAnim.value + 120f + (Math.random().toFloat() * 180f)
-            flourishAnim.animateTo(
-                targetValue = targetValue,
-                animationSpec = androidx.compose.animation.core.spring(
-                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                )
-            )
-        }
-    }
-
-    // Determine the 3-4 color stops dynamically from the active preset's or custom settings' actual parameters
+    // Idle-preview palette, derived purely from the active preset/slider parameters.
     val presetColors = remember(
         uiState.ambianceSettings.ambianceSmoothnessMs,
         uiState.ambianceSettings.ambianceNoiseDeadband,
@@ -293,6 +253,24 @@ fun AmbianceScreen(
             saturationBoost = uiState.ambianceSettings.ambianceSaturationBoost,
             brightnessCompensation = uiState.ambianceSettings.ambianceBrightnessCompensation
         )
+    }
+
+    // While capture is running, source the gradient from the real captured screen colors (the
+    // 4x4 zone grid AmbianceProcessor reports) instead of the synthetic preset palette, so the
+    // preview actually reflects what ambiance mode is seeing. Each quadrant eases toward its new
+    // target color rather than snapping frame-to-frame, mirroring the real device output's
+    // exponential smoothing.
+    val liveQuadrantColors = remember(zoneColors.value) { computeQuadrantColors(zoneColors.value) }
+    val quadrantEasing = tween<Color>(durationMillis = 400, easing = LinearOutSlowInEasing)
+    val animatedQuadrant0 by animateColorAsState(liveQuadrantColors.getOrElse(0) { presetColors[0] }, quadrantEasing, label = "q0")
+    val animatedQuadrant1 by animateColorAsState(liveQuadrantColors.getOrElse(1) { presetColors[1] }, quadrantEasing, label = "q1")
+    val animatedQuadrant2 by animateColorAsState(liveQuadrantColors.getOrElse(2) { presetColors[2] }, quadrantEasing, label = "q2")
+    val animatedQuadrant3 by animateColorAsState(liveQuadrantColors.getOrElse(3) { presetColors[3] }, quadrantEasing, label = "q3")
+
+    val previewColors = if (isActive.value) {
+        listOf(animatedQuadrant0, animatedQuadrant1, animatedQuadrant2, animatedQuadrant3)
+    } else {
+        presetColors
     }
 
     Column(
@@ -326,13 +304,13 @@ fun AmbianceScreen(
                     val radius = maxOf(width, height) * 0.8f
                     
                     // Convert degrees to radians for precise trig rotation
-                    val angleRad = Math.toRadians((tModified * 360f + flourishAnim.value).toDouble())
+                    val angleRad = Math.toRadians((angleProgress * 360f).toDouble())
                     val cosAngle = kotlin.math.cos(angleRad).toFloat()
                     val sinAngle = kotlin.math.sin(angleRad).toFloat()
-                    
-                    // Add smooth organic center drifting based on tModified
-                    val wobbleX = width * 0.15f * kotlin.math.cos(tModified.toDouble() * 2.0 * Math.PI).toFloat()
-                    val wobbleY = height * 0.15f * kotlin.math.sin(tModified.toDouble() * 2.0 * Math.PI).toFloat()
+
+                    // Gentle organic center drift, still tied to the same smooth continuous progress
+                    val wobbleX = width * 0.15f * kotlin.math.cos(angleProgress.toDouble() * 2.0 * Math.PI).toFloat()
+                    val wobbleY = height * 0.15f * kotlin.math.sin(angleProgress.toDouble() * 2.0 * Math.PI).toFloat()
                     
                     val adjustedCenterX = centerX + wobbleX
                     val adjustedCenterY = centerY + wobbleY
@@ -343,7 +321,7 @@ fun AmbianceScreen(
                     val endY = adjustedCenterY - radius * sinAngle
                     
                     val brush = Brush.linearGradient(
-                        colors = presetColors,
+                        colors = previewColors,
                         start = Offset(startX, startY),
                         end = Offset(endX, endY)
                     )
