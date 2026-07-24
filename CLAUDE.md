@@ -114,7 +114,6 @@ One-time diagnostic tool under Settings > Experimental (`ui/components/ModeCaptu
 
 - DSP/animation timing constants (`fluxHistorySize`, `noiseHistory`, `bassHistory`, `energyWindowSize`, `shortWindowSize`, per-frame offsets) are sample-count-based rather than time-based, causing behavior differences between `AudioRecord` (~43Hz) and the Visualizer API (~20Hz). Audited, fix scoped, not urgent. As of Phase 4, these constants live in `core/audio/AudioDspProcessor.kt` (branched by `AudioBackend`) rather than inline in the ViewModel, but the mismatch itself is unchanged.
 - Firework splash experimental animation (two-device) — tuning ongoing, lives in Settings > Experimental.
-- Smart Scene: chip dropdowns for in-place editing, animation timing consistency, chip label formatting, manual per-step editing — all deferred until scene editors are reconciled.
 - Audio visualizer: `paletteCycling` on Beat Only pending hardware test decision; fire-effect flicker/brightness modulation deferred.
 
 ## Testing

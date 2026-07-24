@@ -192,7 +192,6 @@ fun MainScreen() {
         appContainer.adbControlSink
     )
     val viewModel: RgbControllerViewModel = viewModel(factory = factory)
-    val aiSceneGeneratorViewModel: com.example.ui.components.AiSceneGeneratorViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val presets by viewModel.savedPresets.collectAsState()
@@ -276,14 +275,7 @@ fun MainScreen() {
     var deviceAliasInput by remember { mutableStateOf("") }
 
     var selectedTab by remember { mutableStateOf(0) }
-    var showAiSceneGenerator by remember { mutableStateOf(false) }
-    var editingSmartSceneId by remember { mutableStateOf<String?>(null) }
     var showModeCaptureScreen by remember { mutableStateOf(false) }
-
-    BackHandler(enabled = showAiSceneGenerator) {
-        showAiSceneGenerator = false
-        editingSmartSceneId = null
-    }
 
     var liveFps by remember { mutableStateOf(32) }
     if (uiState.coreControl.showFpsTracker && uiState.coreControl.isPowerOn) {
@@ -371,20 +363,7 @@ fun MainScreen() {
     Scaffold(
         topBar = {
             TopAppBar(
-                navigationIcon = {
-                    if (showAiSceneGenerator) {
-                        IconButton(onClick = { 
-                            showAiSceneGenerator = false 
-                            editingSmartSceneId = null
-                        }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = topBarTitleColor
-                            )
-                        }
-                    }
-                },
+                navigationIcon = {},
                 title = {
                     Column(
                         modifier = Modifier
@@ -462,8 +441,6 @@ fun MainScreen() {
                 selectedTab = selectedTab,
                 onTabSelected = {
                     selectedTab = it
-                    showAiSceneGenerator = false
-                    editingSmartSceneId = null
                     showModeCaptureScreen = false
                 }
             )
@@ -478,25 +455,6 @@ fun MainScreen() {
                 com.example.ui.components.ModeCaptureScreen(
                     viewModel = viewModel,
                     onClose = { showModeCaptureScreen = false }
-                )
-            } else if (showAiSceneGenerator) {
-                com.example.ui.components.AiSceneGeneratorScreen(
-                    viewModel = aiSceneGeneratorViewModel,
-                    onApplyScene = { params, sceneName, explanation ->
-                        val editId = editingSmartSceneId
-                        if (editId != null) {
-                            viewModel.updateAiSceneSequence(editId, params, sceneName)
-                            editingSmartSceneId = null
-                        } else {
-                            val firstScene = viewModel.saveAiSceneSequence(params, sceneName, explanation)
-                            if (firstScene != null) {
-                                viewModel.applyScene(firstScene)
-                            }
-                        }
-                        showAiSceneGenerator = false
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
                 )
             } else if (selectedTab == 1) {
                 ModesScreen(
@@ -526,21 +484,12 @@ fun MainScreen() {
             } else if (selectedTab == 0) {
                 HomeScreen(
                     viewModel = viewModel,
-                    aiSceneGeneratorViewModel = aiSceneGeneratorViewModel,
                     permissionsGranted = permissionsGranted,
                     requiredPermissions = requiredPermissions,
                     permissionLauncher = permissionLauncher,
                     onStartAmbianceCapture = {
                         val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                         mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
-                    },
-                    onCreateSmartScene = {
-                        showAiSceneGenerator = true
-                    },
-                    onEditScene = { scene ->
-                        editingSmartSceneId = scene.id
-                        aiSceneGeneratorViewModel.loadExistingScene(scene)
-                        showAiSceneGenerator = true
                     },
                     modifier = Modifier
                         .fillMaxSize()

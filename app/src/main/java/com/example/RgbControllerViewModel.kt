@@ -3,7 +3,6 @@ package com.example
 import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
 import com.example.core.calibration.CalibrationMatrixSolver
-import com.example.core.animation.ProceduralSceneParams
 import com.example.hardware.audio.MetronomePlayer
 import com.example.domain.repository.AppPreferencesRepository
 import com.example.domain.repository.RgbDatabaseRepository
@@ -2211,12 +2210,6 @@ class RgbControllerViewModel(
     fun deleteScene(sceneId: String) = sceneManager.deleteScene(sceneId)
 
     fun renameScene(sceneId: String, newName: String) = sceneManager.renameScene(sceneId, newName)
-
-    fun saveAiSceneSequence(params: ProceduralSceneParams, sceneName: String, explanation: String): AppScene? =
-        sceneManager.saveAiSceneSequence(params, sceneName, explanation)
-
-    fun updateAiSceneSequence(sceneId: String, params: ProceduralSceneParams, sceneName: String) =
-        sceneManager.updateAiSceneSequence(sceneId, params, sceneName)
 
     fun applyScene(scene: AppScene, isReversing: Boolean = false) = sceneManager.applyScene(scene, isReversing)
     // --- ROOM DATABASE OPERATIONS ---

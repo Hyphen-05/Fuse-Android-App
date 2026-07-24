@@ -5,7 +5,6 @@ import com.example.BleConnectionState
 import com.example.DeviceStateStore
 import com.example.RgbUiState
 import com.example.SceneAnimationRunner
-import com.example.core.animation.ProceduralSceneParams
 import com.example.core.protocol.DuoCoProtocol
 import com.example.db.CustomMode
 import com.example.domain.model.AppScene
@@ -200,57 +199,6 @@ class SceneManager(
         val current = scenes.value.map { if (it.id == sceneId) it.copy(name = newName) else it }
         scenes.value = current
         prefsRepo.saveScenes(current)
-    }
-
-    fun saveAiSceneSequence(params: ProceduralSceneParams, sceneName: String, explanation: String): AppScene? {
-        if (params.palette.isEmpty()) return null
-
-        val sceneId = UUID.randomUUID().toString()
-
-        val state = DeviceSceneState(
-            groupASelection = "Colour",
-            colorR = params.palette.first().first,
-            colorG = params.palette.first().second,
-            colorB = params.palette.first().third,
-            isPowerOn = true,
-            animatedSequence = params
-        )
-
-        val scene = AppScene(
-            id = sceneId,
-            name = sceneName,
-            targetScope = "ALL_DEVICES", // Default for AI scenes
-            state = state
-        )
-
-        val current = scenes.value.toMutableList()
-        current.add(scene)
-        scenes.value = current
-        prefsRepo.saveScenes(current)
-
-        return scene
-    }
-
-    fun updateAiSceneSequence(sceneId: String, params: ProceduralSceneParams, sceneName: String) {
-        if (params.palette.isEmpty()) return
-        val current = scenes.value.toMutableList()
-        val index = current.indexOfFirst { it.id == sceneId }
-        if (index != -1) {
-            val oldScene = current[index]
-            val updatedState = oldScene.state.copy(
-                animatedSequence = params,
-                colorR = params.palette.first().first,
-                colorG = params.palette.first().second,
-                colorB = params.palette.first().third
-            )
-            val updatedScene = oldScene.copy(
-                name = sceneName,
-                state = updatedState
-            )
-            current[index] = updatedScene
-            scenes.value = current
-            prefsRepo.saveScenes(current)
-        }
     }
 
     fun applyScene(scene: AppScene, isReversing: Boolean = false) {

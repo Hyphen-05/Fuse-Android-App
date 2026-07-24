@@ -42,13 +42,10 @@ import com.example.domain.model.AppScene
 @Composable
 fun HomeScreen(
     viewModel: RgbControllerViewModel,
-    aiSceneGeneratorViewModel: AiSceneGeneratorViewModel,
     permissionsGranted: Boolean,
     requiredPermissions: List<String>,
     permissionLauncher: ActivityResultLauncher<Array<String>>,
     onStartAmbianceCapture: () -> Unit,
-    onCreateSmartScene: () -> Unit,
-    onEditScene: (AppScene) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -57,7 +54,6 @@ fun HomeScreen(
 
     val activeComposeColor = Color(uiState.coreControl.red, uiState.coreControl.green, uiState.coreControl.blue)
 
-    var showSceneChoiceDialog by remember { mutableStateOf(false) }
     var showCreateSceneDialogFromHome by remember { mutableStateOf(false) }
     var selectedSceneId by remember { mutableStateOf<String?>(null) }
     var sceneToDelete by remember { mutableStateOf<AppScene?>(null) }
@@ -78,132 +74,6 @@ fun HomeScreen(
         }
         val brightnessStr = if (state?.brightness != null) ", ${state.brightness}%" else ""
         return "$modeName$brightnessStr"
-    }
-
-    if (showSceneChoiceDialog) {
-        AlertDialog(
-            onDismissRequest = { showSceneChoiceDialog = false },
-            title = { Text("Create Scene", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                ) {
-                    // Option 1: Create Scene (Manual)
-                    val manualInteractionSource = remember { MutableInteractionSource() }
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = manualInteractionSource,
-                                indication = androidx.compose.foundation.LocalIndication.current
-                            ) {
-                                showSceneChoiceDialog = false
-                                showCreateSceneDialogFromHome = true
-                            }
-                            .testTag("choice_create_scene_manual"),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Create Scene",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Manually configure colors and effects",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    // Option 2: Smart Scene (AI)
-                    val smartInteractionSource = remember { MutableInteractionSource() }
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = smartInteractionSource,
-                                indication = androidx.compose.foundation.LocalIndication.current
-                            ) {
-                                showSceneChoiceDialog = false
-                                aiSceneGeneratorViewModel.resetToIdle()
-                                onCreateSmartScene()
-                            }
-                            .testTag("choice_create_scene_smart"),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Smart Scene",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Describe a scene and let on-device AI build it",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            shape = RoundedCornerShape(24.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            confirmButton = {},
-            dismissButton = {}
-        )
     }
 
     if (showCreateSceneDialogFromHome) {
@@ -235,13 +105,6 @@ fun HomeScreen(
             availableScenes = scenes,
             sceneToEdit = sceneToEdit,
             onDismissRequest = { sceneToEdit = null },
-            onEditAnimation = {
-                val activeScene = sceneToEdit
-                if (activeScene != null) {
-                    onEditScene(activeScene)
-                    sceneToEdit = null
-                }
-            },
             onSaveScene = { name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds ->
                 viewModel.updateScene(sceneToEdit!!.id, name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds)
                 sceneToEdit = null
@@ -850,7 +713,7 @@ fun HomeScreen(
                                         interactionSource = addInteractionSource,
                                         indication = androidx.compose.foundation.LocalIndication.current
                                     ) {
-                                        showSceneChoiceDialog = true
+                                        showCreateSceneDialogFromHome = true
                                     }
                                     .testTag("create_scene_chip_home")
                                     .joyfulPress(addInteractionSource),
