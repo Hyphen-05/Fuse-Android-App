@@ -42,3 +42,6 @@ Thumbs.db
 # Local dev notes (not for public repo)
 CLAUDE.md
 HISTORY.md
+audit-findings-*.md
+mapping-proposal-*.md
+visualizer-review-*.md
