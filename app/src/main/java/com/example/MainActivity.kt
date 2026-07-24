@@ -278,6 +278,7 @@ fun MainScreen() {
     var selectedTab by remember { mutableStateOf(0) }
     var showAiSceneGenerator by remember { mutableStateOf(false) }
     var editingSmartSceneId by remember { mutableStateOf<String?>(null) }
+    var showModeCaptureScreen by remember { mutableStateOf(false) }
 
     BackHandler(enabled = showAiSceneGenerator) {
         showAiSceneGenerator = false
@@ -463,6 +464,7 @@ fun MainScreen() {
                     selectedTab = it
                     showAiSceneGenerator = false
                     editingSmartSceneId = null
+                    showModeCaptureScreen = false
                 }
             )
         }
@@ -472,7 +474,12 @@ fun MainScreen() {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (showAiSceneGenerator) {
+            if (showModeCaptureScreen) {
+                com.example.ui.components.ModeCaptureScreen(
+                    viewModel = viewModel,
+                    onClose = { showModeCaptureScreen = false }
+                )
+            } else if (showAiSceneGenerator) {
                 com.example.ui.components.AiSceneGeneratorScreen(
                     viewModel = aiSceneGeneratorViewModel,
                     onApplyScene = { params, sceneName, explanation ->
@@ -567,7 +574,12 @@ fun MainScreen() {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    SettingsTabContent(uiState, telemetry, viewModel)
+                    SettingsTabContent(
+                        state = uiState,
+                        telemetry = telemetry,
+                        viewModel = viewModel,
+                        onOpenModeCapture = { showModeCaptureScreen = true }
+                    )
                 }
             }
 

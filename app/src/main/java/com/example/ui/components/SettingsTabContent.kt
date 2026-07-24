@@ -126,7 +126,12 @@ fun ExpandableCategoryCard(
     }
 }
 
-fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryState, viewModel: RgbControllerViewModel) {
+fun LazyListScope.SettingsTabContent(
+    state: RgbUiState,
+    telemetry: TelemetryState,
+    viewModel: RgbControllerViewModel,
+    onOpenModeCapture: () -> Unit = {}
+) {
     if (state.calibrationFlow.showCalibrationPrompt && state.audioSettings.detectedAudioDeviceName != null) {
         item {
             val calibratePromptInteractionSource = remember { MutableInteractionSource() }
@@ -1412,6 +1417,50 @@ fun LazyListScope.SettingsTabContent(state: RgbUiState, telemetry: TelemetryStat
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                             )
                         }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Mode Capture (Camera) Section
+                val modeCaptureInteractionSource = remember { MutableInteractionSource() }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Mode Capture (Camera)",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "One-time diagnostic tool: auto-cycles every mode except Auto Play while your phone camera records color and motion along the strip, for correcting mode labels/categories/direction offline.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onOpenModeCapture,
+                        interactionSource = modeCaptureInteractionSource,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_mode_capture_btn")
+                            .joyfulPress(modeCaptureInteractionSource),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary
+                        ),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Mode Capture",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Start Mode Capture",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
                     }
                 }
             }
