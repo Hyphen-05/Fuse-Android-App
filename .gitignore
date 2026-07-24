@@ -13,7 +13,6 @@ captures/
 # Gradle caches and configuration
 .gradle/
 /local.properties
-/gradle/wrapper/gradle-wrapper.jar
 
 # Kotlin / Java / Backup files
 *.class
