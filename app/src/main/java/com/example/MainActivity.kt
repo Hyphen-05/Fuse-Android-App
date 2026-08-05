@@ -29,7 +29,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
@@ -94,8 +93,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -560,32 +557,67 @@ fun MainScreen() {
                 }
             }
 
-            // Expressive connection loading overlay using soft breathing/pulsing circle animations (Material You style)
-            val anyDeviceConnected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED ||
-                uiState.connectivity.deviceConnectionStates.values.any { it == BleConnectionState.CONNECTED }
-
-            val isConnecting = !anyDeviceConnected && savedDevices.any { saved ->
-                val connState = connectionStates[saved.macAddress]
-                val isManuallyDisconnected = connState is com.example.domain.ConnectionState.Disconnected && connState.isManual
-                saved.isAutoConnectEnabled && 
-                !isManuallyDisconnected &&
-                uiState.connectivity.deviceConnectionStates[saved.macAddress] != BleConnectionState.CONNECTED
+            // Connection progress used to be a full-screen scrim with click-through disabled, shown
+            // whenever a saved auto-connect device wasn't currently CONNECTED. That condition never
+            // clears on its own — one saved light that's powered off or out of range covered every
+            // tab forever, including the Devices screen you'd need to reach to turn auto-connect
+            // off. This is a thin non-blocking pill instead: it tracks an attempt that is actually
+            // in flight, offers Cancel, and gives up nagging after 15s (the retry ladder in
+            // handleConnectionStateChange carries on regardless).
+            val connectingDevice = savedDevices.firstOrNull {
+                connectionStates[it.macAddress] == com.example.domain.ConnectionState.Connecting
+            }
+            var connectBannerTimedOut by remember { mutableStateOf(false) }
+            LaunchedEffect(connectingDevice?.macAddress) {
+                connectBannerTimedOut = false
+                if (connectingDevice != null) {
+                    kotlinx.coroutines.delay(15_000L)
+                    connectBannerTimedOut = true
+                }
             }
 
             AnimatedVisibility(
-                visible = isConnecting,
+                visible = connectingDevice != null && !connectBannerTimedOut,
                 enter = fadeIn(animationSpec = tween(400)),
-                exit = fadeOut(animationSpec = tween(150))
+                exit = fadeOut(animationSpec = tween(150)),
+                modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                Box(
+                val device = connectingDevice
+                Surface(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f)) // Translucent overlay to darken background content
-                        .clickable(enabled = false) {} // Prevent click-through
-                        .testTag("connection_loading_overlay"),
-                    contentAlignment = Alignment.Center
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag("connection_status_banner"),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 3.dp
                 ) {
-                    ExpressiveConnectionLoadingIndicator()
+                    Row(
+                        modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "Connecting to ${device?.customName ?: "device"}…",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        TextButton(
+                            onClick = { device?.let { viewModel.disconnectDevice(it.macAddress) } },
+                            modifier = Modifier.testTag("connection_cancel_btn")
+                        ) {
+                            Text(
+                                text = "Cancel",
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
                 }
             }
 
@@ -928,151 +960,3 @@ data class NavigationItemData(
     val testTag: String
 )
 
-@Composable
-fun ExpressiveConnectionLoadingIndicator() {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse_and_breathe")
-    
-    // Soft pulsing breathing scale loop
-    val breatheScale by infiniteTransition.animateFloat(
-        initialValue = 0.75f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breatheScale"
-    )
-    
-    // Soft pulsing breathing alpha loop
-    val breatheAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.55f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breatheAlpha"
-    )
-
-    // Secondary offset/staggered pulse for complex multi-layered breathing depth (asymmetry)
-    val secondScale by infiniteTransition.animateFloat(
-        initialValue = 1.25f,
-        targetValue = 0.75f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "secondScale"
-    )
-
-    val secondAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.05f,
-        targetValue = 0.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "secondAlpha"
-    )
-
-    // Constant rotation for inner design accents
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-
-    Box(
-        modifier = Modifier.size(220.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // 1. Layer 1: Outermost breathing pulse circle
-        Box(
-            modifier = Modifier
-                .graphicsLayer {
-                    scaleX = breatheScale
-                    scaleY = breatheScale
-                }
-                .size(160.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = breatheAlpha),
-                    shape = CircleShape
-                )
-        )
-
-        // 2. Layer 2: Secondary offset breathing circle for visual depth
-        Box(
-            modifier = Modifier
-                .graphicsLayer {
-                    scaleX = secondScale
-                    scaleY = secondScale
-                }
-                .size(140.dp)
-                .background(
-                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = secondAlpha),
-                    shape = CircleShape
-                )
-        )
-
-        // 3. Layer 3: Central card container containing the loading indicator
-        Card(
-            modifier = Modifier
-                .size(130.dp)
-                .border(
-                    width = 1.5.dp,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                    shape = RoundedCornerShape(28.dp)
-                ),
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Large indeterminate circular progress indicator using Material 3 expressive tokens
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .graphicsLayer {
-                            rotationZ = rotation
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.fillMaxSize(),
-                        strokeWidth = 4.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text(
-                    text = "Fusing...",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                
-                Text(
-                    text = "Connecting BLE",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                    )
-                )
-            }
-        }
-    }
-}
