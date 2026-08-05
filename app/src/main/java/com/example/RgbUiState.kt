@@ -152,6 +152,13 @@ data class AudioSettingsState(
     val breathUsesBassRatio: Boolean = false,
     val hueDriftDegPerSec: Float = 4f,
     val hueDegreesPerBeat: Float = 0f,
+    // Per-beat hue nudge ("rubber band"): degrees the hue is pushed *backward* on each flash
+    // trigger, relaxing exponentially back to 0 over hueNudgeReturnMs. Stored positive, applied
+    // negative. 0 disables it, which is where every pre-existing preset sits — this is additive
+    // machinery for presets built around "colours drift, beats pull them back", since the anchor
+    // can only ever jump forward.
+    val hueBeatNudgeDeg: Float = 0f,
+    val hueNudgeReturnMs: Float = 600f,
     // One of "NONE" / "HUE_SHIFT" / "SAT_BOOST" / "BRIGHTNESS_SWELL" — see §4's sustain-response
     // list. String-typed to match the existing visualizerPreset/musicMode string-enum convention
     // in this state class rather than introducing a new sealed-type pattern here.

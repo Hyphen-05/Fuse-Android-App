@@ -230,6 +230,8 @@ class RgbControllerViewModel(
                 breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
                 hueDriftDegPerSec = prefsRepo.getAppStatePrefFloat("hue_drift_deg_per_sec", 4f),
                 hueDegreesPerBeat = prefsRepo.getAppStatePrefFloat("hue_degrees_per_beat", 0f),
+                hueBeatNudgeDeg = prefsRepo.getAppStatePrefFloat("hue_beat_nudge_deg", 0f),
+                hueNudgeReturnMs = prefsRepo.getAppStatePrefFloat("hue_nudge_return_ms", 600f),
                 sustainResponse = prefsRepo.getAppStatePrefString("sustain_response", "HUE_SHIFT") ?: "HUE_SHIFT",
                 sustainRampMs = prefsRepo.getAppStatePrefFloat("sustain_ramp_ms", 2000f),
                 whiteFlashRecoveryMs = prefsRepo.getAppStatePrefFloat("white_flash_recovery_ms", 1000f),

@@ -106,6 +106,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // triggers the hue EMA's hard snap (structural problem #3 in the proposal: every preset used
     // to hard-snap on every beat, including Ambient Chill, whose whole identity is "no transients").
     private var anchorMovedThisFrame = false
+    // --- Per-beat hue nudge ("rubber band") ---
+    // A signed offset applied alongside breath, kicked backwards on each flash trigger and relaxing
+    // exponentially back to 0. This is the only mechanism by which a beat can push hue *backward*:
+    // the anchor can only ever jump forward (a hard snap), so a preset wanting "colours drift, beats
+    // pull them back" had nothing to build on. Zero when hueBeatNudgeDeg is 0, which is every
+    // pre-existing preset — behaviour there is bit-identical.
+    private var hueNudgeOffset = 0f
 
     // --- Sustain-response hysteresis+ramp (replaces the old binary +120° toggle, problem #5) ---
     // 0L is the "not currently accumulating" sentinel, same convention as silenceStartTime below.
@@ -513,6 +520,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // rendered its peak (either trigger mechanism below), not on detection's isBeat frame.
         var flashFiredThisFrame = false
 
+        // Relax the hue nudge toward 0 before this frame's triggers can kick it again, so a kick
+        // always lands at full size. Keyed to the flash triggers rather than isBeat on purpose:
+        // the predictive scheduler is what makes the pushback land on the *felt* beat instead of
+        // ~180ms behind it, and it fires regardless of audioFlashStrength.
+        if (hueNudgeOffset != 0f) {
+            hueNudgeOffset *= kotlin.math.exp(-dtMs.toFloat() / state.hueNudgeReturnMs.coerceAtLeast(1f))
+        }
+
         // --- P1 predictive flash scheduling / fast causal trigger orchestration ---
         // Mechanism selection crossfades by bpmConfidence: once tempo-locked, schedule the flash
         // ahead of detection off the DP beat grid (mechanism 1); before/without a lock, fall back
@@ -561,6 +576,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                 scheduledFlashFired = true
                 flashFiredThisFrame = true
+                applyHueNudge(state.hueBeatNudgeDeg)
                 scheduledFlashConfirmDeadlineMs = nowMs + 150L
                 if (useWhiteFlash) {
                     val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
@@ -619,6 +635,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
                 if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
                     lastFastTriggerFlashAtMs = nowMs
                     flashFiredThisFrame = true
+                    applyHueNudge(state.hueBeatNudgeDeg)
                     if (useWhiteFlash) {
                         // No detection-confirmed strength/confidence exists yet for this trigger
                         // (mechanism 2 fires ahead of/instead of the centered detector) -- reuse
@@ -675,7 +692,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             ((midRatio - highRatio) * breathRange).coerceIn(-breathRange, breathRange)
         }
 
-        var hue = (hueAnchor + breath + 360f) % 360f
+        // Nudge is added before sustain/smoothing, and never touches the anchor — so no hard snap
+        // fires, and the existing hue EMA (visualizerColorSpeed) softens the kick further.
+        var hue = (hueAnchor + breath + hueNudgeOffset + 360f) % 360f
 
         // Sustain response (proposal §4/§5, problem #5): one of four per-preset behaviors, applied
         // with the hysteresis-debounced, ramped sustainIntensity computed above — replacing the
@@ -940,5 +959,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         beatPulsePeak = peak.coerceIn(0f, 1f)
         activeFlashDecayMs = decayMs
         return true
+    }
+
+    /**
+     * Pushes the hue backward by [degrees] (stored positive in the preset, applied negative), and
+     * clamps the running total to ±2·[degrees] so a fast run of beats can't wind the offset up
+     * without bound before the relaxation has had a chance to work it off.
+     */
+    private fun applyHueNudge(degrees: Float) {
+        if (degrees <= 0f) return
+        hueNudgeOffset = (hueNudgeOffset - degrees).coerceIn(-2f * degrees, 2f * degrees)
     }
 }

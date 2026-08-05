@@ -62,6 +62,10 @@ private data class VisualizerConfig(
     val breathUsesBassRatio: Boolean = false,
     val hueDriftDegPerSec: Float = 4f,
     val hueDegreesPerBeat: Float = 0f,
+    // Defaults keep every existing preset's behaviour bit-identical — see the matching
+    // AudioSettingsState fields.
+    val hueBeatNudgeDeg: Float = 0f,
+    val hueNudgeReturnMs: Float = 600f,
     val sustainResponse: String = "HUE_SHIFT",
     val sustainRampMs: Float = 2000f,
     val whiteFlashRecoveryMs: Float = 1000f
@@ -249,6 +253,8 @@ fun audioSettingsReducer(
                     breathUsesBassRatio = config.breathUsesBassRatio,
                     hueDriftDegPerSec = config.hueDriftDegPerSec,
                     hueDegreesPerBeat = config.hueDegreesPerBeat,
+                    hueBeatNudgeDeg = config.hueBeatNudgeDeg,
+                    hueNudgeReturnMs = config.hueNudgeReturnMs,
                     sustainResponse = config.sustainResponse,
                     sustainRampMs = config.sustainRampMs,
                     whiteFlashRecoveryMs = config.whiteFlashRecoveryMs
@@ -281,6 +287,8 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", config.hueAnchorJumpDeg),
                 AudioSideEffect.SaveAudioPrefFloat("hue_jump_confidence_gate", config.hueJumpConfidenceGate),
                 AudioSideEffect.SaveAudioPrefFloat("hue_breath_range_deg", config.hueBreathRangeDeg),
+                AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", config.hueBeatNudgeDeg),
+                AudioSideEffect.SaveAudioPrefFloat("hue_nudge_return_ms", config.hueNudgeReturnMs),
                 AudioSideEffect.SaveAudioPrefBoolean("breath_uses_bass_ratio", config.breathUsesBassRatio),
                 AudioSideEffect.SaveAudioPrefFloat("hue_drift_deg_per_sec", config.hueDriftDegPerSec),
                 AudioSideEffect.SaveAudioPrefFloat("hue_degrees_per_beat", config.hueDegreesPerBeat),
@@ -652,6 +660,8 @@ fun audioSettingsReducer(
                     hueAnchorJumpDeg = 60f,
                     hueJumpConfidenceGate = 0.35f,
                     hueBreathRangeDeg = 25f,
+                    hueBeatNudgeDeg = 0f,
+                    hueNudgeReturnMs = 600f,
                     breathUsesBassRatio = false,
                     hueDriftDegPerSec = 4f,
                     hueDegreesPerBeat = 0f,
@@ -697,6 +707,8 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", 60f),
                 AudioSideEffect.SaveAudioPrefFloat("hue_jump_confidence_gate", 0.35f),
                 AudioSideEffect.SaveAudioPrefFloat("hue_breath_range_deg", 25f),
+                AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", 0f),
+                AudioSideEffect.SaveAudioPrefFloat("hue_nudge_return_ms", 600f),
                 AudioSideEffect.SaveAudioPrefBoolean("breath_uses_bass_ratio", false),
                 AudioSideEffect.SaveAudioPrefFloat("hue_drift_deg_per_sec", 4f),
                 AudioSideEffect.SaveAudioPrefFloat("hue_degrees_per_beat", 0f),
