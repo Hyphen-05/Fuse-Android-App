@@ -425,95 +425,111 @@ fun MusicScreen(
             modifier = Modifier.padding(top = 8.dp)
         )
 
-        val visualPresets = remember {
+        // Grouped smooth-first, which is the owner's stated taste. Pure presentation — the ids and
+        // their config tables are unchanged.
+        val smoothPresets = remember {
             listOf(
-                ExternalMicPreset("Default", "Balanced", "Standard rhythmic response", Color(0xFF9E9E9E)),
-                ExternalMicPreset("Punchy", "Punchy", "Hits hard and drops fast", Color(0xFFE53935)),
+                ExternalMicPreset("Ebb & Flow", "Ebb & Flow", "Drifting colours, beats pull them back", Color(0xFF26A69A)),
                 ExternalMicPreset("Smooth Flow", "Smooth Flow", "Gliding fluid transitions", Color(0xFF00ACC1)),
-                ExternalMicPreset("Strobe Blast", "Strobe Blast", "Intense rapid flashing", Color(0xFF8E24AA)),
                 ExternalMicPreset("Ambient Chill", "Ambient Chill", "Slow lingering fades", Color(0xFF3949AB)),
+                ExternalMicPreset("Default", "Balanced", "Standard rhythmic response", Color(0xFF9E9E9E))
+            )
+        }
+        val energeticPresets = remember {
+            listOf(
                 ExternalMicPreset("Bass Thump", "Bass Thump", "Reacts heavily to bass", Color(0xFF43A047)),
+                ExternalMicPreset("Punchy", "Punchy", "Hits hard and drops fast", Color(0xFFE53935)),
+                ExternalMicPreset("Strobe Blast", "Strobe Blast", "Intense rapid flashing", Color(0xFF8E24AA)),
                 ExternalMicPreset("Laser Sharp", "Laser Sharp", "Instant reaction, no trails", Color(0xFFD81B60)),
                 ExternalMicPreset("Beat Only", "Beat Only", "Pure beat strobe", Color(0xFFFF5722))
             )
         }
 
-        val chunkedVisualPresets = remember(visualPresets) { visualPresets.chunked(2) }
+        val isVisualizerModeActive = uiState.audioSettings.musicMode == "phone_mic" ||
+            uiState.audioSettings.musicMode == "on_device"
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("visual_presets_grid"),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            chunkedVisualPresets.forEach { rowPresets ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    rowPresets.forEach { preset ->
-                        val isActive = (uiState.audioSettings.musicMode == "phone_mic" || uiState.audioSettings.musicMode == "on_device") && uiState.audioSettings.visualizerPreset == preset.id
-                        val presetInteractionSource = remember(preset.id) { MutableInteractionSource() }
-                        Card(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(20.dp))
-                                .border(
-                                    width = if (isActive) 1.5.dp else 1.dp,
-                                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                                .clickable(
-                                    interactionSource = presetInteractionSource,
-                                    indication = androidx.compose.foundation.LocalIndication.current
-                                ) {
-                                    viewModel.setVisualizerPreset(preset.id)
-                                }
-                                .testTag("visual_preset_${preset.id}")
-                                .joyfulPress(presetInteractionSource),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
-                            )
-                        ) {
-                            Row(
+            listOf("Smooth" to smoothPresets, "Energetic" to energeticPresets).forEach { (label, presets) ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                presets.chunked(2).forEach { rowPresets ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        rowPresets.forEach { preset ->
+                            val isActive = isVisualizerModeActive && uiState.audioSettings.visualizerPreset == preset.id
+                            val presetInteractionSource = remember(preset.id) { MutableInteractionSource() }
+                            Card(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .border(
+                                        width = if (isActive) 1.5.dp else 1.dp,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = RoundedCornerShape(20.dp)
+                                    )
+                                    .clickable(
+                                        interactionSource = presetInteractionSource,
+                                        indication = androidx.compose.foundation.LocalIndication.current
+                                    ) {
+                                        viewModel.setVisualizerPreset(preset.id)
+                                    }
+                                    .testTag("visual_preset_${preset.id}")
+                                    .joyfulPress(presetInteractionSource),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
+                                )
                             ) {
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(preset.color.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = preset.name,
-                                        tint = preset.color,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = preset.name,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = preset.description,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(preset.color.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = preset.name,
+                                            tint = preset.color,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = preset.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = preset.description,
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                    if (rowPresets.size < 2) {
-                        Spacer(modifier = Modifier.weight(1f))
+                        if (rowPresets.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
