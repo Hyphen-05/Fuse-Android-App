@@ -200,6 +200,7 @@ class RgbControllerViewModel(
                 isAutoGainEnabled = prefsRepo.getAppStatePrefBoolean("is_auto_gain_enabled", true),
                 isPaletteCyclingEnabled = prefsRepo.getAppStatePrefBoolean("is_palette_cycling_enabled", true),
                 isLogarithmicScalingEnabled = prefsRepo.getAppStatePrefBoolean("is_logarithmic_scaling_enabled", true),
+                musicSensitivity = prefsRepo.getAppStatePrefInt("music_sensitivity", 50),
                 bluetoothDelayMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
                 // totalVisualDelayMs mirrors bluetoothDelayMs directly — the calibration flash
                 // (SendFlashPulse) is sent via broadcastCommandDirect, bypassing queueCommand's

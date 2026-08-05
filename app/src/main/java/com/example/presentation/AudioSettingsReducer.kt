@@ -372,7 +372,8 @@ fun audioSettingsReducer(
                 audioSettings = state.audioSettings.copy(musicSensitivity = intent.value)
             )
             val effects = listOf(
-                AudioSideEffect.BroadcastCommand(DuoCoProtocol.createMusicSensitivityCommand(intent.value), "Mic Sensitivity ${intent.value}")
+                AudioSideEffect.BroadcastCommand(DuoCoProtocol.createMusicSensitivityCommand(intent.value), "Mic Sensitivity ${intent.value}"),
+                AudioSideEffect.SaveAudioPrefInt("music_sensitivity", intent.value)
             )
             newState to effects
         }
@@ -622,6 +623,7 @@ fun audioSettingsReducer(
                     isAutoGainEnabled = true,
                     isPaletteCyclingEnabled = true,
                     isLogarithmicScalingEnabled = true,
+                    musicSensitivity = 50,
                     bluetoothDelayMs = 0,
                     totalVisualDelayMs = 0,
                     // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs (was
@@ -666,6 +668,11 @@ fun audioSettingsReducer(
                 AudioSideEffect.SaveAudioPrefBoolean("is_auto_gain_enabled", true),
                 AudioSideEffect.SaveAudioPrefBoolean("is_palette_cycling_enabled", true),
                 AudioSideEffect.SaveAudioPrefBoolean("is_logarithmic_scaling_enabled", true),
+                // Sensitivity also lives on the strip (the onboard BLE modes use it), so the reset
+                // has to push the default out to hardware as well as back into prefs — otherwise
+                // state says 50 while the strip keeps whatever it was last told.
+                AudioSideEffect.SaveAudioPrefInt("music_sensitivity", 50),
+                AudioSideEffect.BroadcastCommand(DuoCoProtocol.createMusicSensitivityCommand(50), "Mic Sensitivity 50"),
                 AudioSideEffect.SaveAudioPrefInt("bluetooth_delay_ms", 0),
                 // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs (was 100).
                 AudioSideEffect.SaveAudioPrefInt("flash_timing_offset_ms", 0),

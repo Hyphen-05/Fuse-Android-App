@@ -235,7 +235,14 @@ fun MusicScreen(
                 
                 HapticBouncySlider(
                     value = uiState.audioSettings.musicSensitivity.toFloat(),
-                    onValueChange = { viewModel.setMusicSensitivity(it.toInt()) },
+                    // Only dispatch when the whole-number value actually moves — the intent fires a
+                    // BLE sensitivity command, and a raw per-frame drag would flood the write queue.
+                    onValueChange = { raw ->
+                        val stepped = raw.toInt()
+                        if (stepped != uiState.audioSettings.musicSensitivity) {
+                            viewModel.setMusicSensitivity(stepped)
+                        }
+                    },
                     valueRange = 0f..100f,
                     totalSteps = 100,
                     modifier = Modifier.testTag("music_sensitivity_slider")
