@@ -265,10 +265,17 @@ fun MusicScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Not just the microphone: the same value is sent to the strip as the onboard
+                    // BLE modes' sensitivity command, so it applies whichever group is active.
+                    Column {
                         Text(
-                            text = "Microphone Sensitivity",
+                            text = "Sensitivity",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "Applies to both preset groups",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Text(
@@ -418,12 +425,18 @@ fun MusicScreen(
         }
 
         // --- Visualiser Modes ---
-        Text(
-            text = "Visualiser Presets",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+        Column(modifier = Modifier.padding(top = 8.dp)) {
+            Text(
+                text = "Visualiser Presets",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Processed on your phone — needs the mic",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         // Grouped smooth-first, which is the owner's stated taste. Pure presentation — the ids and
         // their config tables are unchanged.
@@ -536,12 +549,18 @@ fun MusicScreen(
         }
 
         // --- LED Modes ---
-        Text(
-            text = "LED Presets",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 8.dp)
-        )
+        Column(modifier = Modifier.padding(top = 8.dp)) {
+            Text(
+                text = "LED Presets",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Built into the strip firmware — no phone audio needed",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         val chunkedPresets = remember(presets) { presets.chunked(2) }
         Column(
@@ -673,7 +692,11 @@ fun RowScope.VisualizerBar(
     val baseColor = if (showIdleWave) {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     } else {
-        MaterialTheme.colorScheme.primary
+        // Mirror the colour the strip is actually being driven to. visualizerHue was already
+        // plumbed in from the DSP and simply went unused, so the bars were always theme-primary
+        // no matter what the lights were doing. Saturation/value are pinned high so the bars stay
+        // legible in either theme — only hue carries the DSP's output.
+        Color.hsv(((visualizerHue % 360f) + 360f) % 360f, 0.85f, 1f)
     }
 
     Box(
