@@ -37,6 +37,9 @@ sealed interface AudioSideEffect {
     data class ClearDeviceAutomationMode(val address: String) : AudioSideEffect
     data class StopMusicSyncInternal(val keepServiceRunning: Boolean) : AudioSideEffect
     data class StartAudioEngine(val mode: String) : AudioSideEffect
+    // Mirrors CoreSideEffect.StopAmbiance. Music sync and ambiance capture both broadcast colour
+    // commands, so starting one has to stop the other or the strip flickers between two masters.
+    data class StopAmbianceCapture(val restoreState: Boolean) : AudioSideEffect
 }
 
 private data class VisualizerConfig(
@@ -295,6 +298,9 @@ fun audioSettingsReducer(
         is RgbIntent.StartMusicSync -> {
             val mode = intent.mode
             val effects = mutableListOf<AudioSideEffect>()
+            // Ambiance capture is the other automation that drives colour; it doesn't get restored
+            // afterwards because music sync is taking over the same devices.
+            effects.add(AudioSideEffect.StopAmbianceCapture(restoreState = false))
             targetAddresses.forEach { address ->
                 effects.add(AudioSideEffect.SaveDeviceState(address, RgbControllerViewModel.AutomationType.AUDIO))
                 effects.add(AudioSideEffect.CancelSceneRunner(address))
