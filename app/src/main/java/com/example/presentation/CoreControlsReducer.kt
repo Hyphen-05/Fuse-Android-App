@@ -380,6 +380,13 @@ fun coreControlsReducer(
             }
         }
 
+        is RgbIntent.ClearErrorMessage -> {
+            if (state.coreControl.errorMessage == null) {
+                return state to emptyList()
+            }
+            state.copy(coreControl = state.coreControl.copy(errorMessage = null)) to emptyList()
+        }
+
         is RgbIntent.StartScanning -> {
             if (state.connectivity.isScanning) {
                 return state to emptyList()
