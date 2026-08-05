@@ -77,6 +77,25 @@ class AudioSettingsReducerTest {
     }
 
     @Test
+    fun setVisualizerPreset_ebbAndFlow_neverSnapsAndNudgesInstead() {
+        val (newState, effects) = reduce(intent = RgbIntent.SetVisualizerPreset("Ebb & Flow"))
+
+        val audio = newState.audioSettings
+        assertEquals("Ebb & Flow", audio.visualizerPreset)
+        // Its whole identity: no anchor snap, no brightness flash, continuous motion, elastic beat.
+        assertEquals(0, audio.anchorBeatsPerAdvance)
+        assertEquals(0f, audio.hueAnchorJumpDeg)
+        assertEquals(0.0f, audio.audioFlashStrength)
+        assertEquals(9f, audio.hueDriftDegPerSec)
+        assertEquals(2.0f, audio.hueDegreesPerBeat)
+        assertEquals(30f, audio.hueBeatNudgeDeg)
+        assertEquals(700f, audio.hueNudgeReturnMs)
+
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", 30f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_nudge_return_ms", 700f)))
+    }
+
+    @Test
     fun setVisualizerPreset_everyExistingPreset_leavesTheHueBeatNudgeDisabled() {
         // The nudge is additive machinery for a preset built around it; every preset that predates
         // it must stay at 0 so its behaviour is unchanged.

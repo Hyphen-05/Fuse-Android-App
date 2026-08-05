@@ -159,6 +159,22 @@ private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset
         hueBreathRangeDeg = 0f, hueDriftDegPerSec = 0f,
         sustainResponse = "NONE", sustainRampMs = 0f, whiteFlashRecoveryMs = 250f
     )
+    // The one preset built on the per-beat hue nudge: all colour motion is continuous (tempo-locked
+    // drift when the detector has a lock, free-running 9°/s otherwise), there is no brightness
+    // flash at all, and the only per-beat event is the elastic pushback. Starting values are a
+    // principled first guess — expect by-feel tuning on hardware. If a subtle brightness component
+    // is wanted later, raise `flash` to ~0.15 rather than touching anything else.
+    "Ebb & Flow" -> VisualizerConfig(
+        attack = 0.25f, decay = 0.06f, flash = 0.0f, gamma = 0.5f, idleDelay = 4000L,
+        noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 0.7f, paletteCycling = true,
+        beatMult = 1.6f, minBrightness = 0.30f, colorSpeed = 0.5f, beatFlashDecayMs = 400f,
+        ambientCapFraction = 0.75f, midFluxWeight = 0.25f,
+        // Never snaps: the anchor is left entirely to drift.
+        anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
+        hueBreathRangeDeg = 20f, hueDriftDegPerSec = 9f, hueDegreesPerBeat = 2.0f,
+        hueBeatNudgeDeg = 30f, hueNudgeReturnMs = 700f,
+        sustainResponse = "BRIGHTNESS_SWELL", sustainRampMs = 3000f
+    )
     else -> VisualizerConfig(
         attack = 0.85f, decay = 0.12f, flash = 0.3f, gamma = 0.45f, idleDelay = 2500L,
         noiseGate = 5.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,
