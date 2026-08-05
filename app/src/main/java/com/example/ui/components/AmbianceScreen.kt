@@ -212,6 +212,20 @@ fun AmbianceScreen(
                 brightnessCompensation = 1.0f,
                 sceneCutSensitivity = 140.0f,
                 noiseDeadband = 0.18f
+            ),
+            AmbiancePreset(
+                id = "candlelight",
+                name = "Candlelight",
+                description = "Very slow, gentle drift — almost never snaps",
+                responseSpeed = 0.20f,
+                // Slowest of any preset; needs the widened smoothness range to be reachable from
+                // the Settings slider without being clamped.
+                smoothnessMs = 400,
+                saturationBoost = 1.1f,
+                brightnessCompensation = 0.9f,
+                // Near the top of the threshold range, so scene cuts essentially never fire.
+                sceneCutSensitivity = 150.0f,
+                noiseDeadband = 0.22f
             )
         )
     }
@@ -443,6 +457,11 @@ fun AmbianceScreen(
                                 )
                             }
                         }
+                    }
+                    // Odd preset count: keep the last card half-width instead of letting it
+                    // stretch across the row.
+                    if (rowPresets.size < 2) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
