@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -36,6 +37,10 @@ fun DevicesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
+
+    // Deleting a saved device also forgets its alias, role and auto-connect setting, so it gets a
+    // confirm step rather than firing on one tap of a 32dp icon.
+    var deviceToForget by rememberSaveable { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = modifier,
@@ -217,7 +222,7 @@ fun DevicesScreen(
 
                                     // Delete Device
                                     IconButton(
-                                        onClick = { viewModel.deleteSavedDevice(saved.macAddress) },
+                                        onClick = { deviceToForget = saved.macAddress },
                                         modifier = Modifier.size(32.dp).testTag("delete_saved_${saved.macAddress}")
                                     ) {
                                         Icon(
@@ -499,5 +504,42 @@ fun DevicesScreen(
                 }
             }
         }
+    }
+
+    if (deviceToForget != null) {
+        val target = savedDevices.find { it.macAddress == deviceToForget }
+        AlertDialog(
+            onDismissRequest = { deviceToForget = null },
+            title = { Text("Forget Device", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+            text = {
+                Text(
+                    "Forget '${target?.customName ?: deviceToForget}'? Its alias, role and auto-connect " +
+                        "setting are removed too, and it will be disconnected."
+                )
+            },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deviceToForget?.let { viewModel.deleteSavedDevice(it) }
+                        deviceToForget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.height(44.dp).testTag("confirm_forget_device"),
+                    shape = CircleShape
+                ) {
+                    Text("Forget")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deviceToForget = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
