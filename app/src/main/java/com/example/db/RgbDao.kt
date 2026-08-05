@@ -8,15 +8,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface RgbDao {
-    @Query("SELECT * FROM rgb_presets ORDER BY timestamp DESC")
-    fun getAllPresets(): Flow<List<RgbPreset>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPreset(preset: RgbPreset)
-
-    @Query("DELETE FROM rgb_presets WHERE id = :id")
-    suspend fun deletePresetById(id: Int)
-
     @Query("SELECT * FROM device_aliases")
     fun getAllDeviceAliases(): Flow<List<RgbDeviceAlias>>
 

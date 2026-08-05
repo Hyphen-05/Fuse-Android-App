@@ -5,7 +5,6 @@ import com.example.ScannedRgbDevice
 import com.example.CctCorrectionProfile
 import com.example.ActiveDeviceState
 import com.example.db.ColorCalibration
-import com.example.db.RgbPreset
 import com.example.db.CustomMode
 import com.example.domain.model.AppScene
 import com.example.core.animation.ProceduralSceneParams
@@ -208,7 +207,6 @@ data class TelemetryState(
 // DB/prefs-backed reference data — category (b), each its own StateFlow,
 // combined at the point of consumption rather than folded into RgbUiState:
 //   scenes: StateFlow<List<AppScene>>
-//   savedPresets: StateFlow<List<RgbPreset>>
 //   savedAliases: StateFlow<List<RgbDeviceAlias>>
 //   savedDevices: StateFlow<List<SavedDevice>>
 //   customModes: StateFlow<List<CustomMode>>
@@ -296,7 +294,6 @@ sealed interface RgbIntent {
     data class RenameScene(val sceneId: String, val newName: String) : RgbIntent
     data class SaveAiSceneSequence(val params: ProceduralSceneParams, val sceneName: String, val explanation: String) : RgbIntent
     data class UpdateAiSceneSequence(val sceneId: String, val params: ProceduralSceneParams, val sceneName: String) : RgbIntent
-    data class ApplyPreset(val preset: RgbPreset) : RgbIntent
     data class SavePreset(val name: String) : RgbIntent
     data class DeletePreset(val id: Int) : RgbIntent
     data class UpdateCustomMode(val customMode: CustomMode) : RgbIntent

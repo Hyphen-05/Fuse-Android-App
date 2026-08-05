@@ -2,7 +2,6 @@ package com.example.data.repository
 
 import kotlinx.coroutines.flow.Flow
 import com.example.db.CustomMode
-import com.example.db.RgbPreset
 import com.example.db.RgbDeviceAlias
 import com.example.db.SavedDevice
 import com.example.db.ColorCalibration
@@ -10,18 +9,11 @@ import com.example.db.RgbDao
 import com.example.domain.repository.RgbDatabaseRepository
 
 class RgbDatabaseRepositoryImpl(private val rgbDao: RgbDao) : RgbDatabaseRepository {
-    override val allPresets: Flow<List<RgbPreset>> = rgbDao.getAllPresets()
     override val allDeviceAliases: Flow<List<RgbDeviceAlias>> = rgbDao.getAllDeviceAliases()
     override val allSavedDevices: Flow<List<SavedDevice>> = rgbDao.getAllSavedDevices()
     override val allCustomModes: Flow<List<CustomMode>> = rgbDao.getAllCustomModes()
     override val allColorCalibrations: Flow<List<ColorCalibration>> = rgbDao.getAllColorCalibrations()
 
-    override suspend fun insertPreset(preset: RgbPreset) {
-        rgbDao.insertPreset(preset)
-    }
-    override suspend fun deletePresetById(id: Int) {
-        rgbDao.deletePresetById(id)
-    }
     override suspend fun saveDeviceAlias(macAddress: String, name: String) {
         rgbDao.insertDeviceAlias(RgbDeviceAlias(macAddress, name))
     }
