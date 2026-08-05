@@ -2008,6 +2008,10 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetShowFpsTracker(enabled))
     }
 
+    fun clearErrorMessage() {
+        dispatch(RgbIntent.ClearErrorMessage)
+    }
+
     override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
     }

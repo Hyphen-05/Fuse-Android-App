@@ -1,6 +1,8 @@
 package com.example
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.content.pm.PackageManager
@@ -106,6 +108,9 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -208,6 +213,15 @@ fun MainScreen() {
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             viewModel.setActiveFeatureName("Ambiance")
             AmbianceCaptureService.start(context, result.resultCode, result.data!!)
+        }
+    }
+
+    // Launched from the "Enable" action on the Bluetooth-disabled snackbar.
+    val enableBluetoothLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.startScanning()
         }
     }
 
@@ -354,7 +368,28 @@ fun MainScreen() {
         label = "powerButtonIconTint"
     )
 
+    // Scan/connect failures are written to coreControl.errorMessage by the ViewModel; this is the
+    // only place that reads it. Without this the "Scan for Devices" button just silently no-ops
+    // when Bluetooth is off.
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(uiState.coreControl.errorMessage) {
+        val message = uiState.coreControl.errorMessage ?: return@LaunchedEffect
+        val offerEnable = message.contains("Bluetooth is disabled", ignoreCase = true)
+        val result = snackbarHostState.showSnackbar(
+            message = message,
+            actionLabel = if (offerEnable) "Enable" else null,
+            withDismissAction = !offerEnable
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            runCatching {
+                enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            }
+        }
+        viewModel.clearErrorMessage()
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 navigationIcon = {},

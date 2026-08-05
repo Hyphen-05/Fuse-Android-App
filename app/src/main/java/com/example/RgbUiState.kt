@@ -244,6 +244,8 @@ sealed interface RgbIntent {
     data class SetModeSpeed(val speed: Int) : RgbIntent
     data class SetWarmth(val percent: Int) : RgbIntent
     data class SetShowFpsTracker(val enabled: Boolean) : RgbIntent
+    // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.
+    object ClearErrorMessage : RgbIntent
 
     // --- Commands & Protocol (verified signatures) ---
     data class QueueCommand(val command: ByteArray) : RgbIntent {
