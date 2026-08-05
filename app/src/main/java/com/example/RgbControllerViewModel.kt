@@ -22,7 +22,6 @@ import android.util.Log
 import androidx.lifecycle.viewModelScope
 import com.example.db.AppDatabase
 import com.example.db.RgbDeviceAlias
-import com.example.db.RgbPreset
 import com.example.db.SavedDevice
 import com.example.db.CustomMode
 import com.example.db.ColorCalibration
@@ -797,8 +796,7 @@ class RgbControllerViewModel(
         }
     }
 
-    // Preset list, Device alias list, and Saved devices list from Room
-    val savedPresets: StateFlow<List<RgbPreset>>
+    // Device alias list and Saved devices list from Room
     val savedAliases: StateFlow<List<RgbDeviceAlias>>
     val savedDevices: StateFlow<List<SavedDevice>>
     val customModes: StateFlow<List<CustomMode>>
@@ -831,12 +829,6 @@ class RgbControllerViewModel(
         adbControlSink.listener = this
         loadOverridesFromPrefs()
         _scenes.value = prefsRepo.loadScenes()
-
-        savedPresets = repository.allPresets.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
 
         savedAliases = repository.allDeviceAliases.stateIn(
             scope = viewModelScope,
@@ -1120,18 +1112,6 @@ class RgbControllerViewModel(
             }
         }
 
-        // Initialize with default color preset in database if empty
-        viewModelScope.launch {
-            savedPresets.collect { list ->
-                if (list.isEmpty()) {
-                    repository.insertPreset(RgbPreset(name = "Chill Sunset", red = 255, green = 110, blue = 40, brightness = 90))
-                    repository.insertPreset(RgbPreset(name = "Cyberpunk Neon", red = 255, green = 0, blue = 255, brightness = 100))
-                    repository.insertPreset(RgbPreset(name = "Forest Green", red = 0, green = 255, blue = 80, brightness = 75))
-                    repository.insertPreset(RgbPreset(name = "Ocean Breeze", red = 0, green = 150, blue = 255, brightness = 80))
-                }
-            }
-        }
-
         // Background auto-connection scanner loop
         viewModelScope.launch {
             while (true) {
@@ -1189,9 +1169,8 @@ class RgbControllerViewModel(
         viewModelScope.launch {
             kotlinx.coroutines.flow.combine(
                 repository.allSavedDevices,
-                repository.allCustomModes,
-                repository.allPresets
-            ) { _, _, _ -> true }
+                repository.allCustomModes
+            ) { _, _ -> true }
                 .collect {
                     _uiState.update { s -> s.copy(coreControl = s.coreControl.copy(isDbLoaded = true)) }
                 }
@@ -2236,29 +2215,6 @@ class RgbControllerViewModel(
     fun applyScene(scene: AppScene, isReversing: Boolean = false) = sceneManager.applyScene(scene, isReversing)
     // --- ROOM DATABASE OPERATIONS ---
 
-    fun savePreset(name: String) {
-        val state = _uiState.value
-        viewModelScope.launch(Dispatchers.IO) {
-            val preset = RgbPreset(
-                name = name,
-                red = state.coreControl.red,
-                green = state.coreControl.green,
-                blue = state.coreControl.blue,
-                brightness = state.coreControl.brightness,
-                modeIndex = state.coreControl.modeIndex
-            )
-            repository.insertPreset(preset)
-            addLog("Saved Preset: '$name'")
-        }
-    }
-
-    fun deletePreset(id: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deletePresetById(id)
-            addLog("Deleted Preset ID: $id")
-        }
-    }
-
     fun saveColorCalibration(calibration: ColorCalibration) {
         dispatch(RgbIntent.SaveColorCalibration(calibration))
     }
@@ -2270,29 +2226,6 @@ class RgbControllerViewModel(
     // fit3x3Matrix wrapper removed (Phase 6): it had zero call sites anywhere in the app or test
     // tree — all callers already use com.example.core.calibration.CalibrationMatrixSolver.fit3x3Matrix
     // directly (see CoreExtractionTest.kt / CalibrationMatrixSolverTest.kt).
-
-    fun applyPreset(preset: RgbPreset) {
-        _uiState.update {
-            it.copy(
-                coreControl = it.coreControl.copy(
-                    red = preset.red,
-                    green = preset.green,
-                    blue = preset.blue,
-                    brightness = preset.brightness,
-                    modeIndex = preset.modeIndex
-                )
-            )
-        }
-                    prefsRepo.putAppStatePrefInt("red", preset.red)
-            prefsRepo.putAppStatePrefInt("green", preset.green)
-            prefsRepo.putAppStatePrefInt("blue", preset.blue)
-            prefsRepo.putAppStatePrefInt("brightness", preset.brightness)
-            prefsRepo.putAppStatePrefInt("mode_index", preset.modeIndex)
-        addLog("Applied Preset: '${preset.name}'")
-        
-        // Send commands
-        syncPhysicalBulb()
-    }
 
     fun saveDeviceAlias(address: String, customName: String) {
         dispatch(RgbIntent.SaveDeviceAlias(address, customName))

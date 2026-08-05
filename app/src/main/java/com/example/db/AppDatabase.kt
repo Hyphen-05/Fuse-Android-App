@@ -6,6 +6,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.db.SavedDevice
 
+// RgbPreset stays registered even though the colour-preset feature was removed: dropping the
+// entity changes the schema, which forces a version bump, and this database falls back to a
+// destructive migration — so removing an unused table would wipe saved devices, aliases,
+// custom modes and calibrations on upgrade. The rgb_presets table is simply left dormant.
 @Database(entities = [RgbPreset::class, RgbDeviceAlias::class, SavedDevice::class, CustomMode::class, ColorCalibration::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun rgbDao(): RgbDao

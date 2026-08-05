@@ -144,7 +144,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.db.RgbPreset
 import com.example.ui.components.ColorWheel
 import com.example.ui.components.SettingsTabContent
 import com.example.ui.components.joyfulPress
@@ -200,7 +199,6 @@ fun MainScreen() {
     val viewModel: RgbControllerViewModel = viewModel(factory = factory)
     val uiState by viewModel.uiState.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
-    val presets by viewModel.savedPresets.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
     val customModes by viewModel.customModes.collectAsState()
     val connectionStates by appContainer.connectionManager.connectionStates.collectAsState()
@@ -226,7 +224,6 @@ fun MainScreen() {
     }
 
     val disconnectAllInteractionSource = remember { MutableInteractionSource() }
-    val savePresetInteractionSource = remember { MutableInteractionSource() }
     val saveAliasInteractionSource = remember { MutableInteractionSource() }
     val saveCalibrationInteractionSource = remember { MutableInteractionSource() }
 
@@ -281,10 +278,6 @@ fun MainScreen() {
         }
     }
 
-    // Dialog state for Save Preset
-    var showSavePresetDialog by rememberSaveable { mutableStateOf(false) }
-    var presetNameInput by rememberSaveable { mutableStateOf("") }
-
     // Dialog state for Save Device Alias
     var deviceToAliasAddress by rememberSaveable { mutableStateOf<String?>(null) }
     var deviceAliasInput by rememberSaveable { mutableStateOf("") }
@@ -298,11 +291,15 @@ fun MainScreen() {
     // this is a manual reveal, not a setting.
     var experimentalUnlocked by rememberSaveable { mutableStateOf(false) }
 
-    // Real FPS reported by a connected device, or null when nothing is reporting. Never invent a
-    // number here — with no telemetry we show the target rate instead (see fpsLabel below).
+    // Real writes-per-second, sampled at 1Hz per device by DeviceWriteManager. Only currently
+    // connected addresses count — deviceAchievedFps keeps its last entry for a device after it
+    // drops, and a stale value from a disconnected device could otherwise win the max. Null means
+    // nothing is connected, i.e. there is genuinely no rate to report; 0 is a real reading.
     val achievedFps: Int? = remember(uiState.connectivity.deviceConnectionStates, telemetry.deviceAchievedFps) {
-        val anyConnected = uiState.connectivity.deviceConnectionStates.any { it.value == BleConnectionState.CONNECTED }
-        if (anyConnected) telemetry.deviceAchievedFps.values.maxOrNull()?.takeIf { it > 0 } else null
+        val connected = uiState.connectivity.deviceConnectionStates
+            .filterValues { it == BleConnectionState.CONNECTED }
+            .keys
+        telemetry.deviceAchievedFps.filterKeys { it in connected }.values.maxOrNull()
     }
     val targetFps = when (uiState.coreControl.activeFeatureName) {
         "Ambiance" -> uiState.ambianceSettings.ambianceUpdateRateCapFps
@@ -591,52 +588,6 @@ fun MainScreen() {
                     ExpressiveConnectionLoadingIndicator()
                 }
             }
-
-    // --- Save Preset Dialog ---
-    if (showSavePresetDialog) {
-        AlertDialog(
-            onDismissRequest = { showSavePresetDialog = false },
-            title = { Text("Save Current Color Preset") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Name your custom color settings to save them locally in the database.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    OutlinedTextField(
-                        value = presetNameInput,
-                        onValueChange = { presetNameInput = it },
-                        label = { Text("Preset Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("preset_name_input_field")
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (presetNameInput.isNotBlank()) {
-                            viewModel.savePreset(presetNameInput.trim())
-                            showSavePresetDialog = false
-                        }
-                    },
-                    interactionSource = savePresetInteractionSource,
-                    modifier = Modifier
-                        .height(44.dp)
-                        .testTag("save_preset_confirm_btn")
-                        .joyfulPress(savePresetInteractionSource),
-                    shape = CircleShape
-                ) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSavePresetDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 
     // --- Edit Device Alias Dialog ---
     if (deviceToAliasAddress != null) {

@@ -47,12 +47,37 @@ class DeviceWriteManager(
     val writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
     var currentPacingMs = pacingMsProvider()
 
-    private var framesSent = 0
-    private var lastFpsTime = System.currentTimeMillis()
+    // Incremented from the GATT callback thread, drained from the sampler coroutine below.
+    private val framesSent = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var pendingJob: Job? = null
 
     private var consecutiveWatchdogTriggers = 0
     private var lastQueueLogTime = 0L
+
+    /**
+     * Samples the achieved write rate on a fixed 1Hz tick. This used to be computed inside
+     * [onWriteCompleted], which meant the counter only advanced when a write landed — once the
+     * strip went idle the last reported rate stuck in the telemetry map forever, so the FPS readout
+     * froze at whatever it had been doing rather than dropping to 0. Ticking independently reports
+     * a real 0 when nothing is being sent. Cancelled with [connectionScope] on disconnect.
+     */
+    init {
+        connectionScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(1000L)
+                val fps = framesSent.getAndSet(0)
+                onFpsUpdate(address, fps)
+                if (fps > 0) {
+                    // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
+                    // device during a real session.
+                    com.example.DiagnosticLogger.log(
+                        "DeviceWriteManager",
+                        "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
+                    )
+                }
+            }
+        }
+    }
 
     /**
      * [priority] and [bypassPacing] implement the peak-hold/peak-priority write rule
@@ -119,21 +144,7 @@ class DeviceWriteManager(
         consecutiveWatchdogTriggers = 0
         lastWriteTime = System.currentTimeMillis()
         isWriting = false
-        framesSent++
-        val now = System.currentTimeMillis()
-        if (now - lastFpsTime >= 1000L) {
-            val fps = framesSent
-            framesSent = 0
-            lastFpsTime = now
-            onFpsUpdate(address, fps)
-            // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per device
-            // during a real session — reuses this existing ~1s cadence rather than adding a new
-            // timer, so it's free.
-            com.example.DiagnosticLogger.log(
-                "DeviceWriteManager",
-                "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
-            )
-        }
+        framesSent.incrementAndGet()
         tryWrite()
     }
 

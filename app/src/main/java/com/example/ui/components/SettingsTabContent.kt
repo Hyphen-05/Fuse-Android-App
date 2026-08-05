@@ -266,17 +266,22 @@ fun LazyListScope.SettingsTabContent(
                         )
                     }
                     Text(
-                        text = "Sets a small final smoothing touch-up on top of the main Response Speed timing. Keep this low (under 30ms) for responsiveness.",
+                        text = "The main colour smoothing time constant. Response Speed scales it (Fast ×0.2, Slow ×2.0). Higher means slower, calmer colour changes.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // Range must cover what the presets actually set (150-350ms). It used to stop
+                    // at 60 with copy calling this a "small final touch-up" — that description
+                    // belongs to AmbianceOutputInterpolator's hardcoded per-tick ease, not to this
+                    // value, and the mismatch meant touching the slider after picking Chill (350ms)
+                    // silently clamped it to 60 and made the response ~6x snappier.
                     HapticBouncySlider(
                         value = smoothnessMs.toFloat(),
                         onValueChange = { newValue ->
                             viewModel.setAmbianceSmoothnessMs(newValue.toInt())
                         },
-                        valueRange = 0f..60f,
-                        totalSteps = 60,
+                        valueRange = AMBIANCE_SMOOTHNESS_MIN_MS..AMBIANCE_SMOOTHNESS_MAX_MS,
+                        totalSteps = 78,
                         modifier = Modifier.fillMaxWidth().testTag("ambiance_smoothness_slider")
                     )
                 }

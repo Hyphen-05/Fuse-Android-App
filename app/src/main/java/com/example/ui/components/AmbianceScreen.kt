@@ -52,6 +52,16 @@ import com.example.ambiance.AmbianceCaptureState
 import com.example.ambiance.ZoneColor
 import androidx.core.graphics.ColorUtils as AndroidColorUtils
 
+/**
+ * Top of the ambiance smoothness range, shared by the Settings slider and the idle-preview
+ * normalisation so the two can't drift apart again. `smoothnessMs` is the primary EMA time
+ * constant in [com.example.ambiance.AmbianceProcessor] (`effectiveTauMs = smoothnessMs *
+ * tauMultiplier`), not a final touch-up, so the range has to cover what the presets actually use —
+ * 150-350ms today, with headroom above.
+ */
+const val AMBIANCE_SMOOTHNESS_MAX_MS = 400f
+const val AMBIANCE_SMOOTHNESS_MIN_MS = 10f
+
 data class AmbiancePreset(
     val id: String,
     val name: String,
@@ -73,7 +83,7 @@ fun derivePaletteFromParameters(
     brightnessCompensation: Float
 ): List<Color> {
     // 1. Normalize inputs to 0f..1f against their actual boundaries
-    val sFrac = (smoothnessMs.toFloat() / 350f).coerceIn(0f, 1f)
+    val sFrac = (smoothnessMs.toFloat() / AMBIANCE_SMOOTHNESS_MAX_MS).coerceIn(0f, 1f)
     val dbFrac = (noiseDeadband / 0.5f).coerceIn(0f, 1f)
     val speedFrac = responseSpeed.coerceIn(0f, 1f)
 
@@ -152,6 +162,11 @@ fun AmbianceScreen(
     var newPresetName by remember { mutableStateOf("") }
 
     // Define 4 built-in presets
+    // sceneCutSensitivity is a *threshold*: AmbianceProcessor does `isSceneCut = aggDelta >
+    // sceneCutSensitivity`, so a higher number means fewer instant cuts. The values below were
+    // originally ordered as if higher meant more sensitive, which put Gaming ("snappy") at the
+    // least cut-prone end and Chill ("slow soothing") at the most. Reordered to match the
+    // descriptions; the pref key stays scene_cut_sensitivity for compat.
     val builtInPresets = remember {
         listOf(
             AmbiancePreset(
@@ -173,7 +188,7 @@ fun AmbianceScreen(
                 smoothnessMs = 210,
                 saturationBoost = 1.4f,
                 brightnessCompensation = 1.1f,
-                sceneCutSensitivity = 100.0f,
+                sceneCutSensitivity = 120.0f,
                 noiseDeadband = 0.14f
             ),
             AmbiancePreset(
@@ -184,7 +199,7 @@ fun AmbianceScreen(
                 smoothnessMs = 200,
                 saturationBoost = 1.3f,
                 brightnessCompensation = 1.0f,
-                sceneCutSensitivity = 130.0f,
+                sceneCutSensitivity = 90.0f,
                 noiseDeadband = 0.10f
             ),
             AmbiancePreset(
@@ -195,7 +210,7 @@ fun AmbianceScreen(
                 smoothnessMs = 350,
                 saturationBoost = 1.2f,
                 brightnessCompensation = 1.0f,
-                sceneCutSensitivity = 90.0f,
+                sceneCutSensitivity = 140.0f,
                 noiseDeadband = 0.18f
             )
         )
@@ -226,7 +241,7 @@ fun AmbianceScreen(
     // itself is always one steady linear sweep, never stepping/snapping/jumping, since nothing
     // in the real ambiance pipeline moves that way (AmbianceOutputInterpolator.easeStep just
     // exponentially eases toward a target color; there's no rotation or spring bounce).
-    val gradientDurationMs = (2000f + (uiState.ambianceSettings.ambianceSmoothnessMs.toFloat() / 350f).coerceIn(0f, 1f) * 8000f).toInt()
+    val gradientDurationMs = (2000f + (uiState.ambianceSettings.ambianceSmoothnessMs.toFloat() / AMBIANCE_SMOOTHNESS_MAX_MS).coerceIn(0f, 1f) * 8000f).toInt()
     val infiniteTransition = rememberInfiniteTransition(label = "ambiance_gradient")
     val angleProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
