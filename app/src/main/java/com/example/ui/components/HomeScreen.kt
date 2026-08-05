@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,8 +55,8 @@ fun HomeScreen(
 
     val activeComposeColor = Color(uiState.coreControl.red, uiState.coreControl.green, uiState.coreControl.blue)
 
-    var showCreateSceneDialogFromHome by remember { mutableStateOf(false) }
-    var selectedSceneId by remember { mutableStateOf<String?>(null) }
+    var showCreateSceneDialogFromHome by rememberSaveable { mutableStateOf(false) }
+    var selectedSceneId by rememberSaveable { mutableStateOf<String?>(null) }
     var sceneToDelete by remember { mutableStateOf<AppScene?>(null) }
     var sceneToRename by remember { mutableStateOf<AppScene?>(null) }
     var sceneToEdit by remember { mutableStateOf<AppScene?>(null) }

@@ -268,15 +268,15 @@ fun MainScreen() {
     }
 
     // Dialog state for Save Preset
-    var showSavePresetDialog by remember { mutableStateOf(false) }
-    var presetNameInput by remember { mutableStateOf("") }
+    var showSavePresetDialog by rememberSaveable { mutableStateOf(false) }
+    var presetNameInput by rememberSaveable { mutableStateOf("") }
 
     // Dialog state for Save Device Alias
-    var deviceToAliasAddress by remember { mutableStateOf<String?>(null) }
-    var deviceAliasInput by remember { mutableStateOf("") }
+    var deviceToAliasAddress by rememberSaveable { mutableStateOf<String?>(null) }
+    var deviceAliasInput by rememberSaveable { mutableStateOf("") }
 
-    var selectedTab by remember { mutableStateOf(0) }
-    var showModeCaptureScreen by remember { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var showModeCaptureScreen by rememberSaveable { mutableStateOf(false) }
     // Unlocked by tapping the version footer at the bottom of Settings 7 times, same gesture as
     // stock Android's "tap Build number to enable Developer options" — familiar to anyone who'd
     // recognize the pattern, invisible to everyone else. Tapping the same sequence again re-hides
@@ -284,32 +284,19 @@ fun MainScreen() {
     // this is a manual reveal, not a setting.
     var experimentalUnlocked by rememberSaveable { mutableStateOf(false) }
 
-    var liveFps by remember { mutableStateOf(32) }
-    if (uiState.coreControl.showFpsTracker && uiState.coreControl.isPowerOn) {
-        LaunchedEffect(uiState.coreControl.activeFeatureName, telemetry.deviceAchievedFps) {
-            val connectedDevices = uiState.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
-            val achievedFps = if (connectedDevices.isNotEmpty()) {
-                telemetry.deviceAchievedFps.values.maxOrNull() ?: 0
-            } else 0
-
-            if (achievedFps > 0) {
-                liveFps = achievedFps
-            } else {
-                val baseFps = when (uiState.coreControl.activeFeatureName) {
-                    "Ambiance" -> uiState.ambianceSettings.ambianceUpdateRateCapFps
-                    "Music" -> 45
-                    "Modes" -> 35
-                    "Colour", "CCT" -> 32
-                    else -> 32
-                }
-                while (true) {
-                    val fluctuation = (-1..1).random()
-                    liveFps = (baseFps + fluctuation).coerceAtLeast(1)
-                    kotlinx.coroutines.delay(1000L)
-                }
-            }
-        }
+    // Real FPS reported by a connected device, or null when nothing is reporting. Never invent a
+    // number here — with no telemetry we show the target rate instead (see fpsLabel below).
+    val achievedFps: Int? = remember(uiState.connectivity.deviceConnectionStates, telemetry.deviceAchievedFps) {
+        val anyConnected = uiState.connectivity.deviceConnectionStates.any { it.value == BleConnectionState.CONNECTED }
+        if (anyConnected) telemetry.deviceAchievedFps.values.maxOrNull()?.takeIf { it > 0 } else null
     }
+    val targetFps = when (uiState.coreControl.activeFeatureName) {
+        "Ambiance" -> uiState.ambianceSettings.ambianceUpdateRateCapFps
+        "Music" -> 45
+        "Modes" -> 35
+        else -> 32
+    }
+    val fpsLabel = achievedFps?.let { "$it Fps" } ?: "~$targetFps Fps target"
 
     // Settings tab local states
     var settingsModeSelectIndex by remember { mutableStateOf(1) }
@@ -386,10 +373,10 @@ fun MainScreen() {
                             ),
                             color = topBarTitleColor
                         )
-                        val subtitleText = remember(uiState.coreControl.isPowerOn, uiState.coreControl.activeFeatureName, uiState.coreControl.showFpsTracker, liveFps) {
+                        val subtitleText = remember(uiState.coreControl.isPowerOn, uiState.coreControl.activeFeatureName, uiState.coreControl.showFpsTracker, fpsLabel) {
                             if (uiState.coreControl.isPowerOn) {
                                 if (uiState.coreControl.showFpsTracker) {
-                                    "Active • ${uiState.coreControl.activeFeatureName} • $liveFps Fps"
+                                    "Active • ${uiState.coreControl.activeFeatureName} • $fpsLabel"
                                 } else {
                                     "Active • ${uiState.coreControl.activeFeatureName}"
                                 }
