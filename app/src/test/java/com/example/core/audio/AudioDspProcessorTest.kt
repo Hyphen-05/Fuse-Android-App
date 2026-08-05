@@ -345,4 +345,96 @@ class AudioDspProcessorTest {
 
         assertEquals(0f, maxHue, 0.5f)
     }
+
+    // ========================================================================
+    // Per-beat hue nudge ("rubber band")
+    // ========================================================================
+
+    /**
+     * Hue with every other colour source switched off, expressed as a signed offset in (-180, 180]
+     * so a backwards nudge reads as a negative number rather than wrapping to ~330. [holdMs] is how
+     * long to keep sampling after the transient, [transients] how many loud frames to drive.
+     */
+    private fun signedHueTrace(
+        settings: AudioSettingsState,
+        holdMs: Long = 200L,
+        transients: Int = 1
+    ): List<Float> {
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        var now = 0L
+        repeat(30) {
+            processor.process(uniformFrame(1f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+            now += 20L
+        }
+        val trace = mutableListOf<Float>()
+        repeat(transients) {
+            processor.process(uniformFrame(80f, backend = AudioBackend.AUDIO_RECORD), settings, now)
+            now += 20L
+            val until = now + (holdMs / transients)
+            while (now <= until) {
+                val result = processor.process(uniformFrame(5f, backend = AudioBackend.AUDIO_RECORD), settings, now)!!
+                trace.add(if (result.hue > 180f) result.hue - 360f else result.hue)
+                now += 20L
+            }
+        }
+        return trace
+    }
+
+    /** Everything that can move hue is off, so only the nudge under test can shift it. */
+    private val hueIsolated = AudioSettingsState(
+        anchorBeatsPerAdvance = 0,
+        hueAnchorJumpDeg = 0f,
+        hueJumpConfidenceGate = 1.01f,
+        hueBreathRangeDeg = 0f,
+        hueDriftDegPerSec = 0f,
+        hueDegreesPerBeat = 0f,
+        sustainResponse = "NONE",
+        // alpha = (0.10 * colorSpeed).coerceIn(0.01, 1.0) — saturating it makes the hue EMA track
+        // the target exactly, so the assertions below measure the nudge and not the smoothing.
+        visualizerColorSpeed = 10f
+    )
+
+    @Test
+    fun `a beat pushes the hue backward by hueBeatNudgeDeg`() {
+        val settings = hueIsolated.copy(
+            hueBeatNudgeDeg = 30f,
+            // Effectively no relaxation over the sampling window, isolating the kick itself.
+            hueNudgeReturnMs = 100_000f
+        )
+
+        val trace = signedHueTrace(settings)
+
+        assertEquals(-30f, trace.min(), 2.0f)
+    }
+
+    @Test
+    fun `the hue nudge relaxes back toward zero`() {
+        val settings = hueIsolated.copy(hueBeatNudgeDeg = 30f, hueNudgeReturnMs = 50f)
+
+        val trace = signedHueTrace(settings, holdMs = 600L)
+
+        // Kicked, then worked off: several relaxation time constants later it's back at the anchor.
+        assertTrue("expected a backward kick, got min=${trace.min()}", trace.min() < -10f)
+        assertEquals(0f, trace.last(), 1.0f)
+    }
+
+    @Test
+    fun `stacked beats cannot wind the hue nudge past twice its size`() {
+        val settings = hueIsolated.copy(hueBeatNudgeDeg = 30f, hueNudgeReturnMs = 100_000f)
+
+        val trace = signedHueTrace(settings, holdMs = 400L, transients = 6)
+
+        assertTrue("clamp breached: min=${trace.min()}", trace.min() >= -60f - 2.0f)
+    }
+
+    @Test
+    fun `a zero nudge leaves hue bit-identical to before the mechanism existed`() {
+        // Regression guard for every pre-existing preset: they all carry hueBeatNudgeDeg = 0, and
+        // at 0 neither the relaxation nor the kick may perturb the trace by any amount, whatever
+        // hueNudgeReturnMs happens to be.
+        val baseline = signedHueTrace(hueIsolated)
+        val withReturnMsSet = signedHueTrace(hueIsolated.copy(hueBeatNudgeDeg = 0f, hueNudgeReturnMs = 250f))
+
+        assertEquals(baseline, withReturnMsSet)
+    }
 }

@@ -73,7 +73,25 @@ class AudioSettingsReducerTest {
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("flash_range", 0.5f)))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", 90f)))
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("sustain_response", "SAT_BOOST")))
-        assertEquals(31, effects.size)
+        assertEquals(33, effects.size)
+    }
+
+    @Test
+    fun setVisualizerPreset_everyExistingPreset_leavesTheHueBeatNudgeDisabled() {
+        // The nudge is additive machinery for a preset built around it; every preset that predates
+        // it must stay at 0 so its behaviour is unchanged.
+        val presets = listOf(
+            "Punchy", "Smooth Flow", "Bass Thump", "Ambient Chill",
+            "Strobe Blast", "Laser Sharp", "Beat Only", "Default"
+        )
+        presets.forEach { preset ->
+            val (newState, effects) = reduce(intent = RgbIntent.SetVisualizerPreset(preset))
+            assertEquals("$preset should not nudge", 0f, newState.audioSettings.hueBeatNudgeDeg)
+            assertTrue(
+                "$preset should persist a zero nudge",
+                effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", 0f))
+            )
+        }
     }
 
     @Test
