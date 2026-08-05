@@ -144,13 +144,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.ColorWheel
 import com.example.ui.components.SettingsTabContent
 import com.example.ui.components.joyfulPress
+import com.example.ui.components.rememberExpressiveHapticType
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import com.example.ui.components.ExpressiveFabMenu
-import com.example.ui.components.ExpressivePowerButtonGroup
 import com.example.ui.components.ExpressiveSlider
 import com.example.ui.components.HapticBouncySlider
 import com.example.ui.theme.MyApplicationTheme
@@ -197,7 +196,6 @@ fun MainScreen() {
     val uiState by viewModel.uiState.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
-    val customModes by viewModel.customModes.collectAsState()
     val connectionStates by appContainer.connectionManager.connectionStates.collectAsState()
     val hapticFeedback = LocalHapticFeedback.current
 
@@ -220,7 +218,6 @@ fun MainScreen() {
         }
     }
 
-    val disconnectAllInteractionSource = remember { MutableInteractionSource() }
     val saveAliasInteractionSource = remember { MutableInteractionSource() }
     val saveCalibrationInteractionSource = remember { MutableInteractionSource() }
 
@@ -305,12 +302,6 @@ fun MainScreen() {
         else -> 32
     }
     val fpsLabel = achievedFps?.let { "$it Fps" } ?: "~$targetFps Fps target"
-
-    // Settings tab local states
-    var settingsModeSelectIndex by remember { mutableStateOf(1) }
-    var settingsModeCustomHexInput by remember { mutableStateOf("") }
-    var settingsAudioSelectIndex by remember { mutableStateOf(1) }
-    var settingsAudioCustomHexInput by remember { mutableStateOf("") }
 
     // Ambient background pulse for active light preview
     val infiniteTransition = rememberInfiniteTransition(label = "ambient_pulse")
@@ -821,21 +812,7 @@ fun ExpressiveNavigationBar(
     onTabSelected: (Int) -> Unit
 ) {
     val hapticFeedback = LocalHapticFeedback.current
-    val hapticType = remember {
-        runCatching {
-            val companion = HapticFeedbackType.Companion
-            val method = companion::class.java.getMethod("getSegmentTick")
-            method.invoke(companion) as HapticFeedbackType
-        }.getOrElse {
-            runCatching {
-                val companion = HapticFeedbackType.Companion
-                val method = companion::class.java.getMethod("getSegmentFrequentTick")
-                method.invoke(companion) as HapticFeedbackType
-            }.getOrElse {
-                HapticFeedbackType.TextHandleMove
-            }
-        }
-    }
+    val hapticType = rememberExpressiveHapticType()
 
     LaunchedEffect(selectedTab) {
         hapticFeedback.performHapticFeedback(hapticType)

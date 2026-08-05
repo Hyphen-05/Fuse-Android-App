@@ -2001,6 +2001,13 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.ClearErrorMessage)
     }
 
+    /**
+     * Last saved pacing for a device, for UI that needs a value before the live one appears in
+     * `connectivity.devicePacingMs`. Exists so the Settings screen doesn't have to build its own
+     * AppPreferencesRepositoryImpl inside a composable and bypass AppContainer's DI.
+     */
+    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, 100)
+
     override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
     }
