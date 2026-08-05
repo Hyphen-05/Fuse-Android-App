@@ -1,40 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Bulb head -->
-    <path
-        android:fillColor="#AEC6FF"
-        android:pathData="M 54,43.5 m -16,0 a 16,16 0 1,1 32,0 a 16,16 0 1,1 -32,0" />
+    <!-- RGB control ring: open arc, blue -> green -> red sweep, closed loop to avoid a seam at the round caps -->
+    <group
+        android:name="ring"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="125">
+        <path
+            android:pathData="M73,54 A19,19 0 1,1 53.83,35"
+            android:strokeWidth="9"
+            android:strokeLineCap="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="sweep"
+                    android:centerX="54"
+                    android:centerY="54">
+                    <item android:offset="0" android:color="#4C8DFF" />
+                    <item android:offset="0.1273" android:color="#4C9FFF" />
+                    <item android:offset="0.2545" android:color="#4CD9CF" />
+                    <item android:offset="0.3743" android:color="#4CD98D" />
+                    <item android:offset="0.5016" android:color="#D6E85A" />
+                    <item android:offset="0.6288" android:color="#F2B854" />
+                    <item android:offset="0.7486" android:color="#F2545B" />
+                    <item android:offset="1" android:color="#4C8DFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
 
-    <!-- Neck -->
+    <!-- Power line through the arc's gap, CCT gradient white -> warm, well inside the safe circle -->
     <path
-        android:fillColor="#93B4FA"
-        android:pathData="M 46,57.5 H 62 V 69.5 H 46 Z" />
-
-    <!-- Base cap -->
-    <path
-        android:fillColor="#E1E3ED"
-        android:pathData="M 47,69.5 H 61 V 74.5 H 47 Z" />
-    <path
-        android:fillColor="#C7CADC"
-        android:pathData="M 49,74.5 H 59 V 78.5 H 49 Z" />
-    <path
-        android:fillColor="#9CA2B8"
-        android:pathData="M 50,78.5 C 50,81 58,81 58,78.5 Z" />
-
-    <!-- RGB filament cluster -->
-    <path
-        android:fillColor="#F2545B"
-        android:pathData="M 48,38.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
-    <path
-        android:fillColor="#5BC98D"
-        android:pathData="M 60,38.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
-    <path
-        android:fillColor="#4C8DFF"
-        android:pathData="M 54,49.5 m -6.5,0 a 6.5,6.5 0 1,1 13,0 a 6.5,6.5 0 1,1 -13,0" />
+        android:pathData="M58.63,79.58 L53.11,49.08"
+        android:strokeWidth="8"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="58.63"
+                android:startY="79.58"
+                android:endX="53.11"
+                android:endY="49.08"
+                android:startColor="#FFFFFF"
+                android:endColor="#FFB454" />
+        </aapt:attr>
+    </path>
 
 </vector>
