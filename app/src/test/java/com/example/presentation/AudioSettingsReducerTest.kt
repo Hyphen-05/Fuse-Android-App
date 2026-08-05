@@ -200,6 +200,26 @@ class AudioSettingsReducerTest {
     }
 
     @Test
+    fun startMusicSync_stopsAmbianceCaptureFirstWithoutRestoringState() {
+        val (_, effects) = reduce(
+            intent = RgbIntent.StartMusicSync("phone_mic"),
+            targetAddresses = listOf("AA:BB")
+        )
+
+        // Must come before the SaveDeviceState/SaveAudioPref work: StopAmbianceCapture(false)
+        // clears the AMBIANCE deviceAutomationMode entries, and the ambiance deactivation
+        // collector would otherwise restore over the state music sync just saved.
+        assertEquals(AudioSideEffect.StopAmbianceCapture(restoreState = false), effects.first())
+    }
+
+    @Test
+    fun startMusicSync_onboardBleMode_alsoStopsAmbianceCapture() {
+        val (_, effects) = reduce(intent = RgbIntent.StartMusicSync("rolling_1"))
+
+        assertTrue(effects.contains(AudioSideEffect.StopAmbianceCapture(restoreState = false)))
+    }
+
+    @Test
     fun startMusicSync_updatesDeviceStatesMapActiveFeatureNameForEachTarget() {
         val initial = RgbUiState().let {
             it.copy(connectivity = it.connectivity.copy(
