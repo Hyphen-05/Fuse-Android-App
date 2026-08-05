@@ -278,7 +278,7 @@ class AudioSettingsReducerTest {
     // ========================================================================
 
     @Test
-    fun setMusicSensitivity_updatesStateAndBroadcastsCommandWithNoPrefWrite() {
+    fun setMusicSensitivity_updatesStateAndBroadcastsCommand() {
         val (newState, effects) = reduce(intent = RgbIntent.SetMusicSensitivity(77))
 
         assertEquals(77, newState.audioSettings.musicSensitivity)
@@ -287,7 +287,13 @@ class AudioSettingsReducerTest {
                 it.command.contentEquals(DuoCoProtocol.createMusicSensitivityCommand(77)) &&
                 it.logMessage == "Mic Sensitivity 77"
         })
-        assertFalse(effects.any { it is AudioSideEffect.SaveAudioPrefInt })
+    }
+
+    @Test
+    fun setMusicSensitivity_persistsValue() {
+        val (_, effects) = reduce(intent = RgbIntent.SetMusicSensitivity(77))
+
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefInt("music_sensitivity", 77)))
     }
 
     // ========================================================================
@@ -591,6 +597,21 @@ class AudioSettingsReducerTest {
         val (_, effects) = reduce(intent = RgbIntent.ResetAudioPipelineSettings)
 
         assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("mid_flux_weight", 0.25f)))
+    }
+
+    @Test
+    fun resetAudioPipelineSettings_resetsSensitivityAndPushesItToHardware() {
+        val dirty = RgbUiState().let {
+            it.copy(audioSettings = it.audioSettings.copy(musicSensitivity = 90))
+        }
+        val (newState, effects) = reduce(state = dirty, intent = RgbIntent.ResetAudioPipelineSettings)
+
+        assertEquals(50, newState.audioSettings.musicSensitivity)
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefInt("music_sensitivity", 50)))
+        assertTrue(effects.any {
+            it is AudioSideEffect.BroadcastCommand &&
+                it.command.contentEquals(DuoCoProtocol.createMusicSensitivityCommand(50))
+        })
     }
 
     // ========================================================================
