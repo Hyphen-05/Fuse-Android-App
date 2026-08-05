@@ -423,6 +423,7 @@ class RgbControllerViewModel(
             is com.example.presentation.AudioSideEffect.StartAudioEngine -> {
                 viewModelScope.launch(Dispatchers.IO) { startAudioRecording(effect.mode) }
             }
+            is com.example.presentation.AudioSideEffect.StopAmbianceCapture -> stopAmbianceIfActive(effect.restoreState)
         }
     }
 
@@ -1215,6 +1216,13 @@ class RgbControllerViewModel(
             var lastActive = false
             com.example.ambiance.AmbianceCaptureState.isActive.collect { active ->
                 if (active && !lastActive) {
+                    // The other direction of the same exclusion StartMusicSync enforces via
+                    // AudioSideEffect.StopAmbianceCapture: both pipelines broadcast colour, so
+                    // whichever starts second owns the strip. No state restore — ambiance is
+                    // taking these devices over.
+                    if (_uiState.value.audioSettings.musicMode != null) {
+                        stopMusicSync(restoreState = false)
+                    }
                     val targetAddresses = getCurrentlyControlledDeviceAddresses()
                     targetAddresses.forEach { address ->
                         saveDeviceState(address, AutomationType.AMBIANCE)
