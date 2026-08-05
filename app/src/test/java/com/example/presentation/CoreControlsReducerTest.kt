@@ -332,6 +332,24 @@ class CoreControlsReducerTest {
     }
 
     @Test
+    fun clearErrorMessage_clearsMessageWithNoEffects() {
+        val state = RgbUiState(coreControl = CoreControlState(errorMessage = "Bluetooth is disabled or unavailable"))
+        val (newState, effects) = reduce(state = state, intent = RgbIntent.ClearErrorMessage)
+
+        assertNull(newState.coreControl.errorMessage)
+        assertTrue(effects.isEmpty())
+    }
+
+    @Test
+    fun clearErrorMessage_whenAlreadyNull_isNoOp() {
+        val state = RgbUiState()
+        val (newState, effects) = reduce(state = state, intent = RgbIntent.ClearErrorMessage)
+
+        assertSame(state, newState)
+        assertTrue(effects.isEmpty())
+    }
+
+    @Test
     fun startScanning_whenIdle_startsBleScanAndClearsError() {
         val state = RgbUiState(coreControl = CoreControlState(errorMessage = "boom", isDemoMode = false))
         val (newState, effects) = reduce(state = state, intent = RgbIntent.StartScanning)
