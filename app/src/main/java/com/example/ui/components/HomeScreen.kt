@@ -782,13 +782,7 @@ fun DeviceTile(
     val displayName = savedDev?.customName ?: scannedDev?.alias ?: scannedDev?.name ?: "DuoCo Light"
     val isActiveControlled = savedDev?.isActiveControlEnabled ?: true
     val hapticFeedback = LocalHapticFeedback.current
-    val hapticType = remember {
-        runCatching {
-            val companion = HapticFeedbackType.Companion
-            val method = companion::class.java.getMethod("getSegmentTick")
-            method.invoke(companion) as HapticFeedbackType
-        }.getOrElse { HapticFeedbackType.TextHandleMove }
-    }
+    val hapticType = rememberExpressiveHapticType()
 
     val deviceState = uiState.connectivity.deviceStatesMap[address] ?: ActiveDeviceState(
         activeFeatureName = uiState.coreControl.activeFeatureName,

@@ -398,12 +398,11 @@ fun LazyListScope.SettingsTabContent(
 
                 // 5. Update Rate Cap
                 val connectedDevices = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
-                val pacingPrefsRepo = remember { com.example.data.repository.AppPreferencesRepositoryImpl(context) }
                 val slowestDevicePacing = if (connectedDevices.isEmpty()) {
                     0
                 } else {
                     connectedDevices.keys.mapNotNull { address ->
-                        state.connectivity.devicePacingMs[address] ?: pacingPrefsRepo.getPacingPrefInt(address, 100)
+                        state.connectivity.devicePacingMs[address] ?: viewModel.savedPacingMs(address)
                     }.maxOrNull() ?: 0
                 }
                 val maxFps = if (slowestDevicePacing <= 0) 20 else (1000 / slowestDevicePacing).coerceIn(1, 60)

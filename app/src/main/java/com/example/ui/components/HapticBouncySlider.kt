@@ -31,21 +31,7 @@ fun HapticBouncySlider(
     totalSteps: Int
 ) {
     val hapticFeedback = LocalHapticFeedback.current
-    val hapticType = remember {
-        runCatching {
-            val companion = HapticFeedbackType.Companion
-            val method = companion::class.java.getMethod("getSegmentTick")
-            method.invoke(companion) as HapticFeedbackType
-        }.getOrElse {
-            runCatching {
-                val companion = HapticFeedbackType.Companion
-                val method = companion::class.java.getMethod("getSegmentFrequentTick")
-                method.invoke(companion) as HapticFeedbackType
-            }.getOrElse {
-                HapticFeedbackType.TextHandleMove
-            }
-        }
-    }
+    val hapticType = rememberExpressiveHapticType()
 
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()

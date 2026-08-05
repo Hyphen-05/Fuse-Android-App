@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.BleConnectionState
-import com.example.DuoCoProtocol
+import com.example.core.protocol.DuoCoProtocol
 import com.example.RgbControllerViewModel
 import com.example.core.pacing.PacingAutoTuneEngine
 import com.example.core.pacing.TuningAction

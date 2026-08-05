@@ -1,6 +1,9 @@
 package com.example
 
 import com.example.core.animation.ProceduralSceneParams
+// Explicit, not same-package resolution: this file used to pick up the com.example.DuoCoProtocol
+// delegation shim implicitly, which is why the shim couldn't be deleted without breaking it.
+import com.example.core.protocol.DuoCoProtocol
 
 import kotlinx.coroutines.*
 import kotlin.math.abs

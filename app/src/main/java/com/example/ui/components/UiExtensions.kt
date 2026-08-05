@@ -17,6 +17,29 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 
+/**
+ * The crisp per-step tick used for sliders and toggles, resolved by reflection because
+ * `HapticFeedbackType.SegmentTick` only exists on newer Compose Foundation versions. Falls back to
+ * `SegmentFrequentTick`, then to `TextHandleMove`, which exists everywhere.
+ *
+ * Extracted from four near-identical copies of this block (MainActivity, HomeScreen,
+ * ExpressiveSlider, HapticBouncySlider) — HomeScreen's copy was missing the middle fallback.
+ */
+@Composable
+fun rememberExpressiveHapticType(): HapticFeedbackType = remember {
+    runCatching {
+        val companion = HapticFeedbackType.Companion
+        companion::class.java.getMethod("getSegmentTick").invoke(companion) as HapticFeedbackType
+    }.getOrElse {
+        runCatching {
+            val companion = HapticFeedbackType.Companion
+            companion::class.java.getMethod("getSegmentFrequentTick").invoke(companion) as HapticFeedbackType
+        }.getOrElse {
+            HapticFeedbackType.TextHandleMove
+        }
+    }
+}
+
 @Composable
 fun Modifier.joyfulPress(
     interactionSource: MutableInteractionSource,

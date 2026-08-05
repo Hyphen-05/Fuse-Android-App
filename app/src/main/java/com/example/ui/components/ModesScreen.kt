@@ -476,40 +476,6 @@ fun CustomModeGridItem(
 }
 
 @Composable
-fun EqualizerWaveformMini() {
-    val infiniteTransition = rememberInfiniteTransition(label = "eq_mini")
-    
-    val height1 by infiniteTransition.animateFloat(
-        initialValue = 4f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(400, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "h1"
-    )
-
-    val height2 by infiniteTransition.animateFloat(
-        initialValue = 12f,
-        targetValue = 4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(300, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "h2"
-    )
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.height(14.dp)
-    ) {
-        Box(modifier = Modifier.width(2.dp).height(height1.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-        Box(modifier = Modifier.width(2.dp).height(height2.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-    }
-}
-
-@Composable
 fun EditModeDialog(
     mode: CustomMode,
     categories: List<String>,
