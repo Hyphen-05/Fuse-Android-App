@@ -130,6 +130,44 @@ fun ExpandableCategoryCard(
     }
 }
 
+/**
+ * Confirm step for the three "Reset … Defaults" buttons. Each one wipes a whole card's worth of
+ * tuned values in a single tap, and several of them (pacing, calibration delay, the visualizer
+ * table) represent real on-device tuning work that isn't recoverable.
+ */
+@Composable
+private fun ResetConfirmDialog(
+    title: String,
+    message: String,
+    confirmTestTag: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+        text = { Text(message) },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                ),
+                modifier = Modifier.height(44.dp).testTag(confirmTestTag),
+                shape = CircleShape
+            ) {
+                Text("Reset")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
 fun LazyListScope.SettingsTabContent(
     state: RgbUiState,
     telemetry: TelemetryState,
@@ -511,18 +549,29 @@ fun LazyListScope.SettingsTabContent(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                 val resetAmbianceInteractionSource = remember { MutableInteractionSource() }
+                var confirmResetAmbiance by rememberSaveable { mutableStateOf(false) }
+                if (confirmResetAmbiance) {
+                    ResetConfirmDialog(
+                        title = "Reset Ambiance Defaults",
+                        message = "This puts all seven ambiance settings back to the Balanced preset.",
+                        confirmTestTag = "confirm_reset_ambiance",
+                        onConfirm = {
+                            viewModel.applyAmbiancePreset(
+                                presetId = "Balanced",
+                                responseSpeed = 0.5f,
+                                smoothnessMs = 150,
+                                saturationBoost = 1.4f,
+                                brightnessCompensation = 1.0f,
+                                sceneCutSensitivity = 110.0f,
+                                noiseDeadband = 0.10f
+                            )
+                            confirmResetAmbiance = false
+                        },
+                        onDismiss = { confirmResetAmbiance = false }
+                    )
+                }
                 OutlinedButton(
-                    onClick = {
-                        viewModel.applyAmbiancePreset(
-                            presetId = "Balanced",
-                            responseSpeed = 0.5f,
-                            smoothnessMs = 150,
-                            saturationBoost = 1.4f,
-                            brightnessCompensation = 1.0f,
-                            sceneCutSensitivity = 110.0f,
-                            noiseDeadband = 0.10f
-                        )
-                    },
+                    onClick = { confirmResetAmbiance = true },
                     interactionSource = resetAmbianceInteractionSource,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -678,10 +727,21 @@ fun LazyListScope.SettingsTabContent(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                 val resetCalibrationInteractionSource = remember { MutableInteractionSource() }
+                var confirmResetCalibration by rememberSaveable { mutableStateOf(false) }
+                if (confirmResetCalibration) {
+                    ResetConfirmDialog(
+                        title = "Reset Calibration Defaults",
+                        message = "This clears the Bluetooth sync delay and puts every device's pacing back to 100ms. Any tuning you did against the metronome is lost.",
+                        confirmTestTag = "confirm_reset_calibration",
+                        onConfirm = {
+                            viewModel.resetCalibrationSettings()
+                            confirmResetCalibration = false
+                        },
+                        onDismiss = { confirmResetCalibration = false }
+                    )
+                }
                 OutlinedButton(
-                    onClick = {
-                        viewModel.resetCalibrationSettings()
-                    },
+                    onClick = { confirmResetCalibration = true },
                     interactionSource = resetCalibrationInteractionSource,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1112,10 +1172,21 @@ fun LazyListScope.SettingsTabContent(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
             val resetAudioInteractionSource = remember { MutableInteractionSource() }
+            var confirmResetAudio by rememberSaveable { mutableStateOf(false) }
+            if (confirmResetAudio) {
+                ResetConfirmDialog(
+                    title = "Reset Audio Defaults",
+                    message = "This puts the whole audio pipeline — smoothing, gains, beat detection, the visualiser preset and sensitivity — back to defaults.",
+                    confirmTestTag = "confirm_reset_audio",
+                    onConfirm = {
+                        viewModel.resetAudioPipelineSettings()
+                        confirmResetAudio = false
+                    },
+                    onDismiss = { confirmResetAudio = false }
+                )
+            }
             OutlinedButton(
-                onClick = {
-                    viewModel.resetAudioPipelineSettings()
-                },
+                onClick = { confirmResetAudio = true },
                 interactionSource = resetAudioInteractionSource,
                 modifier = Modifier
                     .fillMaxWidth()

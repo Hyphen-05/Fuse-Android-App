@@ -159,6 +159,7 @@ fun AmbianceScreen(
     var customPresets by remember { mutableStateOf(loadCustomPresetsFromPrefs(context)) }
 
     var showRenameDialog by remember { mutableStateOf<AmbiancePreset?>(null) }
+    var presetToDelete by remember { mutableStateOf<AmbiancePreset?>(null) }
     var newPresetName by remember { mutableStateOf("") }
 
     // Define 4 built-in presets
@@ -550,11 +551,7 @@ fun AmbianceScreen(
 
                                 // Delete Action
                                 IconButton(
-                                    onClick = {
-                                        customPresets = customPresets.filter { it.id != customPreset.id }
-                                        saveCustomPresetsToPrefs(context, customPresets)
-                                        Toast.makeText(context, "Preset deleted", Toast.LENGTH_SHORT).show()
-                                    },
+                                    onClick = { presetToDelete = customPreset },
                                     modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(
@@ -572,6 +569,40 @@ fun AmbianceScreen(
         }
 
 
+    }
+
+    // Dialog: Delete Custom Preset
+    presetToDelete?.let { targetPreset ->
+        AlertDialog(
+            onDismissRequest = { presetToDelete = null },
+            title = { Text("Delete Preset", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+            text = { Text("Are you sure you want to delete the preset '${targetPreset.name}'?") },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        customPresets = customPresets.filter { it.id != targetPreset.id }
+                        saveCustomPresetsToPrefs(context, customPresets)
+                        Toast.makeText(context, "Preset deleted", Toast.LENGTH_SHORT).show()
+                        presetToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.height(44.dp).testTag("confirm_delete_ambiance_preset"),
+                    shape = CircleShape
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { presetToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Dialog: Rename Custom Preset
