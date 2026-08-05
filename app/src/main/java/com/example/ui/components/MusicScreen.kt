@@ -112,6 +112,53 @@ fun MusicScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
 
+        // --- Capture-failed warning ---
+        // When mic/Visualizer capture fails the engine silently falls back to
+        // DemoAudioDspSimulator, and the lights keep dancing to audio that was never heard. Say so,
+        // otherwise the fallback reads as working music sync.
+        if (uiState.audioSettings.audioEngineMode == "simulation") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("audio_simulation_banner"),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Not listening to audio",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            text = "Capture failed, so this is a demo animation.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                    uiState.audioSettings.musicMode?.let { mode ->
+                        TextButton(
+                            onClick = { viewModel.startMusicSync(mode) },
+                            modifier = Modifier.testTag("audio_simulation_retry")
+                        ) {
+                            Text(text = "Retry", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+            }
+        }
 
         // --- Real-time Waveform Visualizer ---
         Card(

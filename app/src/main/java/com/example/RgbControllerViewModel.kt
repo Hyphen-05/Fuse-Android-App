@@ -2369,7 +2369,9 @@ class RgbControllerViewModel(
     }
 
     private fun stopMusicSyncInternal(keepServiceRunning: Boolean = false) {
-        _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = false)) }
+        _uiState.update {
+            it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = false, audioEngineMode = null))
+        }
 
         transmissionThread?.interrupt()
         transmissionThread = null
@@ -2433,7 +2435,9 @@ class RgbControllerViewModel(
     }
 
     private fun startAudioEngine(mode: String) {
-        _uiState.update { it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = true)) }
+        _uiState.update {
+            it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = true, audioEngineMode = "real"))
+        }
 
         // 1. Audio Capture and Processing
         if (mode == "on_device") {
@@ -2515,6 +2519,9 @@ class RgbControllerViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             addLog("Starting DSP audio simulation engine...")
             com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: SIMULATION started successfully")
+            // Tell the UI the lights are reacting to synthetic audio, not to anything the mic
+            // heard — addLog() alone goes nowhere the user can see.
+            _uiState.update { it.copy(audioSettings = it.audioSettings.copy(audioEngineMode = "simulation")) }
 
             val simulator = com.example.core.audio.DemoAudioDspSimulator()
             val intervalMs = 23L

@@ -89,6 +89,10 @@ data class AudioSettingsState(
     val musicMode: String? = null,
     val musicSensitivity: Int = 50,
     val isAudioSyncRunning: Boolean = false,
+    // Which engine is actually driving the lights: "real" for mic/Visualizer capture, "simulation"
+    // when capture failed and DemoAudioDspSimulator took over, null when nothing is running.
+    // Hardware-driven like isAudioSyncRunning — written by the ViewModel, not by an intent.
+    val audioEngineMode: String? = null,
     val isVisualizerIdle: Boolean = false,
     val audioSmoothingAttack: Float = 0.85f,
     val audioSmoothingDecay: Float = 0.12f,
