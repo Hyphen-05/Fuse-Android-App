@@ -26,8 +26,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -375,9 +377,41 @@ fun MainScreen() {
         viewModel.clearErrorMessage()
     }
 
+    // Connection progress used to be a full-screen scrim with click-through disabled, shown
+    // whenever a saved auto-connect device wasn't currently CONNECTED. That condition never cleared
+    // on its own — one saved light that's powered off or out of range covered every tab forever,
+    // including the Devices screen you'd need to reach to turn auto-connect off. This is a thin
+    // non-blocking pill instead: Cancel marks the device manually disconnected, and it gives up
+    // nagging after 15s (the retry ladder in handleConnectionStateChange carries on regardless).
+    //
+    // F2 (IMPROVEMENT_PLAN.md): this deliberately tracks *hunting*, not ConnectionState.Connecting.
+    // Auto-connect only calls connectDevice() from inside the scan callback (handleScanResult /
+    // addSimulatedDevice), so a strip that's powered off is never found, never reaches Connecting,
+    // and the pill never appeared in the one case it exists for. Connecting, meanwhile, is set
+    // instantly by a manual Connect tap — where DevicesScreen already shows "Connecting…" on the
+    // button itself, making the pill redundant. Hunting covers both the searching and the
+    // attempt-in-flight phases of an auto-connect, and is never entered by a manual tap on a device
+    // that doesn't have auto-connect enabled.
+    val huntingDevice = savedDevices.firstOrNull { device ->
+        device.isAutoConnectEnabled && when (val s = connectionStates[device.macAddress]) {
+            is com.example.domain.ConnectionState.Connected -> false
+            is com.example.domain.ConnectionState.Disconnected -> !s.isManual
+            else -> true // Connecting, or never attempted this session
+        }
+    }
+    var connectBannerTimedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(huntingDevice?.macAddress) {
+        connectBannerTimedOut = false
+        if (huntingDevice != null) {
+            kotlinx.coroutines.delay(15_000L)
+            connectBannerTimedOut = true
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+          Column {
             TopAppBar(
                 navigationIcon = {},
                 title = {
@@ -451,6 +485,57 @@ fun MainScreen() {
                     )
                 }
             )
+
+            // In the topBar slot rather than aligned TopCenter inside the content Box, so it sits
+            // under the app bar and pushes tab content down instead of floating over it.
+            AnimatedVisibility(
+                visible = huntingDevice != null && !connectBannerTimedOut,
+                enter = expandVertically() + fadeIn(animationSpec = tween(400)),
+                exit = shrinkVertically() + fadeOut(animationSpec = tween(150))
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag("connection_status_banner"),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        tonalElevation = 3.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Text(
+                                text = "Looking for ${huntingDevice?.customName ?: "device"}…",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            TextButton(
+                                onClick = { huntingDevice?.let { viewModel.disconnectDevice(it.macAddress) } },
+                                modifier = Modifier.testTag("connection_cancel_btn")
+                            ) {
+                                Text(
+                                    text = "Cancel",
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+          }
         },
         bottomBar = {
             ExpressiveNavigationBar(
@@ -547,70 +632,6 @@ fun MainScreen() {
                         experimentalUnlocked = experimentalUnlocked,
                         onToggleExperimentalUnlocked = { experimentalUnlocked = !experimentalUnlocked }
                     )
-                }
-            }
-
-            // Connection progress used to be a full-screen scrim with click-through disabled, shown
-            // whenever a saved auto-connect device wasn't currently CONNECTED. That condition never
-            // clears on its own — one saved light that's powered off or out of range covered every
-            // tab forever, including the Devices screen you'd need to reach to turn auto-connect
-            // off. This is a thin non-blocking pill instead: it tracks an attempt that is actually
-            // in flight, offers Cancel, and gives up nagging after 15s (the retry ladder in
-            // handleConnectionStateChange carries on regardless).
-            val connectingDevice = savedDevices.firstOrNull {
-                connectionStates[it.macAddress] == com.example.domain.ConnectionState.Connecting
-            }
-            var connectBannerTimedOut by remember { mutableStateOf(false) }
-            LaunchedEffect(connectingDevice?.macAddress) {
-                connectBannerTimedOut = false
-                if (connectingDevice != null) {
-                    kotlinx.coroutines.delay(15_000L)
-                    connectBannerTimedOut = true
-                }
-            }
-
-            AnimatedVisibility(
-                visible = connectingDevice != null && !connectBannerTimedOut,
-                enter = fadeIn(animationSpec = tween(400)),
-                exit = fadeOut(animationSpec = tween(150)),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
-                val device = connectingDevice
-                Surface(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .testTag("connection_status_banner"),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    tonalElevation = 3.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = "Connecting to ${device?.customName ?: "device"}…",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        TextButton(
-                            onClick = { device?.let { viewModel.disconnectDevice(it.macAddress) } },
-                            modifier = Modifier.testTag("connection_cancel_btn")
-                        ) {
-                            Text(
-                                text = "Cancel",
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
                 }
             }
 
