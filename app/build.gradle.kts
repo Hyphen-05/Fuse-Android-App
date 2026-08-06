@@ -79,6 +79,10 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
+  // Polygon morphing for the connection status indicator. material3 1.4.0 ships the Expressive
+  // opt-in marker and tokens but not LoadingIndicator itself, so the morph is built directly on
+  // the same primitives that component uses internally.
+  implementation(libs.androidx.graphics.shapes)
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
