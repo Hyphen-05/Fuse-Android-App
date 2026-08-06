@@ -163,29 +163,30 @@ private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset
     // drift when the detector has a lock, free-running 9°/s otherwise), there is no brightness
     // flash at all, and the only per-beat event is the elastic pushback.
     //
-    // F5 (IMPROVEMENT_PLAN.md), first hardware-feedback pass. Joe: "the problem isn't flashing, it's
-    // brightness jumping which reads as flashy. and it's not very responsive either." Two changes,
-    // one per symptom, so the next round can bisect:
-    //  1. Brightness. flash is already 0, so the jumping came from the amplitude→brightness envelope
-    //     — specifically sustainResponse = "BRIGHTNESS_SWELL", the only thing here deliberately
-    //     modulating brightness over time. Switched to "HUE_SHIFT": sustained passages still get an
-    //     expressive response, but it lands in hue, which is this preset's whole thesis. Everything
-    //     else on the brightness path (gamma 0.5, ambientCapFraction 0.75, minBrightness 0.30) is
-    //     left alone for now; if it still swings, raise minBrightness toward ~0.5 next to compress
-    //     the range, then gamma toward 1.0.
-    //  2. Responsiveness. The 30° nudge was being fed through a deliberately slow hue EMA
-    //     (colorSpeed 0.5) and relaxing over 700ms, which ate the kick entirely. The nudge is now
-    //     big enough to read through the smoothing, the EMA passes more of it, and it snaps back
-    //     quicker so consecutive beats stay distinct.
+    // F5 (IMPROVEMENT_PLAN.md), second hardware-feedback pass. Round 1 moved sustainResponse off
+    // BRIGHTNESS_SWELL and raised the nudge; Joe: "brightness still off, it seems to get brighter
+    // and dimmer. responsiveness seems too strong." So round 1 under-corrected one axis and
+    // over-corrected the other.
+    //  1. Brightness. Dropping the sustain swell wasn't enough, which means the swing is the plain
+    //     amplitude→brightness envelope rather than any timed effect — so attack it structurally by
+    //     shrinking the window it has to move in. minBrightness 0.30 → 0.62 with ambientCapFraction
+    //     0.75 → 0.80 leaves roughly an 18% band instead of 45%, and gamma 0.5 → 0.8 stops the low
+    //     end being expanded on top of that (0.5 is a square-root curve: it magnifies exactly the
+    //     quiet variation that reads as breathing). If it still moves after this, the envelope is
+    //     not the source and the next suspect is the idle/ambient path, not these three.
+    //  2. Responsiveness. Round 1 raised the nudge to 70° *and* opened the hue EMA to 0.9, and the
+    //     two together overshot. Backing off the EMA first (0.9 → 0.65), since that is what turns a
+    //     pull into a jump, and trimming the nudge to 55° — still well above the original 30° that
+    //     couldn't be felt at all. Return time stays 450ms.
     "Ebb & Flow" -> VisualizerConfig(
-        attack = 0.25f, decay = 0.06f, flash = 0.0f, gamma = 0.5f, idleDelay = 4000L,
+        attack = 0.25f, decay = 0.06f, flash = 0.0f, gamma = 0.8f, idleDelay = 4000L,
         noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 0.7f, paletteCycling = true,
-        beatMult = 1.6f, minBrightness = 0.30f, colorSpeed = 0.9f, beatFlashDecayMs = 400f,
-        ambientCapFraction = 0.75f, midFluxWeight = 0.25f,
+        beatMult = 1.6f, minBrightness = 0.62f, colorSpeed = 0.65f, beatFlashDecayMs = 400f,
+        ambientCapFraction = 0.80f, midFluxWeight = 0.25f,
         // Never snaps: the anchor is left entirely to drift.
         anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
         hueBreathRangeDeg = 20f, hueDriftDegPerSec = 9f, hueDegreesPerBeat = 2.0f,
-        hueBeatNudgeDeg = 70f, hueNudgeReturnMs = 450f,
+        hueBeatNudgeDeg = 55f, hueNudgeReturnMs = 450f,
         sustainResponse = "HUE_SHIFT", sustainRampMs = 3000f
     )
     else -> VisualizerConfig(

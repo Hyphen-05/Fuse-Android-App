@@ -2,7 +2,9 @@ package com.example
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.content.pm.PackageManager
@@ -120,6 +122,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -394,11 +397,41 @@ fun MainScreen() {
     // button itself, making the pill redundant. Hunting covers both the searching and the
     // attempt-in-flight phases of an auto-connect, and is never entered by a manual tap on a device
     // that doesn't have auto-connect enabled.
-    val huntingDevice = savedDevices.firstOrNull { device ->
-        device.isAutoConnectEnabled && when (val s = connectionStates[device.macAddress]) {
-            is com.example.domain.ConnectionState.Connected -> false
-            is com.example.domain.ConnectionState.Disconnected -> !s.isManual
-            else -> true // Connecting, or never attempted this session
+    // Bluetooth being off makes "Looking for X…" a lie — nothing can be found, and the scan-error
+    // snackbar is already saying the useful thing. Tracked live so the pill comes back by itself
+    // once Bluetooth is re-enabled (including via the snackbar's own Enable action).
+    var bluetoothEnabled by remember {
+        mutableStateOf(
+            (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)
+                ?.adapter?.isEnabled ?: false
+        )
+    }
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                if (i?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                    bluetoothEnabled = i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_ON
+                }
+            }
+        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
+    val huntingDevice = if (!bluetoothEnabled && !uiState.coreControl.isDemoMode) {
+        null
+    } else {
+        savedDevices.firstOrNull { device ->
+            device.isAutoConnectEnabled && when (val s = connectionStates[device.macAddress]) {
+                is com.example.domain.ConnectionState.Connected -> false
+                is com.example.domain.ConnectionState.Disconnected -> !s.isManual
+                else -> true // Connecting, or never attempted this session
+            }
         }
     }
     var connectBannerTimedOut by remember { mutableStateOf(false) }
