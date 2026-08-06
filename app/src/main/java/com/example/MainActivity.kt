@@ -364,23 +364,11 @@ fun MainScreen() {
 
     // Scan/connect failures are written to coreControl.errorMessage by the ViewModel; this is the
     // only place that reads it. Without this the "Scan for Devices" button just silently no-ops
-    // when Bluetooth is off.
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(uiState.coreControl.errorMessage) {
-        val message = uiState.coreControl.errorMessage ?: return@LaunchedEffect
-        val offerEnable = message.contains("Bluetooth is disabled", ignoreCase = true)
-        val result = snackbarHostState.showSnackbar(
-            message = message,
-            actionLabel = if (offerEnable) "Enable" else null,
-            withDismissAction = !offerEnable
-        )
-        if (result == SnackbarResult.ActionPerformed) {
-            runCatching {
-                enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-            }
-        }
-        viewModel.clearErrorMessage()
-    }
+    // when Bluetooth is off. It used to be a bottom Snackbar; it now shares ConnectionStatusSurface
+    // with the connection indicator, because the two could previously be on screen simultaneously
+    // saying contradictory things.
+    val offerEnableBluetooth = uiState.coreControl.errorMessage
+        ?.contains("Bluetooth is disabled", ignoreCase = true) == true
 
     // Connection progress used to be a full-screen scrim with click-through disabled, shown
     // whenever a saved auto-connect device wasn't currently CONNECTED. That condition never cleared
@@ -434,77 +422,8 @@ fun MainScreen() {
             }
         }
     }
-    var connectBannerTimedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(huntingDevice?.macAddress) {
-        connectBannerTimedOut = false
-        if (huntingDevice != null) {
-            kotlinx.coroutines.delay(15_000L)
-            connectBannerTimedOut = true
-        }
-    }
-
     Scaffold(
-        // F4: the stock M3 Snackbar (square-ish, inverseSurface) read as dated next to the rest of
-        // the app. Everything this host ever carries is a scan/Bluetooth failure, so it borrows the
-        // Music tab's error-banner language — errorContainer, warning icon — with the 20dp corner
-        // radius the confirm dialogs and cards use.
-        snackbarHost = {
-            SnackbarHost(snackbarHostState) { data ->
-                Snackbar(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .testTag("app_snackbar"),
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    actionContentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    dismissActionContentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    action = data.visuals.actionLabel?.let { label ->
-                        {
-                            TextButton(
-                                onClick = { data.performAction() },
-                                modifier = Modifier.testTag("snackbar_action_btn")
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                            }
-                        }
-                    },
-                    dismissAction = if (data.visuals.withDismissAction) {
-                        {
-                            IconButton(onClick = { data.dismiss() }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
-                                    tint = MaterialTheme.colorScheme.onErrorContainer
-                                )
-                            }
-                        }
-                    } else null
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Text(
-                            text = data.visuals.message,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            }
-        },
         topBar = {
-          Column {
             TopAppBar(
                 navigationIcon = {},
                 title = {
@@ -578,57 +497,6 @@ fun MainScreen() {
                     )
                 }
             )
-
-            // In the topBar slot rather than aligned TopCenter inside the content Box, so it sits
-            // under the app bar and pushes tab content down instead of floating over it.
-            AnimatedVisibility(
-                visible = huntingDevice != null && !connectBannerTimedOut,
-                enter = expandVertically() + fadeIn(animationSpec = tween(400)),
-                exit = shrinkVertically() + fadeOut(animationSpec = tween(150))
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .testTag("connection_status_banner"),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        tonalElevation = 3.dp
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(start = 16.dp, top = 6.dp, end = 6.dp, bottom = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            Text(
-                                text = "Looking for ${huntingDevice?.customName ?: "device"}…",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            TextButton(
-                                onClick = { huntingDevice?.let { viewModel.disconnectDevice(it.macAddress) } },
-                                modifier = Modifier.testTag("connection_cancel_btn")
-                            ) {
-                                Text(
-                                    text = "Cancel",
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-          }
         },
         bottomBar = {
             ExpressiveNavigationBar(
@@ -727,6 +595,23 @@ fun MainScreen() {
                     )
                 }
             }
+
+            // Last child of the content Box so it draws above every tab, but with no scrim and no
+            // gesture modifier of its own — the tab underneath stays fully interactive, which is
+            // the constraint that killed the original blocking overlay.
+            com.example.ui.components.ConnectionStatusSurface(
+                huntingDeviceName = huntingDevice?.customName,
+                errorMessage = uiState.coreControl.errorMessage,
+                offerEnableBluetooth = offerEnableBluetooth,
+                onCancelHunt = { huntingDevice?.let { viewModel.disconnectDevice(it.macAddress) } },
+                onEnableBluetooth = {
+                    runCatching {
+                        enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                    }
+                    viewModel.clearErrorMessage()
+                },
+                onDismissError = { viewModel.clearErrorMessage() }
+            )
 
     // --- Edit Device Alias Dialog ---
     if (deviceToAliasAddress != null) {
