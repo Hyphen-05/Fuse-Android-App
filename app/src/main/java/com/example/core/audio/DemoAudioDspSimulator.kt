@@ -6,8 +6,9 @@ import com.example.core.color.ColorConverter
 /**
  * Phase 5, part B: pure, hardware-free port of the DSP pipeline that used to live inline inside
  * `RgbControllerViewModel.runAudioSimulationEngine()`'s `while` loop — a second, hand-duplicated
- * DSP pipeline (randomness-driven, not real captured audio) used as the fallback when the real
- * `AudioRecord`/Visualizer capture backends fail to start. No Android hardware APIs, no
+ * DSP pipeline (randomness-driven, not real captured audio). It used to be the automatic fallback
+ * when the real `AudioRecord`/Visualizer backends failed to start; since F1 it is debug tooling
+ * only, started explicitly over adb and never on the app's behalf. No Android hardware APIs, no
  * `_uiState`/`_telemetry`/`queueCommand` references — those writes still happen in the ViewModel
  * orchestrator, via the same `publishAudioDspResult(AudioDspResult)` helper the real capture
  * pipeline (`AudioDspProcessor`) already uses. This class only produces the [AudioDspResult].

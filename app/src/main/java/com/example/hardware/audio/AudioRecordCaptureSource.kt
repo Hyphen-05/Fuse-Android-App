@@ -44,8 +44,8 @@ class AudioRecordCaptureSource(private val context: Context) : AudioCaptureSourc
             ) == PackageManager.PERMISSION_GRANTED
 
             if (!hasPermission) {
-                onLog("Record Audio Permission missing or denied. Running simulation.")
-                onError(IllegalStateException("Record Audio Permission missing or denied. Running simulation."))
+                onLog("Record Audio Permission missing or denied.")
+                onError(IllegalStateException("Record Audio Permission missing or denied."))
                 return@Thread
             }
 
@@ -55,8 +55,8 @@ class AudioRecordCaptureSource(private val context: Context) : AudioCaptureSourc
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-                onLog("AudioRecord buffer size error, starting simulation.")
-                onError(IllegalStateException("AudioRecord buffer size error, starting simulation."))
+                onLog("AudioRecord buffer size error.")
+                onError(IllegalStateException("AudioRecord buffer size error."))
                 return@Thread
             }
 
@@ -71,8 +71,8 @@ class AudioRecordCaptureSource(private val context: Context) : AudioCaptureSourc
                 )
 
                 if (record.state != AudioRecord.STATE_INITIALIZED) {
-                    onLog("Failed to initialize AudioRecord. Starting simulation.")
-                    onError(IllegalStateException("Failed to initialize AudioRecord. Starting simulation."))
+                    onLog("Failed to initialize AudioRecord.")
+                    onError(IllegalStateException("Failed to initialize AudioRecord."))
                     return@Thread
                 }
 

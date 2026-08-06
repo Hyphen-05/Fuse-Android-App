@@ -37,8 +37,10 @@ interface AudioCaptureSource {
 
     /**
      * Starts capture. Returns true if capture started successfully (e.g. permission granted,
-     * device/session initialized) — false means the caller should fall back (e.g. to
-     * RgbControllerViewModel.runAudioSimulationEngine(), unchanged/out of scope here).
+     * device/session initialized) — false means capture is not going to happen, and the caller is
+     * expected to stop and report it (RgbControllerViewModel.handleAudioCaptureFailure). Note that
+     * some failures are signalled both ways, via [onError] *and* a false return, so that handler
+     * must be idempotent.
      * onFrame may be invoked from a background thread (AudioRecord backend) or from whatever
      * thread constructed the underlying Visualizer (Visualizer backend) — callers must not
      * assume a particular thread.
