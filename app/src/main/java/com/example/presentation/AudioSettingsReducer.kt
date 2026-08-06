@@ -161,19 +161,32 @@ private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset
     )
     // The one preset built on the per-beat hue nudge: all colour motion is continuous (tempo-locked
     // drift when the detector has a lock, free-running 9°/s otherwise), there is no brightness
-    // flash at all, and the only per-beat event is the elastic pushback. Starting values are a
-    // principled first guess — expect by-feel tuning on hardware. If a subtle brightness component
-    // is wanted later, raise `flash` to ~0.15 rather than touching anything else.
+    // flash at all, and the only per-beat event is the elastic pushback.
+    //
+    // F5 (IMPROVEMENT_PLAN.md), first hardware-feedback pass. Joe: "the problem isn't flashing, it's
+    // brightness jumping which reads as flashy. and it's not very responsive either." Two changes,
+    // one per symptom, so the next round can bisect:
+    //  1. Brightness. flash is already 0, so the jumping came from the amplitude→brightness envelope
+    //     — specifically sustainResponse = "BRIGHTNESS_SWELL", the only thing here deliberately
+    //     modulating brightness over time. Switched to "HUE_SHIFT": sustained passages still get an
+    //     expressive response, but it lands in hue, which is this preset's whole thesis. Everything
+    //     else on the brightness path (gamma 0.5, ambientCapFraction 0.75, minBrightness 0.30) is
+    //     left alone for now; if it still swings, raise minBrightness toward ~0.5 next to compress
+    //     the range, then gamma toward 1.0.
+    //  2. Responsiveness. The 30° nudge was being fed through a deliberately slow hue EMA
+    //     (colorSpeed 0.5) and relaxing over 700ms, which ate the kick entirely. The nudge is now
+    //     big enough to read through the smoothing, the EMA passes more of it, and it snaps back
+    //     quicker so consecutive beats stay distinct.
     "Ebb & Flow" -> VisualizerConfig(
         attack = 0.25f, decay = 0.06f, flash = 0.0f, gamma = 0.5f, idleDelay = 4000L,
         noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 0.7f, paletteCycling = true,
-        beatMult = 1.6f, minBrightness = 0.30f, colorSpeed = 0.5f, beatFlashDecayMs = 400f,
+        beatMult = 1.6f, minBrightness = 0.30f, colorSpeed = 0.9f, beatFlashDecayMs = 400f,
         ambientCapFraction = 0.75f, midFluxWeight = 0.25f,
         // Never snaps: the anchor is left entirely to drift.
         anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
         hueBreathRangeDeg = 20f, hueDriftDegPerSec = 9f, hueDegreesPerBeat = 2.0f,
-        hueBeatNudgeDeg = 30f, hueNudgeReturnMs = 700f,
-        sustainResponse = "BRIGHTNESS_SWELL", sustainRampMs = 3000f
+        hueBeatNudgeDeg = 70f, hueNudgeReturnMs = 450f,
+        sustainResponse = "HUE_SHIFT", sustainRampMs = 3000f
     )
     else -> VisualizerConfig(
         attack = 0.85f, decay = 0.12f, flash = 0.3f, gamma = 0.45f, idleDelay = 2500L,
