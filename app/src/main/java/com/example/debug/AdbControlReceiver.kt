@@ -38,6 +38,9 @@ import com.example.hardware.debug.AdbTestMetronome
  *                        MetronomePlayer.startContinuousTone's doc comment)
  *   stop_metronome
  *   select_backend      --es mode phone_mic|on_device   (starts real music-sync audio engine)
+ *   start_simulation    (runs the synthetic DemoAudioDspSimulator through the real DSP→BLE
+ *                        delivery path — the only way to reach it, it is never a fallback for
+ *                        failed real capture; stop with stop_backend)
  *   stop_backend
  *   status              (dumps current state to Logcat under tag AdbControl)
  *
@@ -132,6 +135,18 @@ class AdbControlReceiver : BroadcastReceiver() {
                 }
                 listener.onAdbStartMusicSync(mode)
                 Log.i(TAG, "select_backend: mode=$mode")
+            }
+
+            "start_simulation" -> {
+                val listener = appContainer.adbControlSink.listener
+                if (listener == null) {
+                    Log.w(TAG, "start_simulation: no active RgbControllerViewModel listener registered")
+                    return
+                }
+                // No AudioCaptureService.start() here, unlike select_backend: the simulator never
+                // touches the mic or the Visualizer, so there is nothing to promote the process for.
+                listener.onAdbStartAudioSimulation()
+                Log.i(TAG, "start_simulation")
             }
 
             "stop_backend" -> {

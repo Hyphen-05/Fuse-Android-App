@@ -2320,7 +2320,13 @@ class RgbControllerViewModel(
 
     private fun stopMusicSyncInternal(keepServiceRunning: Boolean = false) {
         _uiState.update {
-            it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = false, audioEngineMode = null))
+            it.copy(
+                audioSettings = it.audioSettings.copy(
+                    isAudioSyncRunning = false,
+                    audioEngineMode = null,
+                    audioFailedMode = null
+                )
+            )
         }
 
         transmissionThread?.interrupt()
@@ -2384,9 +2390,45 @@ class RgbControllerViewModel(
         }
     }
 
+    /**
+     * Terminal handler for "the mic/Visualizer never produced usable audio".
+     *
+     * This used to be `runAudioSimulationEngine()`: capture failed, DemoAudioDspSimulator quietly
+     * took over, and the strip kept dancing to synthetic audio nobody had played. The only tell was
+     * an addLog() line, and nothing in the app displays logMessages. Failure is now a real stop —
+     * the same teardown/restore a user-initiated stop performs — plus a "failed" engine mode the
+     * Music tab surfaces as an error with Retry.
+     *
+     * Idempotent: VisualizerCaptureSource reports several failures twice, once through onError(...)
+     * and again by returning false from start() (see its permission and captureSize branches).
+     */
+    private fun handleAudioCaptureFailure(mode: String, reason: String) {
+        if (_uiState.value.audioSettings.audioEngineMode == "failed") return
+        audioCaptureSource = null
+        audioDspProcessor = null
+        addLog("Audio capture failed ($mode): $reason")
+        DiagnosticLogger.log("AudioCapture", "Active Engine: FAILED mode=$mode reason=$reason")
+        stopMusicSync(restoreState = true)
+        // After the stop, not before — stopMusicSyncInternal() clears audioEngineMode to null.
+        _uiState.update {
+            it.copy(
+                audioSettings = it.audioSettings.copy(
+                    audioEngineMode = "failed",
+                    audioFailedMode = mode
+                )
+            )
+        }
+    }
+
     private fun startAudioEngine(mode: String) {
         _uiState.update {
-            it.copy(audioSettings = it.audioSettings.copy(isAudioSyncRunning = true, audioEngineMode = "real"))
+            it.copy(
+                audioSettings = it.audioSettings.copy(
+                    isAudioSyncRunning = true,
+                    audioEngineMode = "real",
+                    audioFailedMode = null
+                )
+            )
         }
 
         // 1. Audio Capture and Processing
@@ -2418,15 +2460,10 @@ class RgbControllerViewModel(
                 },
                 onLog = { addLog(it) },
                 isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
-                onError = {
-                    audioCaptureSource = null
-                    audioDspProcessor = null
-                    runAudioSimulationEngine()
-                }
+                onError = { handleAudioCaptureFailure(mode, it.message ?: it.toString()) }
             )
             if (!started) {
-                audioCaptureSource = null
-                audioDspProcessor = null
+                handleAudioCaptureFailure(mode, "capture source refused to start")
             }
             return
         }
@@ -2438,19 +2475,18 @@ class RgbControllerViewModel(
         audioCaptureSource = source
         audioDspProcessor = processor
 
-        source.start(
+        val started = source.start(
             onFrame = { frame ->
                 processor.process(frame, _uiState.value.audioSettings, System.currentTimeMillis(), currentEffectivePacingMs())
                     ?.let { publishAudioDspResult(it) }
             },
             onLog = { addLog(it) },
             isRunning = { _uiState.value.audioSettings.isAudioSyncRunning },
-            onError = {
-                audioCaptureSource = null
-                audioDspProcessor = null
-                runAudioSimulationEngine()
-            }
+            onError = { handleAudioCaptureFailure(mode, it.message ?: it.toString()) }
         )
+        if (!started) {
+            handleAudioCaptureFailure(mode, "capture source refused to start")
+        }
     }
 
     // Phase 5, part B: the per-tick DSP math (smoothing, beat heuristic, hue mapping, auto-gain,
@@ -2459,19 +2495,32 @@ class RgbControllerViewModel(
     // startAudioEngine's shape: construct a fresh simulator per run, tick it on the same 23ms
     // cadence, and publish each result through the same publishAudioDspResult() the real capture
     // pipeline uses.
+    //
+    // F1 (IMPROVEMENT_PLAN.md): this is no longer a fallback. It used to run automatically whenever
+    // real capture failed, which meant the app could present synthetic audio as working music sync;
+    // capture failure now stops instead (see handleAudioCaptureFailure). The simulator survives as
+    // a test fixture for the DSP→BLE delivery path with no audio hardware in the loop, reachable
+    // only from the debug-gated AdbControlReceiver ("start_simulation"), never from the UI.
+    //
     // Dispatch-safe by construction, not by caller convention: this function owns a blocking
     // `while` loop with a real `Thread.sleep`, so it launches its own Dispatchers.IO coroutine
-    // rather than trusting every call site to have already hopped off the calling thread. This
-    // matters because one of its two callers (the on-device/Visualizer error fallback in
-    // startAudioEngine) can otherwise run synchronously on the main thread — see the
-    // "StartAudioEngine dispatch fix" note in CLAUDE.md.
+    // rather than trusting the caller to have already hopped off the calling thread.
     private fun runAudioSimulationEngine() {
         viewModelScope.launch(Dispatchers.IO) {
             addLog("Starting DSP audio simulation engine...")
             com.example.DiagnosticLogger.log("AudioCapture", "Active Engine: SIMULATION started successfully")
-            // Tell the UI the lights are reacting to synthetic audio, not to anything the mic
-            // heard — addLog() alone goes nowhere the user can see.
-            _uiState.update { it.copy(audioSettings = it.audioSettings.copy(audioEngineMode = "simulation")) }
+            // Owns isAudioSyncRunning itself rather than inheriting it from startAudioEngine, since
+            // it's now started directly rather than as a fallback partway through one — the loop
+            // below uses that flag as its exit condition.
+            _uiState.update {
+                it.copy(
+                    audioSettings = it.audioSettings.copy(
+                        isAudioSyncRunning = true,
+                        audioEngineMode = "simulation",
+                        audioFailedMode = null
+                    )
+                )
+            }
 
             val simulator = com.example.core.audio.DemoAudioDspSimulator()
             val intervalMs = 23L
@@ -2513,6 +2562,10 @@ class RgbControllerViewModel(
 
     override fun onAdbStartMusicSync(mode: String) {
         startMusicSync(mode)
+    }
+
+    override fun onAdbStartAudioSimulation() {
+        runAudioSimulationEngine()
     }
 
     override fun onAdbStopMusicSync() {

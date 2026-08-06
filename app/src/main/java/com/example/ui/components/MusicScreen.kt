@@ -112,15 +112,15 @@ fun MusicScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
 
-        // --- Capture-failed warning ---
-        // When mic/Visualizer capture fails the engine silently falls back to
-        // DemoAudioDspSimulator, and the lights keep dancing to audio that was never heard. Say so,
-        // otherwise the fallback reads as working music sync.
-        if (uiState.audioSettings.audioEngineMode == "simulation") {
+        // --- Capture-failed error ---
+        // F1 (IMPROVEMENT_PLAN.md): capture failure used to hand over to DemoAudioDspSimulator and
+        // this banner merely disclosed that. The fallback is gone — a failure now stops music sync
+        // outright, and this is the only thing that tells the user why the lights went still.
+        if (uiState.audioSettings.audioEngineMode == "failed") {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("audio_simulation_banner"),
+                    .testTag("audio_capture_failed_banner"),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
@@ -138,23 +138,69 @@ fun MusicScreen(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Not listening to audio",
+                            text = "Couldn't capture audio",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
-                            text = "Capture failed, so this is a demo animation.",
+                            text = if (uiState.audioSettings.audioFailedMode == "on_device") {
+                                "Internal audio capture didn't start, so music sync stopped."
+                            } else {
+                                "The microphone didn't start, so music sync stopped."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
-                    uiState.audioSettings.musicMode?.let { mode ->
+                    uiState.audioSettings.audioFailedMode?.let { mode ->
                         TextButton(
-                            onClick = { viewModel.startMusicSync(mode) },
-                            modifier = Modifier.testTag("audio_simulation_retry")
+                            onClick = {
+                                AudioCaptureService.start(context, mode)
+                                viewModel.startMusicSync(mode)
+                            },
+                            modifier = Modifier.testTag("audio_capture_retry")
                         ) {
                             Text(text = "Retry", color = MaterialTheme.colorScheme.onErrorContainer)
                         }
+                    }
+                }
+            }
+        }
+
+        // Debug-only engine (AdbControlReceiver "start_simulation"). Not an error and not something
+        // a user can reach — but if it is running, the strip is reacting to synthetic audio, so say
+        // so rather than letting it pass for real music sync.
+        if (uiState.audioSettings.audioEngineMode == "simulation") {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("audio_simulation_banner"),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Science,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Simulated audio",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Text(
+                            text = "Test signal, not anything the phone is hearing.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
                     }
                 }
             }

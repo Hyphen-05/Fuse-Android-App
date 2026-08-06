@@ -132,7 +132,9 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
         // Visualizer while it's producing callbacks with no real signal content (see the
         // "Real root cause" doc comment above). Each retry gets its own WATCHDOG_TIMEOUT_MS
         // window, so worst case this takes MAX_ATTACH_RETRIES * WATCHDOG_TIMEOUT_MS (~7.5s) before
-        // falling back to simulation -- comparable to the few manual toggles this replaces.
+        // giving up -- comparable to the few manual toggles this replaces. (Giving up used to mean
+        // "fall back to the simulator"; since F1 it means onError() -> music sync stops and the
+        // Music tab reports the failure.)
         const val MAX_ATTACH_RETRIES = 5
 
         // Bug fix (2026-07-23): "on_device active, pause media for a while, resume -> LEDs never
@@ -142,8 +144,9 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
         // in the class doc comment, just triggered by the output track pausing/restarting instead
         // of initial attach) still only gets MAX_ATTACH_RETRIES (5) reconnect attempts, each
         // bounded by WATCHDOG_TIMEOUT_MS (1.5s) -- about 7.5s -- before giving up and calling
-        // onError(), which permanently falls back to the demo/simulation engine for the rest of
-        // the session. A real pause (switching tracks, a phone call, just stopping to talk) can
+        // onError(), which ends capture for the rest of the session (back then by handing over to
+        // the demo simulator; since F1 by stopping music sync outright and reporting the failure).
+        // A real pause (switching tracks, a phone call, just stopping to talk) can
         // easily outlast 7.5s, so this reads as "never recovers" even though the mechanism that
         // fixed first-activation was right there. Once real signal has been confirmed at least
         // once this session, reconnect attempts must never permanently give up -- silence just
@@ -178,8 +181,8 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasPermission) {
-            onLog("Record Audio Permission missing. Running simulation.")
-            onError(IllegalStateException("Record Audio Permission missing. Running simulation."))
+            onLog("Record Audio Permission missing.")
+            onError(IllegalStateException("Record Audio Permission missing."))
             return false
         }
 

@@ -12,6 +12,13 @@ class AdbControlSink {
     interface Listener {
         fun onAdbStartMusicSync(mode: String)
         fun onAdbStopMusicSync()
+
+        /**
+         * Starts the synthetic-audio DSP simulator. Debug tooling only, and deliberately the sole
+         * entry point to it — see RgbControllerViewModel.runAudioSimulationEngine's doc comment for
+         * why it must never be reachable from the app itself.
+         */
+        fun onAdbStartAudioSimulation()
     }
 
     @Volatile

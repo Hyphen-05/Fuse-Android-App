@@ -88,10 +88,15 @@ data class AudioSettingsState(
     val musicMode: String? = null,
     val musicSensitivity: Int = 50,
     val isAudioSyncRunning: Boolean = false,
-    // Which engine is actually driving the lights: "real" for mic/Visualizer capture, "simulation"
-    // when capture failed and DemoAudioDspSimulator took over, null when nothing is running.
+    // Which engine is actually driving the lights: "real" for mic/Visualizer capture, "failed"
+    // when capture could not start (or stalled out) and music sync was stopped, "simulation" for
+    // the debug-only DemoAudioDspSimulator, null when nothing is running.
     // Hardware-driven like isAudioSyncRunning — written by the ViewModel, not by an intent.
     val audioEngineMode: String? = null,
+    // The mode ("phone_mic"/"on_device") that was being started when audioEngineMode became
+    // "failed", so the Music tab's error banner has something to retry. Meaningless otherwise —
+    // musicMode itself is cleared by the stop that a capture failure triggers.
+    val audioFailedMode: String? = null,
     val isVisualizerIdle: Boolean = false,
     val audioSmoothingAttack: Float = 0.85f,
     val audioSmoothingDecay: Float = 0.12f,
