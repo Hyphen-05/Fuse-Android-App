@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DevicesScreen(
     viewModel: RgbControllerViewModel,
@@ -61,13 +61,16 @@ fun DevicesScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (uiState.connectivity.isScanning) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
+                            // The same Expressive shape-morph as the connect indicator
+                            // (ConnectionStatusSurface), sized for a header rather than a
+                            // full-screen moment — big enough to read as the page's focal point
+                            // while scanning, not a spinner tucked into a row of text.
+                            LoadingIndicator(
+                                modifier = Modifier.size(64.dp),
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
@@ -394,7 +397,10 @@ fun DevicesScreen(
                     savedDevices.none { it.macAddress == scanned.address }
                 }
 
-                if (unsavedScannedDevices.isEmpty() && uiState.coreControl.isDbLoaded) {
+                // Suppressed mid-scan: "no devices found" is a conclusion about a finished scan,
+                // not a fact about the one in progress, and showing it under the loading indicator
+                // reads as the scan having already failed.
+                if (unsavedScannedDevices.isEmpty() && uiState.coreControl.isDbLoaded && !uiState.connectivity.isScanning) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
