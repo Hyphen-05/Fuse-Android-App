@@ -18,7 +18,7 @@ import com.example.hardware.debug.AdbTestMetronome
  * real user even if somehow present.
  *
  * Invoke via:
- *   adb shell am broadcast -a com.example.debug.ACTION_CONTROL -p com.aistudio.expressivergb.xkzqp \
+ *   adb shell am broadcast -a com.example.debug.ACTION_CONTROL -p com.github.hyphen05.fuse \
  *       --es cmd <command> [extras...]
  *
  * Dynamically-registered receivers aren't addressable by component name (-n), so every command
