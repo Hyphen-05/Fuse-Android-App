@@ -350,6 +350,16 @@ fun coreControlsReducer(
                 val keys = state.connectivity.deviceConnectionStates.filterValues {
                     it == BleConnectionState.CONNECTED || it == BleConnectionState.CONNECTING
                 }.keys
+                // Scan results belong to the mode that produced them: simulated devices are
+                // meaningless in real mode and vice versa, so a mode switch always empties the list
+                // and stops any scan in flight. Without this, the four fake devices stayed on the
+                // Devices screen after switching back to real hardware.
+                val stopScanEffects = if (state.connectivity.isScanning) {
+                    listOf(CoreSideEffect.StopBleScan)
+                } else {
+                    emptyList()
+                }
+
                 if (keys.isEmpty()) {
                     val newState = state.copy(
                         coreControl = state.coreControl.copy(isDemoMode = true),
@@ -357,13 +367,16 @@ fun coreControlsReducer(
                             connectionState = BleConnectionState.DISCONNECTED,
                             connectedDeviceAddress = null,
                             connectedDeviceName = null,
-                            deviceConnectionStates = emptyMap()
+                            deviceConnectionStates = emptyMap(),
+                            scannedDevices = emptyList(),
+                            isScanning = false
                         )
                     )
-                    newState to listOf(CoreSideEffect.Log(logMsg), savePref)
+                    newState to (listOf(CoreSideEffect.Log(logMsg), savePref) + stopScanEffects)
                 } else {
                     var newDeviceConnectionStates = state.connectivity.deviceConnectionStates
                     val effects = mutableListOf<CoreSideEffect>(CoreSideEffect.Log(logMsg), savePref)
+                    effects.addAll(stopScanEffects)
                     keys.forEach { address ->
                         newDeviceConnectionStates = newDeviceConnectionStates + (address to BleConnectionState.DISCONNECTING)
                         effects.add(CoreSideEffect.DisconnectDevice(address))
@@ -371,16 +384,24 @@ fun coreControlsReducer(
                     val newState = state.copy(
                         coreControl = state.coreControl.copy(isDemoMode = true),
                         connectivity = state.connectivity.copy(
-                            deviceConnectionStates = newDeviceConnectionStates
+                            deviceConnectionStates = newDeviceConnectionStates,
+                            scannedDevices = emptyList(),
+                            isScanning = false
                         )
                     )
                     newState to effects
                 }
             } else {
+                val effects = mutableListOf<CoreSideEffect>(CoreSideEffect.Log(logMsg), savePref)
+                if (state.connectivity.isScanning) effects.add(CoreSideEffect.StopBleScan)
                 val newState = state.copy(
-                    coreControl = state.coreControl.copy(isDemoMode = false)
+                    coreControl = state.coreControl.copy(isDemoMode = false),
+                    connectivity = state.connectivity.copy(
+                        scannedDevices = emptyList(),
+                        isScanning = false
+                    )
                 )
-                newState to listOf(CoreSideEffect.Log(logMsg), savePref)
+                newState to effects
             }
         }
 

@@ -1578,6 +1578,11 @@ class RgbControllerViewModel(
             val displayName = state.connectivity.connectedDeviceName ?: "Unknown Device"
             viewModelScope.launch {
                 delay(1200) // Simulating connection lag
+                // connectionManager is what the connect pill reads, and the simulated path used to
+                // leave it stuck on Connecting forever — only the real GATT callback
+                // (handleConnectionStateChange) ever called setConnected. Demo devices then looked
+                // permanently mid-connection even though the UI showed them connected.
+                connectionManager.setConnected(address)
                 dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.CONNECTED))
                 addLog("Connected (Simulated) to $displayName!")
             }

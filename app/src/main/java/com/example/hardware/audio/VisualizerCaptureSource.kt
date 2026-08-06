@@ -376,8 +376,15 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                 // doc comment. Captured before the sleep so a stall discovered *during* this wait
                 // still uses the interval appropriate to whether we'd already succeeded going in.
                 val alreadySucceededThisSession = everReceivedRealSignal
+                // F1 follow-up: past the fast quirk-fixing attempts, drop to the gentle cadence
+                // rather than releasing/reconstructing a Visualizer every 1.5s forever while the
+                // user simply hasn't pressed play yet.
+                val settledIntoWaiting = attachRetryCount >= MAX_ATTACH_RETRIES
                 try {
-                    Thread.sleep(if (alreadySucceededThisSession) STALL_RECHECK_INTERVAL_MS else WATCHDOG_TIMEOUT_MS)
+                    Thread.sleep(
+                        if (alreadySucceededThisSession || settledIntoWaiting) STALL_RECHECK_INTERVAL_MS
+                        else WATCHDOG_TIMEOUT_MS
+                    )
                 } catch (e: InterruptedException) {
                     return@Thread
                 }
@@ -403,21 +410,36 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                     // that reads as "the visualizer never recovers when I resume playback." Reset
                     // the retry count instead, so reconnect attempts continue indefinitely at the
                     // STALL_RECHECK_INTERVAL_MS cadence until real signal returns.
-                    if (everReceivedRealSignal || attachRetryCount < MAX_ATTACH_RETRIES) {
+                    //
+                    // F1 follow-up (on-device, 2026-08-06): the same must hold when real signal has
+                    // *never* arrived but frames are, because "frames on schedule with zero content"
+                    // is exactly what silence looks like — there is no way to tell the session-0
+                    // stale-thread quirk from "the user hasn't pressed play yet". Giving up there
+                    // made selecting on-device mode before starting music self-destruct after ~7.5s
+                    // (hard stop, device state restored, no recovery when playback finally began).
+                    // A callback that never fires at all is still a genuine attach failure and still
+                    // gives up, which is the case the error banner exists for.
+                    if (everReceivedRealSignal || receivedAnyFrame.get() || attachRetryCount < MAX_ATTACH_RETRIES) {
                         val nextAttachRetryCount = if (everReceivedRealSignal) 0 else attachRetryCount + 1
+                        val attemptLabel = when {
+                            everReceivedRealSignal -> "stalled after real signal, retrying indefinitely"
+                            attachRetryCount >= MAX_ATTACH_RETRIES ->
+                                "waiting for audio (frames arriving, no content), retrying indefinitely"
+                            else -> "attempt ${attachRetryCount + 1}/$MAX_ATTACH_RETRIES"
+                        }
                         DiagnosticLogger.log(
                             "AudioCapture",
-                            "on_device: $reason (everReceivedRealSignal=$everReceivedRealSignal, attempt " +
-                                "${attachRetryCount + 1}${if (everReceivedRealSignal) "" else "/$MAX_ATTACH_RETRIES"}), reconstructing Visualizer"
+                            "on_device: $reason (everReceivedRealSignal=$everReceivedRealSignal, " +
+                                "$attemptLabel), reconstructing Visualizer"
                         )
                         attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = nextAttachRetryCount, exceptionRetryCount = if (everReceivedRealSignal) 0 else exceptionRetryCount)
                     } else {
                         DiagnosticLogger.log(
                             "AudioCapture",
-                            "on_device: $reason, gave up after $MAX_ATTACH_RETRIES reconstruction attempts, falling back to simulation"
+                            "on_device: $reason, gave up after $MAX_ATTACH_RETRIES reconstruction attempts"
                         )
-                        onLog("Visualizer never produced real signal after $MAX_ATTACH_RETRIES attempts. Running simulation.")
-                        onError(IllegalStateException("Visualizer(0) attach never produced real signal after $MAX_ATTACH_RETRIES attempts"))
+                        onLog("Visualizer never delivered a callback after $MAX_ATTACH_RETRIES attempts.")
+                        onError(IllegalStateException("Visualizer(0) never delivered a capture callback after $MAX_ATTACH_RETRIES attempts"))
                     }
                 }
             }.apply {
