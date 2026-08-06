@@ -603,7 +603,6 @@ fun MainScreen() {
                 huntingDeviceName = huntingDevice?.customName,
                 errorMessage = uiState.coreControl.errorMessage,
                 offerEnableBluetooth = offerEnableBluetooth,
-                onCancelHunt = { huntingDevice?.let { viewModel.disconnectDevice(it.macAddress) } },
                 onEnableBluetooth = {
                     runCatching {
                         enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))

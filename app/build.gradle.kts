@@ -7,7 +7,11 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  // 37, not 36.1: material3 1.5.0-alpha25 (Expressive — see the dependency note below) declares an
+  // AAR metadata floor of API 37, and the build fails checkDebugAarMetadata below it. targetSdk
+  // stays at 36 deliberately — compiling against 37 doesn't opt this app into 37's behaviour
+  // changes, and that's a separate decision from getting the Expressive components.
+  compileSdk { version = release(37) }
 
   defaultConfig {
     applicationId = "com.github.hyphen05.fuse"
@@ -78,11 +82,10 @@ dependencies {
   implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
+  // Pinned past the BOM (which carries 1.4.0) for Material 3 Expressive: LoadingIndicator,
+  // MaterialShapes and ButtonGroup only exist from the 1.5.0 alpha line onward. 1.4.1 and a stable
+  // 1.5.0 do not exist — don't "fix" this pin by dropping back to a release version.
   implementation(libs.androidx.compose.material3)
-  // Polygon morphing for the connection status indicator. material3 1.4.0 ships the Expressive
-  // opt-in marker and tokens but not LoadingIndicator itself, so the morph is built directly on
-  // the same primitives that component uses internally.
-  implementation(libs.androidx.graphics.shapes)
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
