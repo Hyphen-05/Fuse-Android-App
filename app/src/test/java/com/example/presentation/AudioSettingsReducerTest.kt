@@ -88,11 +88,15 @@ class AudioSettingsReducerTest {
         assertEquals(0.0f, audio.audioFlashStrength)
         assertEquals(9f, audio.hueDriftDegPerSec)
         assertEquals(2.0f, audio.hueDegreesPerBeat)
-        assertEquals(30f, audio.hueBeatNudgeDeg)
-        assertEquals(700f, audio.hueNudgeReturnMs)
+        assertEquals(70f, audio.hueBeatNudgeDeg)
+        assertEquals(450f, audio.hueNudgeReturnMs)
+        // F5: brightness expression is off this preset entirely — the sustain response has to land
+        // in hue, not brightness, or "flashy" comes straight back.
+        assertEquals("HUE_SHIFT", audio.sustainResponse)
 
-        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", 30f)))
-        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_nudge_return_ms", 700f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_beat_nudge_deg", 70f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefFloat("hue_nudge_return_ms", 450f)))
+        assertTrue(effects.contains(AudioSideEffect.SaveAudioPrefString("sustain_response", "HUE_SHIFT")))
     }
 
     @Test
