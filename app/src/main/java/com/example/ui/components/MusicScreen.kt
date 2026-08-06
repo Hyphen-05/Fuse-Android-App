@@ -478,7 +478,9 @@ fun MusicScreen(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Processed on your phone — needs the mic",
+                // F6: the old copy said "needs the mic", but this group covers both capture
+                // sources — the mic *and* on-device internal audio (Visualizer).
+                text = "Your phone listens and drives the colours",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
