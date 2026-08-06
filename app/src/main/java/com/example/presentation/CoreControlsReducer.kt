@@ -334,7 +334,11 @@ fun coreControlsReducer(
 
         is RgbIntent.SetDemoMode -> {
             val logMsg = if (intent.isDemo) "Switched to Demo Mode" else "Switched to Real Hardware BLE Mode"
-            
+            // Persisted since F1 (IMPROVEMENT_PLAN.md), because this is now a Settings toggle the
+            // user owns rather than something the app decides for them at startup. The ViewModel's
+            // init block reads it back and only overrides it when there is no BLE adapter at all.
+            val savePref = CoreSideEffect.SavePrefBoolean("demo_mode", intent.isDemo)
+
             if (intent.isDemo) {
                 // Mirrors ViewModel.disconnect() (called from setDemoMode(true)): it only acts on
                 // activeConnections.keys, a live-only registry that holds an address exactly
@@ -356,10 +360,10 @@ fun coreControlsReducer(
                             deviceConnectionStates = emptyMap()
                         )
                     )
-                    newState to listOf(CoreSideEffect.Log(logMsg))
+                    newState to listOf(CoreSideEffect.Log(logMsg), savePref)
                 } else {
                     var newDeviceConnectionStates = state.connectivity.deviceConnectionStates
-                    val effects = mutableListOf<CoreSideEffect>(CoreSideEffect.Log(logMsg))
+                    val effects = mutableListOf<CoreSideEffect>(CoreSideEffect.Log(logMsg), savePref)
                     keys.forEach { address ->
                         newDeviceConnectionStates = newDeviceConnectionStates + (address to BleConnectionState.DISCONNECTING)
                         effects.add(CoreSideEffect.DisconnectDevice(address))
@@ -376,7 +380,7 @@ fun coreControlsReducer(
                 val newState = state.copy(
                     coreControl = state.coreControl.copy(isDemoMode = false)
                 )
-                newState to listOf(CoreSideEffect.Log(logMsg))
+                newState to listOf(CoreSideEffect.Log(logMsg), savePref)
             }
         }
 

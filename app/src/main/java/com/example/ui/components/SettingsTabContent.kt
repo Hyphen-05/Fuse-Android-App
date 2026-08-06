@@ -1238,6 +1238,40 @@ fun LazyListScope.SettingsTabContent(
         }
     }
 
+    item {
+        ExpandableCategoryCard(
+            title = "Demo Mode",
+            icon = Icons.Default.DeveloperMode,
+            iconTint = MaterialTheme.colorScheme.primary,
+            initiallyExpanded = false
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("demo_mode_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Simulate hardware",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Fake devices and fake scan results, so you can explore the app with " +
+                            "nothing plugged in. Turning this on disconnects any real lights.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.coreControl.isDemoMode,
+                    onCheckedChange = { viewModel.setDemoMode(it) },
+                    modifier = Modifier.testTag("demo_mode_switch")
+                )
+            }
+        }
+    }
+
     if (experimentalUnlocked) {
     item {
         val context = LocalContext.current

@@ -252,7 +252,9 @@ fun MainScreen() {
     ) { results ->
         permissionsGranted = results.values.all { it }
         if (permissionsGranted) {
-            viewModel.setDemoMode(false) // toggle demo mode off if we now have physical permissions!
+            // Deliberately does NOT force demo mode off any more: it's a persisted user choice
+            // (Settings → Demo Mode) since F1, and granting permissions isn't a request to leave it.
+            // startScanning() already routes to the simulated scan while demo mode is on.
             viewModel.startScanning()
         }
     }
