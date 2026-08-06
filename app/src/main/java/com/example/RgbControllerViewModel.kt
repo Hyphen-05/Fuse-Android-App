@@ -1084,13 +1084,19 @@ class RgbControllerViewModel(
         val bluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothAdapter = bluetoothManager?.adapter
 
-        // If no hardware Bluetooth available, enforce Demo Mode automatically
+        // Demo Mode is the user's choice (Settings → Demo Mode), so it is restored from prefs rather
+        // than decided here — the one exception being a device with no BLE radio at all, where real
+        // mode isn't an option to offer.
         if (bluetoothAdapter == null) {
             _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = true)) }
-            addLog("No BLE hardware found. Auto-fallback to Demo/Simulation Mode.")
+            addLog("No BLE hardware found. Demo Mode enforced.")
         } else {
-            _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = false)) }
-            addLog("BLE adapter loaded. Ready to scan!")
+            val demoMode = prefsRepo.getAppStatePrefBoolean("demo_mode", false)
+            _uiState.update { it.copy(coreControl = it.coreControl.copy(isDemoMode = demoMode)) }
+            addLog(
+                if (demoMode) "BLE adapter loaded, but Demo Mode is on — no real devices will be used."
+                else "BLE adapter loaded. Ready to scan!"
+            )
         }
 
         // Combine DB aliases with scanned devices

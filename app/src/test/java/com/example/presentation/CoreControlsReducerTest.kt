@@ -295,6 +295,7 @@ class CoreControlsReducerTest {
         assertNull(newState.connectivity.connectedDeviceAddress)
         assertTrue(newState.connectivity.deviceConnectionStates.isEmpty())
         assertTrue(effects.none { it is CoreSideEffect.DisconnectDevice })
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean("demo_mode", true)))
     }
 
     @Test
@@ -320,15 +321,22 @@ class CoreControlsReducerTest {
         assertEquals(BleConnectionState.DISCONNECTED, newState.connectivity.deviceConnectionStates["stale-disconnected"])
         assertEquals(BleConnectionState.DISCONNECTING, newState.connectivity.deviceConnectionStates["live-connected"])
         assertEquals(BleConnectionState.DISCONNECTING, newState.connectivity.deviceConnectionStates["live-connecting"])
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean("demo_mode", true)))
     }
 
     @Test
-    fun setDemoMode_false_onlyTogglesFlagAndLogs() {
+    fun setDemoMode_false_togglesFlagLogsAndPersists() {
         val state = RgbUiState(coreControl = CoreControlState(isDemoMode = true))
         val (newState, effects) = reduce(state = state, intent = RgbIntent.SetDemoMode(false))
 
         assertFalse(newState.coreControl.isDemoMode)
-        assertEquals(listOf(CoreSideEffect.Log("Switched to Real Hardware BLE Mode")), effects)
+        assertEquals(
+            listOf(
+                CoreSideEffect.Log("Switched to Real Hardware BLE Mode"),
+                CoreSideEffect.SavePrefBoolean("demo_mode", false)
+            ),
+            effects
+        )
     }
 
     @Test
