@@ -59,24 +59,41 @@ class DeviceWriteManager(
      * [onWriteCompleted], which meant the counter only advanced when a write landed — once the
      * strip went idle the last reported rate stuck in the telemetry map forever, so the FPS readout
      * froze at whatever it had been doing rather than dropping to 0. Ticking independently reports
-     * a real 0 when nothing is being sent. Cancelled with [connectionScope] on disconnect.
+     * a real 0 when nothing is being sent.
+     *
+     * F3 (IMPROVEMENT_PLAN.md) — must be cancelled explicitly via [release], which is why it's held
+     * here rather than launched from a bare `init` block. [connectionScope] belongs to the whole
+     * transport, not to one connection, so it is never cancelled on a per-device disconnect: every
+     * manager rebuilt for an address (each service discovery, and `restoreWriteManagers` at VM init)
+     * used to leave the previous manager's sampler running forever. Orphans never see a write, so
+     * they published `0` into `deviceAchievedFps[address]` once a second, alternating with the live
+     * manager's real count — the "27 fps, 0, 27 fps" flicker.
      */
-    init {
-        connectionScope.launch(Dispatchers.IO) {
-            while (true) {
-                delay(1000L)
-                val fps = framesSent.getAndSet(0)
-                onFpsUpdate(address, fps)
-                if (fps > 0) {
-                    // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
-                    // device during a real session.
-                    com.example.DiagnosticLogger.log(
-                        "DeviceWriteManager",
-                        "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
-                    )
-                }
+    private val fpsSamplerJob: Job = connectionScope.launch(Dispatchers.IO) {
+        while (true) {
+            delay(1000L)
+            val fps = framesSent.getAndSet(0)
+            onFpsUpdate(address, fps)
+            if (fps > 0) {
+                // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
+                // device during a real session.
+                com.example.DiagnosticLogger.log(
+                    "DeviceWriteManager",
+                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
+                )
             }
         }
+    }
+
+    /**
+     * Stops this manager's background work. Must be called whenever the manager is dropped —
+     * replaced in `deviceWriteManagers` or removed on disconnect — since [connectionScope] outlives
+     * any single connection and will not do it for us. See [fpsSamplerJob].
+     */
+    fun release() {
+        fpsSamplerJob.cancel()
+        pendingJob?.cancel()
+        pendingJob = null
     }
 
     /**

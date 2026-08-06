@@ -286,7 +286,10 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
         writeCharacteristics[address] = charac
         val manager = buildWriteManager(address, gatt, charac)
-        deviceWriteManagers[address] = manager
+        // F3: release whatever this replaces. Service discovery runs again on every reconnect, and
+        // a dropped manager's 1Hz FPS sampler lives on connectionScope (transport-wide, never
+        // cancelled per device) — orphans kept publishing 0 over the live manager's readings.
+        deviceWriteManagers.put(address, manager)?.release()
 
         return CharacteristicRegistration.Registered(
             address = address,
@@ -311,7 +314,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     override fun removeConnection(address: String): BluetoothGatt? {
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
-        deviceWriteManagers.remove(address)
+        deviceWriteManagers.remove(address)?.release()
         return gatt
     }
 
@@ -344,7 +347,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         activeConnections.forEach { (address, gatt) ->
             val charac = writeCharacteristics[address]
             if (charac != null) {
-                deviceWriteManagers[address] = buildWriteManager(address, gatt, charac)
+                deviceWriteManagers.put(address, buildWriteManager(address, gatt, charac))?.release()
                 onRestored(address)
             }
         }
