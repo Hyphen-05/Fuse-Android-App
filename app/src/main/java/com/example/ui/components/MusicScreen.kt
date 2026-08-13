@@ -54,6 +54,7 @@ fun MusicScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
+    val savedDevices by viewModel.savedDevices.collectAsState()
     val context = LocalContext.current
 
     var pendingMode by remember { mutableStateOf<String?>(null) }
@@ -469,6 +470,16 @@ fun MusicScreen(
                 }
             }
         }
+
+        // --- How the visualiser is spread across multiple strips ---
+        // Moved here from the per-device cards on the Devices tab: a role only means something
+        // relative to the other strips, so it belongs next to the visualiser it shapes.
+        val controlledDevices = savedDevices.filter { it.isActiveControlEnabled }
+        VisualizerRoleLayoutCard(
+            controlledDevices = controlledDevices,
+            onSelectLayout = { viewModel.applyVisualizerRoleLayout(it) },
+            modifier = Modifier.padding(top = 8.dp)
+        )
 
         // --- Visualiser Modes ---
         Column(modifier = Modifier.padding(top = 8.dp)) {
