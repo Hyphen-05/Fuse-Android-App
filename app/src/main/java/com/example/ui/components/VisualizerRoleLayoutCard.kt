@@ -3,9 +3,10 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -14,6 +15,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -57,6 +60,30 @@ fun currentVisualizerLayout(devices: List<SavedDevice>): String? {
 }
 
 /**
+ * What each strip is actually doing under the current roles, in the order the visualiser assigns
+ * them — the same ordering `publishAudioDspResult` uses, so "Bass" here is the strip really getting
+ * the bass.
+ *
+ * This is what makes Swap Roles legible: the button changes nothing visible until music is playing,
+ * so without a readout there is no way to tell it did anything.
+ */
+fun deviceRoleSummaries(devices: List<SavedDevice>): List<Pair<SavedDevice, String>> {
+    val bandSplitOrder = devices.filter { it.deviceRole == "BandSplit" }.map { it.macAddress }
+    val alternatingOrder = devices.filter { it.deviceRole == "AlternatingFlash" }.map { it.macAddress }
+    return devices.map { device ->
+        val label = when (device.deviceRole) {
+            "HueOffset" -> "Hue +${device.hueOffsetDegrees.toInt()}°"
+            "BandSplit" ->
+                if (bandSplitOrder.indexOf(device.macAddress) % 2 == 0) "Bass" else "Mids & highs"
+            "AlternatingFlash" ->
+                "Flash ${alternatingOrder.indexOf(device.macAddress) + 1} of ${alternatingOrder.size}"
+            else -> "In sync"
+        }
+        device to label
+    }
+}
+
+/**
  * How the visualiser is spread across several strips, as one choice for the whole setup.
  *
  * This replaces the per-device "Visualizer Role" chips that used to sit on each saved device's card
@@ -72,6 +99,7 @@ fun VisualizerRoleLayoutCard(
 ) {
     val selected = currentVisualizerLayout(controlledDevices)
     val singleDevice = controlledDevices.size < 2
+    val haptic = LocalHapticFeedback.current
 
     Card(
         modifier = modifier
@@ -105,30 +133,25 @@ fun VisualizerRoleLayoutCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // Two rows of two: four chips in one row are too cramped for "Alternate" and
-            // "Band Split" to stay readable on a phone.
-            VISUALIZER_LAYOUTS.chunked(2).forEach { rowLayouts ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    rowLayouts.forEach { (layout, _) ->
-                        FilterChip(
-                            selected = selected == layout,
-                            enabled = !singleDevice,
-                            onClick = { onSelectLayout(layout) },
-                            label = {
-                                Text(
-                                    text = LAYOUT_LABELS[layout] ?: layout,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("visualizer_layout_chip_$layout")
-                        )
-                    }
+            // One scrolling row of natural-width chips, matching the category chips on the Modes
+            // tab. Laying them out two-per-row with weight(1f) stretched each chip to half the
+            // screen, which reads as four buttons rather than as a set of chips.
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(VISUALIZER_LAYOUTS) { (layout, _) ->
+                    FilterChip(
+                        selected = selected == layout,
+                        enabled = !singleDevice,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onSelectLayout(layout)
+                        },
+                        label = { Text(text = LAYOUT_LABELS[layout] ?: layout) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("visualizer_layout_chip_$layout")
+                    )
                 }
             }
         }

@@ -66,4 +66,41 @@ class VisualizerRoleLayoutTest {
     fun `a single mirrored device still reads as Mirror`() {
         assertEquals("Mirror", currentVisualizerLayout(listOf(device("A", "Mirror"))))
     }
+
+    @Test
+    fun `band split summary names the halves in visualiser order`() {
+        val summaries = deviceRoleSummaries(listOf(device("A", "BandSplit"), device("B", "BandSplit")))
+        assertEquals(listOf("Bass", "Mids & highs"), summaries.map { it.second })
+    }
+
+    @Test
+    fun `hue offset summary carries the angle`() {
+        val summaries = deviceRoleSummaries(listOf(device("A", "Mirror"), device("B", "HueOffset", 120f)))
+        assertEquals(listOf("In sync", "Hue +120°"), summaries.map { it.second })
+    }
+
+    @Test
+    fun `alternating summary counts only the alternating devices`() {
+        // A Mirror device in the middle must not take a slot in the flash rotation, or the labels
+        // stop matching what publishAudioDspResult actually does.
+        val devices = listOf(
+            device("A", "AlternatingFlash"),
+            device("B", "Mirror"),
+            device("C", "AlternatingFlash")
+        )
+        assertEquals(
+            listOf("Flash 1 of 2", "In sync", "Flash 2 of 2"),
+            deviceRoleSummaries(devices).map { it.second }
+        )
+    }
+
+    @Test
+    fun `swapping two band split devices swaps which one has the bass`() {
+        // What Settings' Swap Roles has to produce: the labels move, the device order doesn't.
+        val before = listOf(device("A", "BandSplit"), device("B", "Mirror"))
+        assertEquals(listOf("Bass", "In sync"), deviceRoleSummaries(before).map { it.second })
+
+        val after = listOf(device("A", "Mirror"), device("B", "BandSplit"))
+        assertEquals(listOf("In sync", "Bass"), deviceRoleSummaries(after).map { it.second })
+    }
 }

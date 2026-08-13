@@ -27,9 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import com.example.RgbUiState
@@ -368,8 +371,48 @@ fun LazyListScope.SettingsTabContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // The roles themselves are invisible until music is playing, so the swap gets a
+                    // readout: each strip and the part it plays, straight from the saved roles.
+                    // Tapping the button visibly moves the labels down the list.
+                    if (controlledDevices.size >= 2) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.testTag("device_role_summary")
+                        ) {
+                            deviceRoleSummaries(controlledDevices).forEach { (device, roleLabel) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = device.customName.ifBlank { device.macAddress },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Text(
+                                        text = roleLabel,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val swapContext = LocalContext.current
+                    val swapHaptic = LocalHapticFeedback.current
                     OutlinedButton(
-                        onClick = { viewModel.rotateDeviceRoles() },
+                        onClick = {
+                            swapHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.rotateDeviceRoles()
+                            android.widget.Toast.makeText(
+                                swapContext,
+                                "Roles swapped between your strips",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        },
                         enabled = controlledDevices.size >= 2,
                         shape = CircleShape,
                         modifier = Modifier
