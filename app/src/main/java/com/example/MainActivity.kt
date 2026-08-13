@@ -3,8 +3,11 @@ package com.example
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.BroadcastReceiver
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import android.content.pm.PackageManager
@@ -146,7 +149,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.ColorWheel
 import com.example.ui.components.SettingsTabContent
@@ -253,11 +260,35 @@ fun MainScreen() {
         )
     }
 
+    // Android stops showing the system permission dialog once the user has denied it twice, and
+    // `launch()` then returns instantly with the same denial — the button looks broken. The only
+    // way out is the app's own settings page.
+    //
+    // `shouldShowRequestPermissionRationale` is false both before the first ask *and* after a
+    // permanent denial, so on its own it can't tell those apart. The persisted "we have asked"
+    // flag is what disambiguates them across app restarts.
+    val permissionPrefs = remember {
+        context.getSharedPreferences("rgb_prefs", Context.MODE_PRIVATE)
+    }
+    val hostActivity = remember(context) { context.findHostActivity() }
+
+    fun computePermissionsBlocked(): Boolean {
+        val activity = hostActivity ?: return false
+        if (!permissionPrefs.getBoolean(PREF_HAS_REQUESTED_BT_PERMISSIONS, false)) return false
+        return requiredPermissions.any { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED &&
+                !ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)
+        }
+    }
+
+    var permissionsBlocked by remember { mutableStateOf(false) }
+
     // Register ActivityResultLauncher for multiple permissions
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         permissionsGranted = results.values.all { it }
+        permissionsBlocked = computePermissionsBlocked()
         if (permissionsGranted) {
             // Deliberately does NOT force demo mode off any more: it's a persisted user choice
             // (Settings → Demo Mode) since F1, and granting permissions isn't a request to leave it.
@@ -271,6 +302,33 @@ fun MainScreen() {
         permissionsGranted = requiredPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
+        permissionsBlocked = !permissionsGranted && computePermissionsBlocked()
+    }
+
+    fun requestBluetoothPermissions() {
+        permissionPrefs.edit().putBoolean(PREF_HAS_REQUESTED_BT_PERMISSIONS, true).apply()
+        permissionLauncher.launch(requiredPermissions.toTypedArray())
+    }
+
+    fun openAppSettings() {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null)
+            )
+        )
+    }
+
+    // Permissions can only be restored from the system settings page, i.e. from outside the app, so
+    // re-check on every resume — otherwise the "Open App Settings" card would still be sitting there
+    // after the user came back having granted them.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) checkPermissions()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(Unit) {
@@ -547,8 +605,10 @@ fun MainScreen() {
                 HomeScreen(
                     viewModel = viewModel,
                     permissionsGranted = permissionsGranted,
-                    requiredPermissions = requiredPermissions,
-                    permissionLauncher = permissionLauncher,
+                    permissionsBlocked = permissionsBlocked,
+                    onGrantPermissions = {
+                        if (permissionsBlocked) openAppSettings() else requestBluetoothPermissions()
+                    },
                     onStartAmbianceCapture = {
                         val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                         mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
@@ -563,7 +623,7 @@ fun MainScreen() {
                     onScanClick = {
                         checkPermissions()
                         if (!permissionsGranted && !uiState.coreControl.isDemoMode) {
-                            permissionLauncher.launch(requiredPermissions.toTypedArray())
+                            if (permissionsBlocked) openAppSettings() else requestBluetoothPermissions()
                         } else {
                             viewModel.startScanning()
                         }
@@ -937,3 +997,23 @@ data class NavigationItemData(
     val testTag: String
 )
 
+
+/**
+ * Set the first time we ask for Bluetooth permissions. Without it, "the system won't show the
+ * dialog" (a permanent denial) is indistinguishable from "we've never asked", since
+ * `shouldShowRequestPermissionRationale` is false in both cases.
+ */
+private const val PREF_HAS_REQUESTED_BT_PERMISSIONS = "has_requested_bt_permissions"
+
+/**
+ * `shouldShowRequestPermissionRationale` needs the Activity, and `LocalContext` inside Compose is
+ * usually a wrapper around it rather than the Activity itself.
+ */
+private fun Context.findHostActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}

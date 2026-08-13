@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -44,8 +43,8 @@ import com.example.domain.model.AppScene
 fun HomeScreen(
     viewModel: RgbControllerViewModel,
     permissionsGranted: Boolean,
-    requiredPermissions: List<String>,
-    permissionLauncher: ActivityResultLauncher<Array<String>>,
+    permissionsBlocked: Boolean,
+    onGrantPermissions: () -> Unit,
     onStartAmbianceCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -236,7 +235,14 @@ fun HomeScreen(
                             )
                         }
                         Text(
-                            text = "To scan and connect to physical DuoCo RGB light strips, this app requires local Bluetooth permissions.",
+                            text = if (permissionsBlocked) {
+                                "Bluetooth permissions were denied, and Android won't ask again from " +
+                                    "inside the app. Turn them on in the app's system settings to scan " +
+                                    "for light strips."
+                            } else {
+                                "To scan and connect to physical DuoCo RGB light strips, this app " +
+                                    "requires local Bluetooth permissions."
+                            },
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
                             )
@@ -246,9 +252,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.End
                         ) {
                             Button(
-                                onClick = {
-                                    permissionLauncher.launch(requiredPermissions.toTypedArray())
-                                },
+                                onClick = onGrantPermissions,
                                 interactionSource = grantPermissionsInteractionSource,
                                 modifier = Modifier
                                     .height(44.dp)
@@ -259,7 +263,7 @@ fun HomeScreen(
                                 ),
                                 shape = CircleShape
                             ) {
-                                Text("Grant Permissions")
+                                Text(if (permissionsBlocked) "Open App Settings" else "Grant Permissions")
                             }
                         }
                     }
