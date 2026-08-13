@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -55,41 +57,36 @@ fun DevicesScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Header
-                Row(
+                // The button keeps its place and size in both states so nothing jumps when a scan
+                // starts, and the scan indicator sits *below* it rather than replacing it — a
+                // running scan used to leave no way to stop it short of the 15s timeout.
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (uiState.connectivity.isScanning) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            // The same Expressive shape-morph as the connect indicator
-                            // (ConnectionStatusSurface), sized for a header rather than a
-                            // full-screen moment — big enough to read as the page's focal point
-                            // while scanning, not a spinner tucked into a row of text.
-                            LoadingIndicator(
-                                modifier = Modifier.size(64.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "Scanning...",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            )
-                        }
-                    } else {
-                        Button(
-                            onClick = onScanClick,
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                        ) {
-                            Text("Scan for Devices")
-                        }
+                    val isScanning = uiState.connectivity.isScanning
+                    Button(
+                        onClick = { if (isScanning) viewModel.stopScanning() else onScanClick() },
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("scan_button")
+                    ) {
+                        Text(if (isScanning) "Scanning… tap to stop" else "Scan for Devices")
+                    }
+
+                    if (isScanning) {
+                        // The same Expressive shape-morph as the connect indicator
+                        // (ConnectionStatusSurface), sized for a header rather than a
+                        // full-screen moment — big enough to read as the page's focal point
+                        // while scanning, not a spinner tucked into a row of text. The old
+                        // "Scanning..." caption under it is gone: the button above now says it.
+                        LoadingIndicator(
+                            modifier = Modifier.size(64.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
 
@@ -474,13 +471,19 @@ fun DevicesScreen(
                                             }
                                         }
                                     }
-                                    Text(
-                                        text = device.address,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontFamily = FontFamily.Monospace
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = device.address,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontFamily = FontFamily.Monospace
+                                            )
                                         )
-                                    )
+                                        SignalStrengthBars(rssi = device.rssi)
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -546,6 +549,49 @@ fun DevicesScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+}
+
+/**
+ * Four rising bars filled according to signal strength, with the raw dBm beside them.
+ *
+ * The scan already carries RSSI (`ScannedRgbDevice.rssi`, and the discovered list is sorted by it),
+ * but nothing surfaced it — with several strips in range there was no way to tell which entry is
+ * the one in the room with you.
+ */
+@Composable
+private fun SignalStrengthBars(rssi: Int) {
+    // The usual Android Wi-Fi/BLE buckets: -60 and up is across-the-room strong, below -80 is
+    // barely there and likely to drop mid-connect.
+    val level = when {
+        rssi >= -60 -> 4
+        rssi >= -70 -> 3
+        rssi >= -80 -> 2
+        else -> 1
+    }
+    val tint = when (level) {
+        4, 3 -> MaterialTheme.colorScheme.secondary
+        2 -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.outline
+    }
+    Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.testTag("signal_bars_level_$level")
+    ) {
+        repeat(4) { index ->
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height((3 + index * 2).dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(if (index < level) tint else MaterialTheme.colorScheme.outlineVariant)
+            )
+        }
+        Text(
+            text = "$rssi dBm",
+            style = MaterialTheme.typography.labelSmall.copy(color = tint)
         )
     }
 }
