@@ -243,6 +243,17 @@ class VisualizerCaptureSource(private val context: Context) : AudioCaptureSource
                     vis.release()
                 } catch (re: Exception) {}
                 if (attachRetryCount < MAX_ATTACH_RETRIES) {
+                    // Wait before retrying. What has to change here is the *other* client's
+                    // captureSize, so recursing immediately burned all five attempts inside a few
+                    // microseconds against a condition that can only resolve over time. Same
+                    // exponential backoff the exception path uses.
+                    val retryDelayMs = EXCEPTION_RETRY_BASE_DELAY_MS shl attachRetryCount
+                    try {
+                        Thread.sleep(retryDelayMs)
+                    } catch (ie: InterruptedException) {
+                        return false
+                    }
+                    if (!isRunning()) return false
                     return attemptStart(onFrame, onLog, isRunning, onError, attachRetryCount = attachRetryCount + 1, exceptionRetryCount = exceptionRetryCount)
                 }
                 onLog("Visualizer's shared session capture size is too small after $MAX_ATTACH_RETRIES attempts. Running simulation.")

@@ -413,7 +413,10 @@ fun AmbianceFineTuneControls(
                         Button(
                             onClick = {
                                 val trimmedName = presetNameToSave.trim()
-                                if (trimmedName.isNotEmpty()) {
+                                val shadowsBuiltIn = BUILT_IN_AMBIANCE_PRESET_NAMES.any {
+                                    it.equals(trimmedName, ignoreCase = true)
+                                }
+                                if (trimmedName.isNotEmpty() && !shadowsBuiltIn) {
                                     val newPreset = AmbiancePreset(
                                         id = "custom_" + System.currentTimeMillis(),
                                         name = trimmedName,
@@ -442,6 +445,8 @@ fun AmbianceFineTuneControls(
 
                                     showSavePresetDialog = false
                                     android.widget.Toast.makeText(context, "Preset '$trimmedName' saved!", android.widget.Toast.LENGTH_SHORT).show()
+                                } else if (shadowsBuiltIn) {
+                                    android.widget.Toast.makeText(context, "'$trimmedName' is a built-in preset — pick another name", android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
                                     android.widget.Toast.makeText(context, "Please enter a valid name", android.widget.Toast.LENGTH_SHORT).show()
                                 }

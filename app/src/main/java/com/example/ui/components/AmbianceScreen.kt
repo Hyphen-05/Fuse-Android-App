@@ -162,7 +162,8 @@ fun AmbianceScreen(
     var presetToDelete by remember { mutableStateOf<AmbiancePreset?>(null) }
     var newPresetName by remember { mutableStateOf("") }
 
-    // Define 4 built-in presets
+    // Define the built-in presets. Their names are also listed in BUILT_IN_AMBIANCE_PRESET_NAMES,
+    // which the save-a-custom-preset dialog rejects — keep the two in step when adding one.
     // sceneCutSensitivity is a *threshold*: AmbianceProcessor does `isSceneCut = aggDelta >
     // sceneCutSensitivity`, so a higher number means fewer instant cuts. The values below were
     // originally ordered as if higher meant more sensitive, which put Gaming ("snappy") at the
@@ -813,3 +814,18 @@ fun AmbianceDiagnosticsCard() {
     }
 }
 
+
+/**
+ * Names of the built-in ambiance presets, for the save-a-custom-preset dialog to refuse.
+ *
+ * A custom preset called "Balanced" doesn't replace the built-in one — both cards then match the
+ * active preset by name and both render as selected, with no way to tell which set of values is
+ * actually live.
+ */
+internal val BUILT_IN_AMBIANCE_PRESET_NAMES = listOf(
+    "Balanced",
+    "Movie / Cinematic",
+    "Gaming / Fast Action",
+    "Chill / Ambient",
+    "Candlelight"
+)
