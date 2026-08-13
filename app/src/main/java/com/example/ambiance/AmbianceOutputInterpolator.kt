@@ -27,6 +27,11 @@ class AmbianceOutputInterpolator(
 
     private var lastTickTime: Long = 0
 
+    // One repository for the object's lifetime. This used to be constructed inside scheduleTick(),
+    // i.e. every 20–100ms for as long as ambiance ran, and each construction opens six
+    // SharedPreferences handles.
+    private val preferencesRepository = com.example.data.repository.AppPreferencesRepositoryImpl(context)
+
     fun start() {
         com.example.DiagnosticLogger.log(
             "AmbianceOutputInterpolator",
@@ -70,8 +75,8 @@ class AmbianceOutputInterpolator(
     }
 
     private fun scheduleTick() {
-        val pacingMs = com.example.data.repository.AppPreferencesRepositoryImpl(context)
-            .getPacingPrefInt("slowest_connected_pacing", 100)
+        val pacingMs = preferencesRepository
+            .getPacingPrefInt(SLOWEST_PACING_PREF_KEY, DEFAULT_SLOWEST_PACING_MS)
             .coerceAtLeast(20)
 
         handler?.postDelayed({

@@ -20,6 +20,13 @@ class AmbianceProcessor(
     private var lastLoggedColor = Triple(0, 0, 0)
     private var wasSceneCut = false
 
+    // Both used to be re-acquired inside processFrame, i.e. up to 60 times a second for the whole
+    // capture session — and every AppPreferencesRepositoryImpl opens six SharedPreferences handles.
+    // The reads themselves stay per-frame: once the file is loaded they're in-memory map lookups,
+    // and they're what makes a slider move show up on the strip straight away.
+    private val prefs = context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE)
+    private val preferencesRepository = com.example.data.repository.AppPreferencesRepositoryImpl(context)
+
     private data class EmaState(
         val emaLinR: Double, val emaLinG: Double, val emaLinB: Double
     )
@@ -29,10 +36,9 @@ class AmbianceProcessor(
         try {
             val nowMs = System.currentTimeMillis()
             
-            val prefs = context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE)
             val updateRateCapFps = prefs.getInt("update_rate_cap_fps", 20).coerceAtLeast(1)
-            val slowestDevicePacing = com.example.data.repository.AppPreferencesRepositoryImpl(context)
-                .getPacingPrefInt("slowest_connected_pacing", 0)
+            val slowestDevicePacing = preferencesRepository
+                .getPacingPrefInt(SLOWEST_PACING_PREF_KEY, DEFAULT_SLOWEST_PACING_MS)
             
             val fpsIntervalMs = 1000 / updateRateCapFps
             val effectiveIntervalMs = max(fpsIntervalMs, slowestDevicePacing)
@@ -295,3 +301,14 @@ class AmbianceProcessor(
         )
     }
 }
+
+/**
+ * Pacing floor for the ambiance output, in milliseconds — the slowest write interval any connected
+ * device can keep up with, written reactively by the ViewModel as devices connect.
+ *
+ * The default used to differ by reader: the processor assumed 0 (no floor) and the interpolator
+ * assumed 100. It only shows before anything has connected — when ambiance has nothing to write to
+ * anyway — so both now take the conservative value rather than the fast one.
+ */
+internal const val SLOWEST_PACING_PREF_KEY = "slowest_connected_pacing"
+internal const val DEFAULT_SLOWEST_PACING_MS = 100
