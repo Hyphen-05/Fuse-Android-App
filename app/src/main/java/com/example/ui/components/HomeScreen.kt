@@ -353,225 +353,232 @@ fun HomeScreen(
 
         // --- Control Deck (Only displayed when CONNECTED) ---
         if (uiState.connectivity.connectionState == BleConnectionState.CONNECTED) {
-            // CCT Warmth Slider Card (in place of power status card)
-            if (uiState.coreControl.isPowerOn) {
+            val controlsInert = !uiState.coreControl.isPowerOn
+
+            if (controlsInert) {
                 item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("cct_control_card"),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
-                        ) {
-                            val warmthPercentage = uiState.coreControl.warmth
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "Color Temperature (CCT)",
-                                        style = MaterialTheme.typography.titleMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    )
-                                }
-                                Text(
-                                    text = "$warmthPercentage%",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                )
-                            }
-
-                            val warmthGradient = remember {
-                                // Generate a perceptually matched gradient track to align with the non-linear slider mapping
-                                val colors = (0..10).map { step ->
-                                    val pct = step * 10
-                                    val k = ColorUtils.warmthToKelvin(pct)
-                                    val rgb = ColorUtils.convertKelvinToRgb(k)
-                                    Color(rgb[0], rgb[1], rgb[2])
-                                }
-                                androidx.compose.ui.graphics.Brush.horizontalGradient(colors)
-                            }
-
-                            ExpressiveSlider(
-                                value = warmthPercentage,
-                                onValueChange = { viewModel.setWarmth(it) },
-                                labelPrefix = "Warmth",
-                                activeColor = Color.Transparent,
-                                inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                contentColor = Color.White,
-                                trackBrush = warmthGradient,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("warmth_slider")
-                            )
-                        }
-                    }
+                    PowerOffHintCard(onTurnOn = { viewModel.setPower(true) })
                 }
             }
-            // Brightness Slider Card (below power card)
-            if (uiState.coreControl.isPowerOn) {
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("brightness_control_card"),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+
+            // CCT Warmth Slider Card (in place of power status card)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .inertWhen(controlsInert)
+                        .testTag("cct_control_card"),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
+                        val warmthPercentage = uiState.coreControl.warmth
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "Dimming Control",
+                                    text = "Color Temperature (CCT)",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                 )
-                                Text(
-                                    text = "${uiState.coreControl.brightness}%",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                )
                             }
+                            Text(
+                                text = "$warmthPercentage%",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
 
-                            ExpressiveSlider(
-                                value = uiState.coreControl.brightness,
-                                onValueChange = { viewModel.setBrightness(it) },
-                                labelPrefix = "Brightness",
-                                activeColor = MaterialTheme.colorScheme.primary,
-                                inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("brightness_slider")
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             )
                         }
+
+                        val warmthGradient = remember {
+                            // Generate a perceptually matched gradient track to align with the non-linear slider mapping
+                            val colors = (0..10).map { step ->
+                                val pct = step * 10
+                                val k = ColorUtils.warmthToKelvin(pct)
+                                val rgb = ColorUtils.convertKelvinToRgb(k)
+                                Color(rgb[0], rgb[1], rgb[2])
+                            }
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(colors)
+                        }
+
+                        ExpressiveSlider(
+                            value = warmthPercentage,
+                            onValueChange = { viewModel.setWarmth(it) },
+                            labelPrefix = "Warmth",
+                            activeColor = Color.Transparent,
+                            inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            contentColor = Color.White,
+                            trackBrush = warmthGradient,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("warmth_slider")
+                        )
                     }
                 }
-
-                // Color Preview Card (existing colour card)
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("control_deck_card"),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            }
+            // Brightness Slider Card (below power card)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .inertWhen(controlsInert)
+                        .testTag("brightness_control_card"),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 16.dp, horizontal = 16.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Text(
+                                text = "Dimming Control",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Text(
+                                text = "${uiState.coreControl.brightness}%",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
+
+                        ExpressiveSlider(
+                            value = uiState.coreControl.brightness,
+                            onValueChange = { viewModel.setBrightness(it) },
+                            labelPrefix = "Brightness",
+                            activeColor = MaterialTheme.colorScheme.primary,
+                            inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("brightness_slider")
+                        )
+                    }
+                }
+            }
+
+            // Color Preview Card (existing colour card)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .inertWhen(controlsInert)
+                        .testTag("control_deck_card"),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 16.dp, horizontal = 16.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val paletteColors = listOf(
+                                Color.Red, Color.Green, Color.Blue,
+                                Color.Yellow, Color.Cyan, Color(0xFF6A0DAD),
+                                Color.White, Color(0xFFFF1493), Color(0xFFFFA500), Color(0xFF00FF7F)
+                            )
+                            val leftChips = paletteColors.take(5)
+                            val rightChips = paletteColors.drop(5)
+
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                val paletteColors = listOf(
-                                    Color.Red, Color.Green, Color.Blue,
-                                    Color.Yellow, Color.Cyan, Color(0xFF6A0DAD),
-                                    Color.White, Color(0xFFFF1493), Color(0xFFFFA500), Color(0xFF00FF7F)
-                                )
-                                val leftChips = paletteColors.take(5)
-                                val rightChips = paletteColors.drop(5)
-
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    leftChips.forEach { color ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(color)
-                                                .border(
-                                                    width = if (activeComposeColor == color) 3.dp else 1.dp,
-                                                    color = if (activeComposeColor == color) MaterialTheme.colorScheme.onSurface else Color.White,
-                                                    shape = CircleShape
+                                leftChips.forEach { color ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .border(
+                                                width = if (activeComposeColor == color) 3.dp else 1.dp,
+                                                color = if (activeComposeColor == color) MaterialTheme.colorScheme.onSurface else Color.White,
+                                                shape = CircleShape
+                                            )
+                                            .clickable {
+                                                viewModel.setColor(
+                                                    (color.red * 255).toInt(),
+                                                    (color.green * 255).toInt(),
+                                                    (color.blue * 255).toInt()
                                                 )
-                                                .clickable {
-                                                    viewModel.setColor(
-                                                        (color.red * 255).toInt(),
-                                                        (color.green * 255).toInt(),
-                                                        (color.blue * 255).toInt()
-                                                    )
-                                                }
-                                                .testTag("palette_color_${(color.red * 255).toInt()}_${(color.green * 255).toInt()}_${(color.blue * 255).toInt()}")
-                                        )
-                                    }
+                                            }
+                                            .testTag("palette_color_${(color.red * 255).toInt()}_${(color.green * 255).toInt()}_${(color.blue * 255).toInt()}")
+                                    )
                                 }
+                            }
 
-                                // Interactive Canvas Color Wheel
-                                ColorWheel(
-                                    selectedColor = activeComposeColor,
-                                    onColorChanged = { r, g, b ->
-                                        viewModel.setColor(r, g, b)
-                                    },
-                                    modifier = Modifier
-                                        .size(200.dp)
-                                        .testTag("interactive_color_wheel")
-                                )
+                            // Interactive Canvas Color Wheel
+                            ColorWheel(
+                                selectedColor = activeComposeColor,
+                                onColorChanged = { r, g, b ->
+                                    viewModel.setColor(r, g, b)
+                                },
+                                modifier = Modifier
+                                    .size(200.dp)
+                                    .testTag("interactive_color_wheel")
+                            )
 
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    rightChips.forEach { color ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(color)
-                                                .border(
-                                                    width = if (activeComposeColor == color) 3.dp else 1.dp,
-                                                    color = if (activeComposeColor == color) MaterialTheme.colorScheme.onSurface else Color.White,
-                                                    shape = CircleShape
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                rightChips.forEach { color ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .border(
+                                                width = if (activeComposeColor == color) 3.dp else 1.dp,
+                                                color = if (activeComposeColor == color) MaterialTheme.colorScheme.onSurface else Color.White,
+                                                shape = CircleShape
+                                            )
+                                            .clickable {
+                                                viewModel.setColor(
+                                                    (color.red * 255).toInt(),
+                                                    (color.green * 255).toInt(),
+                                                    (color.blue * 255).toInt()
                                                 )
-                                                .clickable {
-                                                    viewModel.setColor(
-                                                        (color.red * 255).toInt(),
-                                                        (color.green * 255).toInt(),
-                                                        (color.blue * 255).toInt()
-                                                    )
-                                                }
-                                                .testTag("palette_color_${(color.red * 255).toInt()}_${(color.green * 255).toInt()}_${(color.blue * 255).toInt()}")
-                                        )
-                                    }
+                                            }
+                                            .testTag("palette_color_${(color.red * 255).toInt()}_${(color.green * 255).toInt()}_${(color.blue * 255).toInt()}")
+                                    )
                                 }
                             }
                         }
@@ -881,6 +888,60 @@ fun DeviceTile(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Shown on Home when a device is connected but power is off, above the dimmed control deck.
+ *
+ * The deck used to be hidden outright in this state, which left Home nearly blank and gave no clue
+ * that the power button in the top bar is what brings the controls back.
+ */
+@Composable
+private fun PowerOffHintCard(onTurnOn: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("power_off_hint_card"),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.PowerSettingsNew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Power is off",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                )
+                Text(
+                    text = "Turn the lights on to use the controls below.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                )
+            }
+            FilledTonalButton(
+                onClick = onTurnOn,
+                shape = CircleShape,
+                modifier = Modifier.testTag("power_on_hint_btn")
+            ) {
+                Text("Turn on")
             }
         }
     }

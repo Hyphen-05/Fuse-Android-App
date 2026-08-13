@@ -13,8 +13,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 
 /**
@@ -39,6 +42,26 @@ fun rememberExpressiveHapticType(): HapticFeedbackType = remember {
         }
     }
 }
+
+/**
+ * Dims content to the Material disabled opacity and swallows every touch that lands inside it, so a
+ * card can read as unavailable instead of disappearing.
+ *
+ * Used by the Home control deck while power is off: hiding the CCT/brightness/colour cards left the
+ * screen nearly blank at the moment the user most needs a hint, with nothing pointing at the power
+ * button that brings them back.
+ */
+fun Modifier.inertWhen(inert: Boolean): Modifier = this
+    .alpha(if (inert) 0.38f else 1f)
+    .then(
+        if (!inert) Modifier else Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            }
+        }
+    )
 
 @Composable
 fun Modifier.joyfulPress(
