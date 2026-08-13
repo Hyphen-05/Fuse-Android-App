@@ -568,7 +568,15 @@ fun AmbianceScreen(
             }
         }
 
-
+        // 6. Fine-tune — the same seven sliders that live under Settings → Ambiance, mirrored here
+        // beside the presets they actually feed. Collapsed by default so the tab still opens on the
+        // presets; "Save Current Configuration as Preset" comes with them, next to the list it adds
+        // to rather than two tabs away from it.
+        AmbianceFineTuneControls(
+            state = uiState,
+            viewModel = viewModel,
+            title = "Fine-tune"
+        )
     }
 
     // Dialog: Delete Custom Preset
