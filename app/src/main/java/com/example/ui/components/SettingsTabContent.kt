@@ -348,6 +348,41 @@ fun LazyListScope.SettingsTabContent(
             initiallyExpanded = false
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Which strip plays which half of a layout depends on where they are in the room,
+                // and nothing in the app can know that — so the layout itself is picked on the
+                // Audio tab, and reversing it is one action here.
+                val controlledDevices = viewModel.savedDevices.collectAsState().value
+                    .filter { it.isActiveControlEnabled }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Switch Device Roles",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (controlledDevices.size < 2) {
+                            "Swaps which strip plays which part of a multi-strip visualiser layout. Needs two or more connected."
+                        } else {
+                            "Swaps which strip plays which part of the visualiser layout chosen on the Audio tab."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = { viewModel.rotateDeviceRoles() },
+                        enabled = controlledDevices.size >= 2,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("swap_device_roles_btn")
+                    ) {
+                        Text("Swap Roles")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
                 ExpandableCategoryCard(
                     title = "Temporal Filtering & Smoothing",
                     icon = Icons.Default.FilterAlt,

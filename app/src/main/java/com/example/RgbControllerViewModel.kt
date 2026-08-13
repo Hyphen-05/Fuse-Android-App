@@ -2283,6 +2283,57 @@ class RgbControllerViewModel(
         }
     }
 
+    /**
+     * Assigns visualiser roles across every currently controlled device at once.
+     *
+     * Roles are stored per device, but they only mean anything as a *set* — "one strip offset from
+     * the other" is a property of the pair, not of either strip. Choosing a layout is what the
+     * Audio tab's four chips do; per-device assignment is no longer exposed in the UI.
+     */
+    fun applyVisualizerRoleLayout(layout: String) {
+        val addresses = getCurrentlyControlledDeviceAddresses()
+        if (addresses.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            addresses.forEachIndexed { index, address ->
+                when (layout) {
+                    "HueSplit" -> {
+                        // The first device carries the visualiser's own hue and the rest are spread
+                        // evenly around the wheel from it — 180° apart for a pair, 120° for three.
+                        if (index == 0) {
+                            repository.updateDeviceRole(address, "Mirror")
+                        } else {
+                            repository.updateDeviceRole(address, "HueOffset")
+                            repository.updateHueOffsetDegrees(address, 360f * index / addresses.size)
+                        }
+                    }
+                    "AlternatingFlash", "BandSplit" -> repository.updateDeviceRole(address, layout)
+                    else -> repository.updateDeviceRole(address, "Mirror")
+                }
+            }
+            addLog("Visualiser layout '$layout' applied to ${addresses.size} device(s)")
+        }
+    }
+
+    /**
+     * Rotates the assigned roles one place around the controlled devices — a straight swap when two
+     * are connected. Which strip ends up as which half of an effect depends on where they are in
+     * the room, so this is the fix for "right effect, wrong way round".
+     */
+    fun rotateDeviceRoles() {
+        val devices = savedDevices.value.filter { it.isActiveControlEnabled }
+        if (devices.size < 2) return
+        viewModelScope.launch(Dispatchers.IO) {
+            // Read every source role first: the writes below would otherwise overwrite a device's
+            // role before the next device has taken a copy of it.
+            val sources = devices.indices.map { devices[(it + devices.size - 1) % devices.size] }
+            devices.forEachIndexed { index, device ->
+                repository.updateDeviceRole(device.macAddress, sources[index].deviceRole)
+                repository.updateHueOffsetDegrees(device.macAddress, sources[index].hueOffsetDegrees)
+            }
+            addLog("Swapped visualiser roles across ${devices.size} devices")
+        }
+    }
+
     fun updateCustomMode(customMode: CustomMode) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertCustomMode(customMode)
