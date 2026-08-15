@@ -50,14 +50,26 @@ private val LAYOUT_LABELS = mapOf(
 fun currentVisualizerLayout(devices: List<SavedDevice>): String? {
     val roles = devices.map { it.deviceRole }
     if (roles.isEmpty()) return null
+    // "BandSplit" without a half is what older builds wrote; it still renders (by list position)
+    // so it still has to read as the Band Split layout.
+    val bandSplitRoles = setOf("BandSplitLow", "BandSplitHigh", "BandSplit")
     return when {
         roles.all { it == "Mirror" } -> "Mirror"
         roles.all { it == "AlternatingFlash" } -> "AlternatingFlash"
-        roles.all { it == "BandSplit" } -> "BandSplit"
+        roles.all { it in bandSplitRoles } -> "BandSplit"
         roles.first() == "Mirror" && roles.drop(1).all { it == "HueOffset" } -> "HueSplit"
         else -> null
     }
 }
+
+/**
+ * Whether swapping would actually change anything.
+ *
+ * Mirror and Alternate give every strip the same part to play — Alternate rotates the flash through
+ * all of them — so there is nothing to trade, and offering the action would be a lie.
+ */
+fun rolesAreSwappable(devices: List<SavedDevice>): Boolean =
+    devices.size >= 2 && devices.map { it.deviceRole to it.hueOffsetDegrees }.distinct().size > 1
 
 /**
  * What each strip is actually doing under the current roles, in the order the visualiser assigns
@@ -68,15 +80,18 @@ fun currentVisualizerLayout(devices: List<SavedDevice>): String? {
  * so without a readout there is no way to tell it did anything.
  */
 fun deviceRoleSummaries(devices: List<SavedDevice>): List<Pair<SavedDevice, String>> {
-    val bandSplitOrder = devices.filter { it.deviceRole == "BandSplit" }.map { it.macAddress }
-    val alternatingOrder = devices.filter { it.deviceRole == "AlternatingFlash" }.map { it.macAddress }
+    // Legacy "BandSplit" rows still take their half from list position; everything written since
+    // carries its half in the role itself, which is what makes the labels move on a swap.
+    val legacyBandSplitOrder = devices.filter { it.deviceRole == "BandSplit" }.map { it.macAddress }
     return devices.map { device ->
         val label = when (device.deviceRole) {
             "HueOffset" -> "Hue +${device.hueOffsetDegrees.toInt()}°"
+            "BandSplitLow" -> "Bass"
+            "BandSplitHigh" -> "Mids & highs"
             "BandSplit" ->
-                if (bandSplitOrder.indexOf(device.macAddress) % 2 == 0) "Bass" else "Mids & highs"
-            "AlternatingFlash" ->
-                "Flash ${alternatingOrder.indexOf(device.macAddress) + 1} of ${alternatingOrder.size}"
+                if (legacyBandSplitOrder.indexOf(device.macAddress) % 2 == 0) "Bass" else "Mids & highs"
+            // Every strip takes a turn, so none of them is "the first one" for longer than a beat.
+            "AlternatingFlash" -> "Alternating"
             else -> "In sync"
         }
         device to label
