@@ -2,7 +2,9 @@ package com.example.ui.components
 
 import com.example.db.SavedDevice
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -52,7 +54,7 @@ class VisualizerRoleLayoutTest {
         )
         assertEquals(
             "BandSplit",
-            currentVisualizerLayout(listOf(device("A", "BandSplit"), device("B", "BandSplit")))
+            currentVisualizerLayout(listOf(device("A", "BandSplitLow"), device("B", "BandSplitHigh")))
         )
     }
 
@@ -68,9 +70,29 @@ class VisualizerRoleLayoutTest {
     }
 
     @Test
-    fun `band split summary names the halves in visualiser order`() {
+    fun `band split summary names the halves from the roles themselves`() {
+        val summaries = deviceRoleSummaries(listOf(device("A", "BandSplitLow"), device("B", "BandSplitHigh")))
+        assertEquals(listOf("Bass", "Mids & highs"), summaries.map { it.second })
+    }
+
+    @Test
+    fun `legacy band split rows still get labelled by position`() {
+        // Rows written before the halves moved into the role string. They still render by list
+        // position in publishAudioDspResult, so the labels have to match that, not the role.
         val summaries = deviceRoleSummaries(listOf(device("A", "BandSplit"), device("B", "BandSplit")))
         assertEquals(listOf("Bass", "Mids & highs"), summaries.map { it.second })
+        assertEquals("BandSplit", currentVisualizerLayout(listOf(device("A", "BandSplit"), device("B", "BandSplit"))))
+    }
+
+    @Test
+    fun `split halves are swappable but identical roles are not`() {
+        // The bug this fixes: Band Split used to give both strips the same role string, so the
+        // swap wrote back the values it had just read and nothing moved.
+        assertTrue(rolesAreSwappable(listOf(device("A", "BandSplitLow"), device("B", "BandSplitHigh"))))
+        assertTrue(rolesAreSwappable(listOf(device("A", "Mirror"), device("B", "HueOffset"))))
+        assertFalse(rolesAreSwappable(listOf(device("A", "Mirror"), device("B", "Mirror"))))
+        assertFalse(rolesAreSwappable(listOf(device("A", "AlternatingFlash"), device("B", "AlternatingFlash"))))
+        assertFalse(rolesAreSwappable(listOf(device("A", "BandSplitLow"))))
     }
 
     @Test
@@ -80,16 +102,16 @@ class VisualizerRoleLayoutTest {
     }
 
     @Test
-    fun `alternating summary counts only the alternating devices`() {
-        // A Mirror device in the middle must not take a slot in the flash rotation, or the labels
-        // stop matching what publishAudioDspResult actually does.
+    fun `every alternating device reads the same`() {
+        // The flash rotates through all of them, so no strip is "the first" for longer than a beat
+        // — numbering them implied an order that swapping could change, and it can't.
         val devices = listOf(
             device("A", "AlternatingFlash"),
             device("B", "Mirror"),
             device("C", "AlternatingFlash")
         )
         assertEquals(
-            listOf("Flash 1 of 2", "In sync", "Flash 2 of 2"),
+            listOf("Alternating", "In sync", "Alternating"),
             deviceRoleSummaries(devices).map { it.second }
         )
     }
@@ -97,10 +119,10 @@ class VisualizerRoleLayoutTest {
     @Test
     fun `swapping two band split devices swaps which one has the bass`() {
         // What Settings' Swap Roles has to produce: the labels move, the device order doesn't.
-        val before = listOf(device("A", "BandSplit"), device("B", "Mirror"))
-        assertEquals(listOf("Bass", "In sync"), deviceRoleSummaries(before).map { it.second })
+        val before = listOf(device("A", "BandSplitLow"), device("B", "BandSplitHigh"))
+        assertEquals(listOf("Bass", "Mids & highs"), deviceRoleSummaries(before).map { it.second })
 
-        val after = listOf(device("A", "Mirror"), device("B", "BandSplit"))
-        assertEquals(listOf("In sync", "Bass"), deviceRoleSummaries(after).map { it.second })
+        val after = listOf(device("A", "BandSplitHigh"), device("B", "BandSplitLow"))
+        assertEquals(listOf("Mids & highs", "Bass"), deviceRoleSummaries(after).map { it.second })
     }
 }

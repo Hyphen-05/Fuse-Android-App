@@ -1874,6 +1874,9 @@ class RgbControllerViewModel(
         if (result.flashFiredThisFrame) alternatingFlashBeatCounter++
 
         val alternatingAddresses = targetAddresses.filter { deviceRoleFor(it) == "AlternatingFlash" }
+        // Legacy rows only: "BandSplit" (no half in the name) decided bass-vs-highs by position in
+        // this list, which made the halves a property of DB order rather than of the device — and
+        // so unswappable. New assignments use BandSplitLow/BandSplitHigh, below.
         val bandSplitAddresses = targetAddresses.filter { deviceRoleFor(it) == "BandSplit" }
 
         // visualizer-review-2026-07-22.md A7: DemoAudioDspSimulator constructs AudioDspResult with
@@ -1902,6 +1905,8 @@ class RgbControllerViewModel(
                     val isFlashTarget = myIdx >= 0 && (alternatingFlashBeatCounter % groupSize) == myIdx
                     ColorConverter.hsvToRgb(result.hue, result.sat, if (isFlashTarget) result.value else result.ambientValue)
                 }
+                "BandSplitLow" -> ColorConverter.hsvToRgb(result.hue, result.sat, result.bassLevel)
+                "BandSplitHigh" -> ColorConverter.hsvToRgb(result.hue, result.sat, result.midHighLevel)
                 "BandSplit" -> {
                     val myIdx = bandSplitAddresses.indexOf(address)
                     val level = if (myIdx % 2 == 0) result.bassLevel else result.midHighLevel
@@ -2306,7 +2311,13 @@ class RgbControllerViewModel(
                             repository.updateHueOffsetDegrees(address, 360f * index / addresses.size)
                         }
                     }
-                    "AlternatingFlash", "BandSplit" -> repository.updateDeviceRole(address, layout)
+                    // Which half a strip plays has to live on the strip, not in list order, or
+                    // swapping them is impossible — see rotateDeviceRoles.
+                    "BandSplit" -> repository.updateDeviceRole(
+                        address,
+                        if (index % 2 == 0) "BandSplitLow" else "BandSplitHigh"
+                    )
+                    "AlternatingFlash" -> repository.updateDeviceRole(address, layout)
                     else -> repository.updateDeviceRole(address, "Mirror")
                 }
             }

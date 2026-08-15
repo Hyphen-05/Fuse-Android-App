@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.content.Context
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -40,6 +41,7 @@ import com.example.TelemetryState
 import com.example.RgbControllerViewModel
 import com.example.BleConnectionState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
@@ -363,10 +365,13 @@ fun LazyListScope.SettingsTabContent(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (controlledDevices.size < 2) {
-                            "Swaps which strip plays which part of a multi-strip visualiser layout. Needs two or more connected."
-                        } else {
-                            "Swaps which strip plays which part of the visualiser layout chosen on the Audio tab."
+                        text = when {
+                            controlledDevices.size < 2 ->
+                                "Swaps which strip plays which part of a multi-strip visualiser layout. Needs two or more connected."
+                            !rolesAreSwappable(controlledDevices) ->
+                                "Every strip plays the same part in this layout, so there's nothing to swap. Pick Hue Split or Band Split on the Audio tab first."
+                            else ->
+                                "Swaps which strip plays which part of the visualiser layout chosen on the Audio tab."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -401,26 +406,48 @@ fun LazyListScope.SettingsTabContent(
                             }
                         }
                     }
-                    val swapContext = LocalContext.current
                     val swapHaptic = LocalHapticFeedback.current
+                    val canSwap = rolesAreSwappable(controlledDevices)
+                    // Expressive's own button feedback: ButtonDefaults.shapes() morphs the
+                    // container on press, and the label confirms in place afterwards. A toast
+                    // would have said the same thing somewhere else on the screen.
+                    var justSwapped by remember { mutableStateOf(false) }
+                    LaunchedEffect(justSwapped) {
+                        if (justSwapped) {
+                            delay(1600)
+                            justSwapped = false
+                        }
+                    }
                     OutlinedButton(
                         onClick = {
-                            swapHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            swapHaptic.performHapticFeedback(HapticFeedbackType.Confirm)
                             viewModel.rotateDeviceRoles()
-                            android.widget.Toast.makeText(
-                                swapContext,
-                                "Roles swapped between your strips",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
+                            justSwapped = true
                         },
-                        enabled = controlledDevices.size >= 2,
-                        shape = CircleShape,
+                        enabled = canSwap,
+                        shapes = ButtonDefaults.shapes(),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
                             .testTag("swap_device_roles_btn")
                     ) {
-                        Text("Swap Roles")
+                        AnimatedContent(targetState = justSwapped, label = "swapRolesLabel") { swapped ->
+                            if (swapped) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text("Swapped")
+                                }
+                            } else {
+                                Text("Swap Roles")
+                            }
+                        }
                     }
                 }
 
