@@ -68,10 +68,12 @@ class FeelHarnessTest {
 
         val tracks = presets.map { preset ->
             val (frames, stats) = runPreset(preset, pcm)
+            val metrics = FeelAnalysis.analyse(frames)
+            println("%-14s %s | %d writes, %d dropped".format(preset, metrics.summary(), stats.accepted, stats.droppedTooFast + stats.droppedOverCapacity))
             FeelTrack(
                 label = preset,
                 frames = frames,
-                caption = "${stats.accepted} writes shown | ${stats.droppedTooFast + stats.droppedOverCapacity} dropped"
+                caption = metrics.summary().replace(" | ", " | ")
             )
         }
 
