@@ -176,9 +176,9 @@ class AmbianceProcessor(
                 newEmaLinG = ColorConverter.srgbToLinear(aggRawG)
                 newEmaLinB = ColorConverter.srgbToLinear(aggRawB)
             } else {
-                val lum = ColorConverter.luminance(emaSrgbR.toDouble(), emaSrgbG.toDouble(), emaSrgbB.toDouble()) / 255.0
-                val dynamicThreshold = (5.0 + 10.0 * lum + 15.0 * (1.0 - lum).pow(2)) * deadbandMultiplier
-                val diff = abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)
+                val lum = AmbianceDeadband.luminance(emaSrgbR, emaSrgbG, emaSrgbB)
+                val dynamicThreshold = AmbianceDeadband.lightStepThreshold(lum, deadbandMultiplier.toDouble())
+                val diff = AmbianceDeadband.diff(aggRawR, aggRawG, aggRawB, emaSrgbR, emaSrgbG, emaSrgbB)
                 if (diff <= dynamicThreshold) {
                     newEmaLinR = emaState.emaLinR
                     newEmaLinG = emaState.emaLinG
