@@ -79,7 +79,8 @@ class DeviceWriteManager(
                 // device during a real session.
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
-                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
+                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps, " +
+                        "inFlightMs=${"%.1f".format(inFlightMsEstimate)}. (${diagAttribution(address)})"
                 )
             }
         }
@@ -159,10 +160,36 @@ class DeviceWriteManager(
             "onWriteCompleted callback received for $address. (${diagAttribution(address)})"
         )
         consecutiveWatchdogTriggers = 0
-        lastWriteTime = System.currentTimeMillis()
+        val completedAt = System.currentTimeMillis()
+        recordInFlight(completedAt - lastWriteTime)
+        lastWriteTime = completedAt
         isWriting = false
         framesSent.incrementAndGet()
         tryWrite()
+    }
+
+    /**
+     * Rolling estimate of how long a write occupies the radio: issued → `onCharacteristicWrite`.
+     *
+     * This is the number every pacing decision actually depends on, and until now nothing measured
+     * it — pacing was a stored guess, tuned once against conditions that were gone by the time the
+     * value was saved. Hardware calibration put it at ~4.6ms per strip on a warm link and ~68ms for
+     * the first write after a quiet spell (`tools/calibration/README.md`), but it varies by phone,
+     * by distance and by what else is on the radio, which is exactly why it wants measuring here
+     * rather than assuming.
+     *
+     * An EMA rather than a mean: the useful question is "what is the link doing now", not "what has
+     * it averaged since connecting".
+     */
+    @Volatile var inFlightMsEstimate: Double = 0.0
+        private set
+
+    private fun recordInFlight(sample: Long) {
+        // Guard the first callback after a connect, where lastWriteTime is still 0 and the
+        // "elapsed" is really the epoch.
+        if (sample <= 0 || sample > 5_000) return
+        inFlightMsEstimate =
+            if (inFlightMsEstimate <= 0.0) sample.toDouble() else inFlightMsEstimate * 0.8 + sample * 0.2
     }
 
     @Synchronized
