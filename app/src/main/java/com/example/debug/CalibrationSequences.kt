@@ -13,8 +13,12 @@ import java.io.File
  * and every constant in `StripLimits` becomes a measurement:
  *  - [BRIGHTNESS_RAMP] answers whether the cubic curve in `ColorConverter.hsvToRgb` matches what the
  *    LEDs actually do — the open question behind every "too dim" report.
- *  - [LATENCY_PULSE] answers `visibleLatencyMs`.
- *  - [RATE_RAMP] answers `minWriteSpacingMs` and `sustainedWritesPerSecond`.
+ *  - [LATENCY_PULSE] was meant to answer `visibleLatencyMs`. It cannot: video time can only be
+ *    aligned to log time using the strips themselves, which arrive already delayed by the latency
+ *    being measured, so the alignment subtracts it out. What it does measure is delivery *jitter*
+ *    (sd 36ms, 2026-08-16). The constant needs the phone's own screen in frame — see the README.
+ *  - [RATE_RAMP] answers `sustainedWritesPerSecond`, from its CSV alone with no video at all.
+ *  - [SPACING_STAIRCASE] answers `minWriteSpacingMs`, which [RATE_RAMP] on video could not.
  *  - Running [RATE_RAMP] with two strips connected answers `multiDeviceThroughputFactor`.
  *
  * Every sequence opens with [syncMarker]: three fast full-white flashes, which is the alignment
@@ -29,9 +33,10 @@ object CalibrationSequences {
     const val BRIGHTNESS_RAMP = "brightness_ramp"
     const val LATENCY_PULSE = "latency_pulse"
     const val RATE_RAMP = "rate_ramp"
+    const val SPACING_STAIRCASE = "spacing_staircase"
     const val HOLD_WHITE = "hold_white"
 
-    val ALL = listOf(BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, HOLD_WHITE)
+    val ALL = listOf(BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, HOLD_WHITE)
 
     /** One line per write: when it was sent, and what was in it. */
     private val log = StringBuilder()
@@ -83,6 +88,7 @@ object CalibrationSequences {
             BRIGHTNESS_RAMP -> brightnessRamp(::emit)
             LATENCY_PULSE -> latencyPulse(::emit)
             RATE_RAMP -> rateRamp(::emit)
+            SPACING_STAIRCASE -> spacingStaircase(::emit)
             else -> return null
         }
 
@@ -152,6 +158,50 @@ object CalibrationSequences {
             repeat(writes) { index ->
                 if (index % 2 == 0) emit("rate_$rate", 255, 0, 0) else emit("rate_$rate", 0, 0, 255)
                 delay(intervalMs)
+            }
+        }
+    }
+
+    /**
+     * Asks the drop question in a form a 60fps camera can answer, which [rateRamp] could not.
+     *
+     * [rateRamp] asks "did each of these forty fast events happen?" — a question about fast events,
+     * needing a camera faster than the events. The 2026-08-16 run showed that failing: with ±50ms of
+     * delivery jitter against a 17ms frame, "dropped" and "arrived late" are the same observation
+     * above about 5Hz, and three different detectors gave three different answers at 10Hz.
+     *
+     * So ask it as a *steady state* instead. From black, send red, then blue [spacing] ms later,
+     * then hold for most of a second. What the wall is showing when it settles says what happened,
+     * and it says it for long enough that frame rate stops mattering:
+     *  - **blue** — both writes rendered
+     *  - **red** — the second was dropped: the strip would not take it that soon after the first
+     *  - **black** — both were dropped, or the strip was still off
+     *
+     * Ten bursts at each spacing turn the jitter from noise into a probability: the answer is a drop
+     * *rate* per spacing, and `minWriteSpacingMs` is where that rate leaves zero. The commanded
+     * spacing is only a request — coroutine `delay` is not exact at 2ms — so the analysis bins on
+     * the achieved gap between the two logged timestamps, never on the label.
+     *
+     * What this measures is the whole pipeline, not the strip alone: a write coalesced by Android's
+     * BLE stack and one refused by the strip's firmware look identical from here. That is the right
+     * scope for the feel harness, which models what the user sees, but it is why the constant this
+     * feeds is named for write *spacing* rather than for the strip.
+     */
+    private suspend fun spacingStaircase(emit: (String, Int, Int, Int) -> Unit) {
+        val spacings = listOf(2, 4, 6, 8, 12, 16, 20, 25, 30, 40, 60)
+        val repeats = 10
+        for (spacing in spacings) {
+            emit("stair_${spacing}_marker", 0, 0, 0)
+            delay(700)
+            repeat(repeats) { index ->
+                emit("stair_${spacing}_${index}_reset", 0, 0, 0)
+                delay(500)
+                emit("stair_${spacing}_${index}_first", 255, 0, 0)
+                delay(spacing.toLong())
+                emit("stair_${spacing}_${index}_second", 0, 0, 255)
+                // Long enough that the settled colour spans tens of frames, so reading it needs no
+                // alignment better than "somewhere in this window".
+                delay(700)
             }
         }
     }

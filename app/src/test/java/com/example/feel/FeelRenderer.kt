@@ -21,10 +21,13 @@ data class FeelTrack(
  * Draws what the strips did as a picture.
  *
  * The point of the whole harness: a timeline of colour is something you can *look at* and judge —
- * how often it changes, how far the hue travels, whether brightness pumps or drifts, where writes
- * were dropped — none of which survives being described in numbers or in prose. Stacking several
- * presets in one image makes them directly comparable, which is the question that actually gets
- * asked ("is Ebb & Flow calmer than Balanced?").
+ * how often it changes, how far the hue travels, whether brightness pumps or drifts, where colours
+ * were swallowed by the queue — none of which survives being described in numbers or in prose.
+ * Stacking several presets in one image makes them directly comparable, which is the question that
+ * actually gets asked ("is Ebb & Flow calmer than Balanced?").
+ *
+ * Colours here are **emitted light**, not commanded bytes (see [StripLimits.responseExponent]) — the
+ * strips are compressive enough that the two are different pictures.
  */
 object FeelRenderer {
 
@@ -105,9 +108,10 @@ object FeelRenderer {
                 previousY = y
             }
 
-            // Lane 3 — dropped writes, the stutter you'd see but never find in a DSP trace.
+            // Lane 3 — colours the write queue swallowed: computed by the DSP, never sent, never
+            // seen. The gap between what a preset thinks it is doing and what the wall shows.
             gfx.color = AwtColor(255, 82, 82)
-            track.frames.filter { it.droppedWriteHere }.forEach { frame ->
+            track.frames.filter { it.coalescedHere }.forEach { frame ->
                 val x = LABEL_WIDTH + ((frame.atMs / 1000.0) * pixelsPerSecond).toInt()
                 if (x in 0 until width) {
                     gfx.drawLine(x, rowTop + BAND_HEIGHT + CURVE_HEIGHT + 3, x, rowTop + BAND_HEIGHT + CURVE_HEIGHT + 9)

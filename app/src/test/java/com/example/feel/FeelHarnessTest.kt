@@ -69,7 +69,7 @@ class FeelHarnessTest {
         val tracks = presets.map { preset ->
             val (frames, stats) = runPreset(preset, pcm)
             val metrics = FeelAnalysis.analyse(frames)
-            println("%-14s %s | %d writes, %d dropped".format(preset, metrics.summary(), stats.accepted, stats.droppedTooFast + stats.droppedOverCapacity))
+            println("%-14s %s | %d shown, %d swallowed by the queue".format(preset, metrics.summary(), stats.accepted, stats.coalesced))
             FeelTrack(
                 label = preset,
                 frames = frames,
@@ -108,14 +108,14 @@ class FeelHarnessTest {
             FeelTrack(
                 label = label,
                 frames = frames,
-                caption = "${stats.accepted} shown, ${stats.droppedTooFast + stats.droppedOverCapacity} dropped " +
-                    "(${"%.0f".format(stats.dropRate * 100)}%)"
+                caption = "${stats.accepted} shown, ${stats.coalesced} swallowed " +
+                    "(${"%.0f".format(stats.coalesceRate * 100)}%)"
             )
         }
 
         val file = FeelRenderer.render(
             tracks = tracks,
-            title = "Pacing and multi-strip contention — red ticks are writes the strip dropped (PROVISIONAL limits, not yet measured)",
+            title = "Pacing and multi-strip contention — red ticks are colours the write queue swallowed (limits measured 2026-08-16)",
             outputFile = File(outputDir, "pacing.png")
         )
         println("wrote $file")
