@@ -45,3 +45,6 @@ IMPROVEMENT_PLAN.md
 audit-findings-*.md
 mapping-proposal-*.md
 visualizer-review-*.md
+
+# Session handoff notes — internal, deliberately local-only (see CLAUDE.md)
+HANDOFF-*.md
