@@ -69,6 +69,10 @@ frame rate.
    room dark. Start recording.
 3. `adb -s 47201FDAS00BHH shell am broadcast -a com.example.debug.ACTION_CONTROL -p com.github.hyphen05.fuse --es cmd run_calibration --es sequence spacing_staircase`
 4. Leave the phone alone and in the foreground for ~2½ minutes (110 bursts). Stop recording.
+
+   **The moto's camera app exits to the launcher on its own when left idle**, and it is not the
+   screen timeout — that was already 30 minutes. It cost one whole unrecorded run on 2026-08-16.
+   Start the recording *before* any long wait, not after: a recording camera stays put.
 5. Repeat with two strips connected — the per-write cost doubles, so the floor may too.
 6. Pull the CSV, put it next to the video, and run `analyse_staircase.py` (set `VIDEO` first).
 
