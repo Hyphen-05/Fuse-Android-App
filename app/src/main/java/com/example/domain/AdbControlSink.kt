@@ -19,6 +19,13 @@ class AdbControlSink {
          * why it must never be reachable from the app itself.
          */
         fun onAdbStartAudioSimulation()
+
+        /**
+         * Runs a scripted calibration sequence on every connected strip with pacing bypassed, and
+         * writes a CSV of what was sent when. Debug tooling only: it exists so the feel harness's
+         * strip model can be built on measured hardware behaviour instead of guessed constants.
+         */
+        fun onAdbRunCalibration(sequence: String)
     }
 
     @Volatile

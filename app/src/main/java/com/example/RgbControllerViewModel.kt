@@ -2645,6 +2645,36 @@ class RgbControllerViewModel(
         stopMusicSync()
     }
 
+    /**
+     * Drives a calibration sequence straight at the wire, bypassing pacing so the sequence controls
+     * its own timing exactly — the whole point is to find out what the hardware does with writes the
+     * app would normally hold back.
+     *
+     * Any running music sync or scene is stopped first: a second source writing colours mid-run
+     * would corrupt every measurement taken from it.
+     */
+    override fun onAdbRunCalibration(sequence: String) {
+        viewModelScope.launch {
+            stopMusicSync()
+            val targets = getCurrentlyControlledDeviceAddresses()
+            if (targets.isEmpty()) {
+                addLog("Calibration '$sequence' aborted: no connected devices.")
+                return@launch
+            }
+            addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
+            val file = com.example.debug.CalibrationSequences.run(
+                sequence = sequence,
+                outputDir = getApplication().getExternalFilesDir(null)
+            ) { command ->
+                targets.forEach { address ->
+                    bleGattTransport.writeCommand(address, command, bypassPacing = true)
+                }
+            }
+            addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
+            android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
+        }
+    }
+
     override fun onCleared() {
         if (ambianceCommandSink.listener === this) {
             ambianceCommandSink.listener = null

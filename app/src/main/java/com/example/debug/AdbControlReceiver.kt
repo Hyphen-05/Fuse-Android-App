@@ -159,6 +159,21 @@ class AdbControlReceiver : BroadcastReceiver() {
                 Log.i(TAG, "stop_backend")
             }
 
+            "run_calibration" -> {
+                val sequence = intent.getStringExtra("sequence")
+                if (sequence == null || sequence !in CalibrationSequences.ALL) {
+                    Log.w(TAG, "run_calibration: 'sequence' must be one of ${CalibrationSequences.ALL}")
+                    return
+                }
+                val listener = appContainer.adbControlSink.listener
+                if (listener == null) {
+                    Log.w(TAG, "run_calibration: no active RgbControllerViewModel listener registered")
+                    return
+                }
+                listener.onAdbRunCalibration(sequence)
+                Log.i(TAG, "run_calibration: sequence=$sequence started")
+            }
+
             "status" -> {
                 Log.i(
                     TAG,
