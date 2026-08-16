@@ -29,8 +29,9 @@ object CalibrationSequences {
     const val BRIGHTNESS_RAMP = "brightness_ramp"
     const val LATENCY_PULSE = "latency_pulse"
     const val RATE_RAMP = "rate_ramp"
+    const val HOLD_WHITE = "hold_white"
 
-    val ALL = listOf(BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP)
+    val ALL = listOf(BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, HOLD_WHITE)
 
     /** One line per write: when it was sent, and what was in it. */
     private val log = StringBuilder()
@@ -57,6 +58,23 @@ object CalibrationSequences {
         fun emit(label: String, r: Int, g: Int, b: Int) {
             send(DuoCoProtocol.createColorCommand(r, g, b))
             record(System.currentTimeMillis() - startedAt, label, r, g, b)
+        }
+
+        // The strip applies its own brightness setting on top of whatever RGB it is sent, so a run
+        // taken at the user's current dimming level measures RGB × that level and nothing can be
+        // untangled afterwards. Pin it to 100% first; the app's slider is left showing whatever it
+        // showed before, so this has to be reset by hand (or by moving the slider) after a session.
+        send(DuoCoProtocol.createBrightnessCommand(100))
+        record(0, "brightness_pinned_100", -1, -1, -1)
+        delay(400)
+
+        // Setup aid, not a measurement: parks the strips at the brightest state any run will
+        // produce so the camera's exposure can be locked against the worst case. Locking against a
+        // dimmer state clips the top of the ramp, which is unrecoverable after the fact.
+        if (sequence == HOLD_WHITE) {
+            emit("hold_white", 255, 255, 255)
+            delay(180_000)
+            return writeCsv(sequence, outputDir, startedAt)
         }
 
         syncMarker(::emit)
