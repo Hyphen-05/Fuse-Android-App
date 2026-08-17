@@ -19,6 +19,9 @@ import java.io.File
  *    (sd 36ms, 2026-08-16). The constant needs the phone's own screen in frame — see the README.
  *  - [RATE_RAMP] answers `sustainedWritesPerSecond`, from its CSV alone with no video at all.
  *  - [SPACING_STAIRCASE] answers `minWriteSpacingMs`, which [RATE_RAMP] on video could not.
+ *  - [DARK_RAMP] covers the bottom of the range that [BRIGHTNESS_RAMP] skipped, where the fitted
+ *    curve disagrees with its own lowest measured point by 2×, and asks whether the brightness
+ *    command is a finer dimmer than the colour bytes.
  *  - Running [RATE_RAMP] with two strips connected answers `multiDeviceThroughputFactor`.
  *
  * Every sequence opens with [syncMarker]: three fast full-white flashes, which is the alignment
@@ -34,9 +37,12 @@ object CalibrationSequences {
     const val LATENCY_PULSE = "latency_pulse"
     const val RATE_RAMP = "rate_ramp"
     const val SPACING_STAIRCASE = "spacing_staircase"
+    const val DARK_RAMP = "dark_ramp"
     const val HOLD_WHITE = "hold_white"
 
-    val ALL = listOf(BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, HOLD_WHITE)
+    val ALL = listOf(
+        BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP, HOLD_WHITE
+    )
 
     /** One line per write: when it was sent, and what was in it. */
     private val log = StringBuilder()
@@ -65,6 +71,13 @@ object CalibrationSequences {
             record(System.currentTimeMillis() - startedAt, label, r, g, b)
         }
 
+        // Brightness rows are logged with r = g = -1 and the percentage in the b column, matching
+        // how the pin-to-100 row below already marks itself as "not a colour".
+        fun emitBrightness(label: String, percent: Int) {
+            send(DuoCoProtocol.createBrightnessCommand(percent))
+            record(System.currentTimeMillis() - startedAt, label, -1, -1, percent)
+        }
+
         // The strip applies its own brightness setting on top of whatever RGB it is sent, so a run
         // taken at the user's current dimming level measures RGB × that level and nothing can be
         // untangled afterwards. Pin it to 100% first; the app's slider is left showing whatever it
@@ -89,6 +102,7 @@ object CalibrationSequences {
             LATENCY_PULSE -> latencyPulse(::emit)
             RATE_RAMP -> rateRamp(::emit)
             SPACING_STAIRCASE -> spacingStaircase(::emit)
+            DARK_RAMP -> darkRamp(::emit, ::emitBrightness)
             else -> return null
         }
 
@@ -204,6 +218,57 @@ object CalibrationSequences {
                 delay(700)
             }
         }
+    }
+
+    /**
+     * Measures the bottom of the range, which no run has ever covered, and settles whether the
+     * brightness command is a finer dimmer than the colour bytes are.
+     *
+     * Two questions, one recording, because both are about the same few percent of light:
+     *
+     * **Phase 1 — the dark end of the response curve.** `light = (byte/255)^0.4` was fitted across
+     * the whole ramp, and it misses its own lowest measured point by better than 2× (byte 8 read 11%
+     * of full light; the curve says 25%). Everything the ambiance work cares about lives at bytes
+     * 4-24, inside that gap, and nothing below byte 8 has ever been measured at all. Either the
+     * strip has a real toe down there — a minimum usable duty cycle, PWM resolution running out — or
+     * the dimmest wall patch was the one the camera measured worst. Stepping every byte from 0 to 32
+     * separates those: a toe is a smooth bend, a measurement artefact is not.
+     *
+     * **Phase 2 — is brightness finer than a byte?** The same dim colour can be commanded as small
+     * bytes at full brightness, or as large bytes scaled down by the brightness command. They differ
+     * in resolution enormously: at byte 6 there are six steps between the colour and black, at byte
+     * 96 there are ninety-six. If brightness is a PWM duty cycle held at more than 8-bit precision —
+     * which is the usual way to build one — the second route is strictly better, and it is free: one
+     * extra command, no ongoing wire cost, and it is the hardware's own dimmer rather than a
+     * reimplementation of it over the radio. Holding the colour fixed at 96 and stepping brightness
+     * 1-20% shows it directly: smooth steps mean the fine dimmer exists, a staircase that lands on
+     * the same handful of levels as phase 1 means it does not.
+     *
+     * Phase 2 restores brightness to 100% at the end, because every other sequence assumes it.
+     */
+    private suspend fun darkRamp(
+        emit: (String, Int, Int, Int) -> Unit,
+        emitBrightness: (String, Int) -> Unit
+    ) {
+        for (level in 0..32) {
+            emit("dark_$level", level, level, level)
+            delay(1500)
+        }
+        // Descending, as in brightnessRamp: the same level reading differently on the way down means
+        // the camera's exposure drifted and the run is not usable.
+        for (level in 32 downTo 0 step 4) {
+            emit("dark_down_$level", level, level, level)
+            delay(1000)
+        }
+
+        emit("dark_phase2_marker", 0, 0, 0)
+        delay(1500)
+        for (percent in 1..20) {
+            emitBrightness("bright_$percent", percent)
+            emit("bright_${percent}_colour", 96, 96, 96)
+            delay(1500)
+        }
+        emitBrightness("bright_restore_100", 100)
     }
 
     private fun writeCsv(sequence: String, outputDir: File?, startedAt: Long): File? {
