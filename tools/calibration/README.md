@@ -86,7 +86,8 @@ below), a dark room, and locked exposure.
 
 ```
 adb shell am broadcast -a com.example.debug.ACTION_CONTROL -p com.github.hyphen05.fuse \
-    --es cmd run_calibration --es sequence <hold_white|brightness_ramp|latency_pulse|rate_ramp>
+    --es cmd run_calibration \
+    --es sequence <hold_white|brightness_ramp|dark_ramp|latency_pulse|rate_ramp|spacing_staircase>
 ```
 
 `hold_white` parks the strips at the brightest state any run produces, so the camera's exposure can
@@ -141,6 +142,46 @@ The whole top half of the byte range buys the last 16% of light. Consequences ar
 `IMPROVEMENT_PLAN.md`'s Tier E; the short version is that the cubic curve in
 `ColorConverter.hsvToRgb` roughly compensates for this and should not be removed without new
 measurements.
+
+### The fit is not trustworthy below byte ~32 (noticed 2026-08-17)
+
+Check the fit against its own points. From byte 32 up it is good to within a few percent. At **byte
+8, the lowest point measured, it is out by more than 2×**: the rig read 11% of full light, the curve
+says 25%. The exponent was fitted across the whole ramp, so the bright end — where most of the
+points are — decided it.
+
+That matters because everything the ambiance and dithering work is about sits at **bytes 4-24**,
+inside that gap, and **nothing below byte 8 has ever been measured at all**. Two readings, and this
+recording cannot separate them: a real toe in the response (a minimum usable duty cycle, or PWM
+resolution running out at the bottom), or measurement error exactly where it is most likely, since
+the dimmest wall patch is the one nearest the camera's noise floor and the most sensitive to an
+error in the black level.
+
+Both readings push the same way, so conclusions drawn from the curve stay directionally right: the
+local slope between the *measured* bytes 8 and 32 is **1.7× steeper** than the fitted curve's, so
+near-black steps are if anything larger than the model says. What the curve must not be used for is
+a light value at a specific byte below 8 — including the tempting claim that byte 1 emits ~11%.
+
+`dark_ramp` exists to settle this, and to answer the question it raises: **is the brightness command
+a finer dimmer than the colour bytes are?** If brightness is a PWM duty cycle held at more than
+8-bit precision, dim colours should be commanded as large bytes scaled down rather than as small
+bytes — one extra command, and it buys back the resolution the byte grid does not have down there.
+See `DitheringSimulation` for the argument and the numbers.
+
+## Capturing the dark ramp (the offline-analysis run to do next)
+
+Two phases in one recording, ~2½ minutes. Same rig as any other sequence — dark room, locked
+exposure, wall patch not the emitters — but with one change that matters: **lock exposure against
+`hold_white` as usual, then check the dimmest levels are still above the noise floor** on a test
+frame before committing to the run. The whole point is the bottom of the range, and that is the part
+an exposure lock chosen for the bright end throws away.
+
+1. Phase 1 steps every byte from 0 to 32 (1.5s each), then descends in fours as a drift check.
+2. Phase 2 holds colour at byte 96 and steps brightness 1-20%, restoring 100% at the end.
+
+Phase 2's read is the interesting one: smooth, even steps mean the fine dimmer exists and headroom
+scaling is the right fix for dark scenes. A staircase landing on the same handful of levels as phase
+1 means brightness is just a byte multiply, and it is not.
 
 ## Throughput, 2026-08-16 (wire side, all three rate ramps)
 
