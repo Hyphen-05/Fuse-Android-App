@@ -66,6 +66,22 @@ data class StripLimits(
     val responseExponent: Double = 0.4,
 
     /**
+     * Spread of [visibleLatencyMs] from write to write: **measured sd 36ms, peak-to-peak 108ms**
+     * (2026-08-16). Writes sent evenly do not land evenly.
+     *
+     * **Defaults to 0, deliberately.** Every existing conclusion drawn from this harness was drawn
+     * without it, and switching it on globally would move every render for reasons unrelated to the
+     * change being judged. Turn it on for the questions where the *evenness* of delivery is the
+     * whole question — a dither pattern is the example, and the one this was added for.
+     *
+     * Modelled as independent per write, which is the pessimistic reading: the measurement gives the
+     * spread but not its correlation structure, and a serial radio's real jitter is probably partly
+     * common-mode (a delayed write delays the next). Where a result depends on this, it is a result
+     * that needs the camera, not a bigger simulation.
+     */
+    val deliveryJitterSdMs: Double = 0.0,
+
+    /**
      * The known, unavoidable firmware flash when the pixel count changes (see CLAUDE.md). Modelled
      * so a feature that changes pixel count mid-animation shows the flash in its render instead of
      * looking clean.
@@ -121,8 +137,13 @@ data class StripStats(
  */
 class VirtualStrip(
     private val limits: StripLimits = StripLimits(),
-    private val connectedStripCount: Int = 1
+    private val connectedStripCount: Int = 1,
+    /** Fixed so a run with jitter switched on is still reproducible; vary it to resample. */
+    jitterSeed: Int = 7
 ) {
+    private val jitterRandom = kotlin.random.Random(jitterSeed)
+    private var lastVisibleAtMs = Long.MIN_VALUE
+
     private var busyUntilMs: Long? = null
     private var lastIssuedAtMs: Long? = null
     private var powered = true
@@ -215,6 +236,26 @@ class VirtualStrip(
         )
     }
 
+    /**
+     * When this write becomes visible: the latency, plus its share of the measured spread.
+     *
+     * Held monotonic — a write cannot overtake the one before it on a serial radio, so jitter can
+     * stretch and compress the gaps between colours but never reorder them. Without the clamp a
+     * large negative sample would make a colour appear before its predecessor, which is a modelling
+     * artefact rather than anything the hardware does.
+     */
+    private fun visibleAt(atMs: Long): Long {
+        val jitter = if (limits.deliveryJitterSdMs <= 0.0) 0.0 else {
+            var u = jitterRandom.nextDouble(); val v = jitterRandom.nextDouble()
+            if (u < 1e-9) u = 1e-9
+            Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v) * limits.deliveryJitterSdMs
+        }
+        val at = atMs + limits.visibleLatencyMs + Math.round(jitter)
+        val monotonic = maxOf(at, lastVisibleAtMs)
+        lastVisibleAtMs = monotonic
+        return monotonic
+    }
+
     private fun apply(event: StripEvent, atMs: Long) {
         when (event) {
             is StripEvent.Power -> powered = event.on
@@ -233,7 +274,7 @@ class VirtualStrip(
             }
             else -> Unit
         }
-        visibleChanges.add(StripFrame(atMs + limits.visibleLatencyMs, r, g, b, powered))
+        visibleChanges.add(StripFrame(visibleAt(atMs), r, g, b, powered))
     }
 
     fun stats() = StripStats(accepted, coalesced, malformed, ignored)
@@ -254,6 +295,9 @@ class VirtualStrip(
     fun timeline(untilMs: Long, stepMs: Long = 10, inEmittedLight: Boolean = true): List<StripFrame> {
         // Let anything still queued go out, or a run's last colours would vanish from the render.
         drainUntil(untilMs)
+        // Coalesce markers carry an un-jittered time, so with jitter on the list can be slightly out
+        // of order; the sweep below assumes it is sorted. Stable, so equal times keep issue order.
+        visibleChanges.sortBy { it.atMs }
 
         val out = mutableListOf<StripFrame>()
         var index = 0
