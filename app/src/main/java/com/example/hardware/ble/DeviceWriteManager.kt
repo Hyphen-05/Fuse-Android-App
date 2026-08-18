@@ -55,6 +55,19 @@ class DeviceWriteManager(
     private var lastQueueLogTime = 0L
 
     /**
+     * The last RGB colour actually handed to the radio, for [WriteDedupe].
+     *
+     * Issued rather than enqueued, because the queue drops what it replaces. Cleared whenever a
+     * write fails, so a failure can always be retried by resending the same colour — and note that a
+     * reconnect builds a whole new manager, which starts this at null, so nothing survives a
+     * disconnect to suppress the first colour of a new connection.
+     */
+    @Volatile private var lastIssuedColour: ByteArray? = null
+
+    /** Redundant colours suppressed since the last 1Hz telemetry tick. */
+    private val identicalSkipped = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
      * Samples the achieved write rate on a fixed 1Hz tick. This used to be computed inside
      * [onWriteCompleted], which meant the counter only advanced when a write landed — once the
      * strip went idle the last reported rate stuck in the telemetry map forever, so the FPS readout
@@ -73,14 +86,18 @@ class DeviceWriteManager(
         while (true) {
             delay(1000L)
             val fps = framesSent.getAndSet(0)
+            val skipped = identicalSkipped.getAndSet(0)
             onFpsUpdate(address, fps)
-            if (fps > 0) {
+            if (fps > 0 || skipped > 0) {
                 // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
-                // device during a real session.
+                // device during a real session. `identicalSkipped` rides along because the ratio of
+                // skipped to sent is the direct read on how much of a preset's computed output the
+                // byte grid cannot express — 97% on a slow fade, in simulation.
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps, " +
-                        "inFlightMs=${"%.1f".format(inFlightMsEstimate)}. (${diagAttribution(address)})"
+                        "inFlightMs=${"%.1f".format(inFlightMsEstimate)}, identicalSkipped=$skipped. " +
+                        "(${diagAttribution(address)})"
                 )
             }
         }
@@ -109,6 +126,14 @@ class DeviceWriteManager(
      */
     fun updateCommand(command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false) {
         val processed = calibrate(address, command)
+
+        // A colour identical to the one already on the strip changes nothing, and enqueuing it would
+        // evict whatever real colour is still waiting (see [WriteDedupe]). Checked before the
+        // peak-hold logic below, so a redundant frame cannot displace a held peak either.
+        if (WriteDedupe.isRedundantColour(processed, lastIssuedColour)) {
+            identicalSkipped.incrementAndGet()
+            return
+        }
 
         val type = if (processed.size >= 3) processed[2] else null
         // A held peak of the same type takes priority over this frame if it hasn't written yet —
@@ -238,12 +263,16 @@ class DeviceWriteManager(
             }
 
             if (!success) {
+                // Forget the dedupe baseline: this colour did not reach the radio, so an identical
+                // resend is a genuine retry rather than a redundant frame.
+                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
                 Log.w("BleWriteQueue", "writeCharacteristic() returned false for $address")
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() returned false (write failure) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
                 )
             } else {
+                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = cmdToWrite.bytes
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() initiated (write success) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
@@ -251,6 +280,7 @@ class DeviceWriteManager(
             }
         } catch (e: Exception) {
             isWriting = false
+            if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
             com.example.DiagnosticLogger.log(
                 "DeviceWriteManager",
                 "writeCharacteristic() Exception for $address: ${android.util.Log.getStackTraceString(e)}. (${diagAttribution(address)})"
