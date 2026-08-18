@@ -85,6 +85,23 @@ reading the wrong window and every number from that run is suspect — which is 
 `find_sync` latching onto the wrong flash did to the first analysis, undetected. Check these before
 reading anything else.
 
+## Absolute latency: why "flash the phone's screen" is not ready either
+
+The standing note says the constant needs the phone's own screen in frame, flashed on the same
+millisecond as the write. That is the right *shape* — a reference event that is not the strips — but
+it does not work as stated, and the reason is the same one that sank the first attempt.
+
+**The screen has its own latency, and nobody has measured it.** A View toggle reaches photons a
+compositor frame or two plus panel response later — order 20-30ms on a modern phone. The quantity
+being measured is guessed at 35ms. So the method returns `BLE latency − screen latency` and presents
+it as absolute: the same class of error as aligning on the strips, just smaller and harder to spot.
+
+It needs one of: the screen path characterised independently; a reference that is not the display
+(an LED on a wired GPIO, whose delay is microseconds); or an explicit, stated acceptance of the
+bias. Do not plumb the flash overlay until that is decided — and when it is, note that `RgbUiState`'s
+shape is locked, so it wants the `AdbControlReceiver` / Mode Capture precedent (a registered
+listener outside the reducer chain) rather than a new state field.
+
 ## Sustained load — the run that needs nothing but time
 
 `sustained_load` writes flat out for an hour with no delay between writes, which is precisely the
