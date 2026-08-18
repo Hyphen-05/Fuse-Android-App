@@ -79,6 +79,24 @@ frame rate.
 Reads red/blue/black per burst: blue = both writes rendered, red = the second was dropped, black =
 both were. The drop rate against achieved spacing is the answer.
 
+**The run now ends with ten control bursts** (`control_*`), which send the first colour and no
+second write at all. They must settle on **red**. Any that read blue or black mean the classifier is
+reading the wrong window and every number from that run is suspect — which is exactly what
+`find_sync` latching onto the wrong flash did to the first analysis, undetected. Check these before
+reading anything else.
+
+## Sustained load — the run that needs nothing but time
+
+`sustained_load` writes flat out for an hour with no delay between writes, which is precisely the
+configuration removing the pacing wait would ship. **No camera, no dark room, nobody watching** — the
+CSV is the whole result, and a link that degrades shows up as an achieved rate that sags over time.
+A marker row every 30s segments the file.
+
+This is the last measurement standing between the pacing work and shipping it: every ramp so far ran
+flat out for about fifteen seconds, so "does an hour of this disconnect, back the queue up, or
+degrade" is genuinely unmeasured. Run it on a day when the strips are not otherwise wanted; it does
+not need to happen at night.
+
 ## Running a session
 
 Requires: strips connected in Fuse, a camera that is not the phone driving them (see the caveat
@@ -87,7 +105,7 @@ below), a dark room, and locked exposure.
 ```
 adb shell am broadcast -a com.example.debug.ACTION_CONTROL -p com.github.hyphen05.fuse \
     --es cmd run_calibration \
-    --es sequence <hold_white|brightness_ramp|dark_ramp|latency_pulse|rate_ramp|spacing_staircase>
+    --es sequence <hold_white|brightness_ramp|dark_ramp|latency_pulse|rate_ramp|spacing_staircase|sustained_load>
 ```
 
 `hold_white` parks the strips at the brightest state any run produces, so the camera's exposure can
@@ -105,11 +123,19 @@ app's slider still shows the old value afterwards — nudge it to resync.
 ## The phone cannot film itself (2026-08-16)
 
 With the camera app in front, Android froze Fuse and then killed it — *"Async binder space running
-out while frozen"* — because BLE callbacks kept arriving at a frozen process. Disabling
-`cached_apps_freezer` works around it for a test device but is a global setting that should be put
-back. The proper fix is a foreground service for the duration of a run. Backgrounding also costs
-~57% of write throughput even when the process survives, so a filmed run is not measuring the same
-system as normal use.
+out while frozen"* — because BLE callbacks kept arriving at a frozen process. That session worked
+around it by disabling `cached_apps_freezer` globally on Joe's own phone, which then had to be
+remembered and put back.
+
+**Fixed properly 2026-08-18: every run is now wrapped in a foreground service**
+(`CalibrationForegroundService`), so the process is unfreezable for its duration and no device
+surgery is needed. It is best-effort — if the service will not start, the run still goes ahead and
+says so in the log, it is just freezable again. **Do not disable the freezer any more.**
+
+Backgrounding still costs ~57% of write throughput (36.8ms per write against 4.6ms in the
+foreground) even when the process survives. That is scheduling and radio priority, not freezing, and
+no service type changes it — so a filmed run still is not measuring the same system as normal use.
+It matters for any *rate* measurement and not at all for a response-curve or spacing one.
 
 ## Analysis
 
