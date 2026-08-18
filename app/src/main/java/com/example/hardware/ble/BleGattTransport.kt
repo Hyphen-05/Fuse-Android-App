@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Result of [BleGattTransport.registerDuoCoCharacteristic]. Mirrors the two outcomes of the former
@@ -147,6 +148,12 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     private val writeCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
     private val deviceWriteManagers = ConcurrentHashMap<String, DeviceWriteManager>()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
+
+    /**
+     * Orders the MTU exchange ahead of service discovery. See [GattDiscoveryGate] for the race this
+     * exists to prevent and how it presented.
+     */
+    private val discoveryGate = GattDiscoveryGate()
     private val connectionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Most-recent gatt seen per address at a callback entry, so address-keyed ops can find it.
@@ -174,6 +181,19 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
             val address = gatt?.device?.address ?: return
             callbackGatt[address] = gatt
             onServicesDiscovered(address, status)
+        }
+
+        /**
+         * The MTU exchange finishing is what releases service discovery — see [GattDiscoveryGate].
+         * Status is deliberately ignored: a refused MTU is fine (the default 23 works), what
+         * matters is that the GATT client is free again.
+         */
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            val address = gatt?.device?.address ?: return
+            callbackGatt[address] = gatt
+            discoveryGate.onMtuSettled(address)
+            onLog("MTU settled for $address (mtu=$mtu, status=$status); starting service discovery.")
+            issueDiscoveryIfWanted(address)
         }
 
         override fun onCharacteristicWrite(
@@ -242,8 +262,18 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         val gatt = activeConnections[address] ?: return
         try {
             gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-            gatt.requestMtu(512)
+            discoveryGate.onMtuRequested(address)
+            if (!gatt.requestMtu(512)) {
+                // Refused outright: nothing is in flight, so discovery must not wait for a
+                // callback that will never come.
+                discoveryGate.onMtuSettled(address)
+                issueDiscoveryIfWanted(address)
+            } else {
+                armMtuFallback(address)
+            }
         } catch (e: SecurityException) {
+            discoveryGate.onMtuSettled(address)
+            issueDiscoveryIfWanted(address)
             onLog("SecurityException requesting priority or MTU for $address: ${e.message}")
         } catch (e: Exception) {
             onLog("Error requesting priority or MTU for $address: ${e.message}")
@@ -252,10 +282,49 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun discoverServices(address: String) {
         val gatt = activeConnections[address] ?: return
+        discoveryGate.onDiscoveryWanted(address)
+        issueDiscoveryIfWanted(address)
+    }
+
+    /**
+     * Issues discovery once per connection, and only when the GATT client is free.
+     *
+     * Idempotent on purpose: it is called from the connect path, from [onMtuChanged] and from the
+     * fallback timer, and exactly one of those should win. Whichever arrives first while no MTU
+     * exchange is outstanding does the work.
+     */
+    private fun issueDiscoveryIfWanted(address: String) {
+        if (!discoveryGate.shouldIssueDiscovery(address)) return
+        val gatt = callbackGatt[address] ?: activeConnections[address]
+        if (gatt == null) {
+            discoveryGate.onDiscoveryFailed(address)
+            return
+        }
         try {
-            gatt.discoverServices()
+            if (!gatt.discoverServices()) {
+                // Let a later trigger retry rather than stranding the connection at CONNECTING.
+                discoveryGate.onDiscoveryFailed(address)
+                onLog("discoverServices() refused for $address.")
+            }
         } catch (e: SecurityException) {
+            discoveryGate.onDiscoveryFailed(address)
             onLog("SecurityException: Service discovery denied for $address.")
+        }
+    }
+
+    /**
+     * Starts discovery anyway if the MTU callback never arrives.
+     *
+     * Some peripherals simply do not answer an MTU request. Without this the connection would hang
+     * at CONNECTING forever waiting on a callback — trading the old bug for a quieter one.
+     */
+    private fun armMtuFallback(address: String) {
+        connectionScope.launch {
+            kotlinx.coroutines.delay(MTU_FALLBACK_MS)
+            if (discoveryGate.onMtuSettled(address)) {
+                onLog("MTU callback never arrived for $address; starting service discovery anyway.")
+                issueDiscoveryIfWanted(address)
+            }
         }
     }
 
@@ -312,6 +381,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {
+        discoveryGate.forget(address)
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
         deviceWriteManagers.remove(address)?.release()
@@ -351,5 +421,14 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
                 onRestored(address)
             }
         }
+    }
+
+    private companion object {
+        /**
+         * How long to wait for `onMtuChanged` before starting service discovery regardless.
+         * Generous: the observed exchange took ~700ms on the moto, and being late here costs a
+         * slower connect, while being early costs the dropped-discovery bug this fixes.
+         */
+        const val MTU_FALLBACK_MS = 2000L
     }
 }
