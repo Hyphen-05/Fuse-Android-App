@@ -38,6 +38,13 @@
             android:name=".ambiance.AmbianceCaptureService"
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
+        <!-- Debug tooling: keeps the process unfrozen for the length of a filmed calibration run,
+             which is what Android's cached-app freezer otherwise kills. Replaces disabling the
+             freezer globally on the test phone. See CalibrationForegroundService. -->
+        <service
+            android:name=".debug.CalibrationForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

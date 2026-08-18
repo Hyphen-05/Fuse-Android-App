@@ -2652,6 +2652,11 @@ class RgbControllerViewModel(
      *
      * Any running music sync or scene is stopped first: a second source writing colours mid-run
      * would corrupt every measurement taken from it.
+     *
+     * The run is wrapped in [com.example.debug.CalibrationForegroundService] because the phone
+     * driving a run cannot also film it, so the app spends the whole run backgrounded — where
+     * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
+     * start, the sequence still runs, it is just freezable again.
      */
     override fun onAdbRunCalibration(sequence: String) {
         viewModelScope.launch {
@@ -2662,16 +2667,28 @@ class RgbControllerViewModel(
                 return@launch
             }
             addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
-            val file = com.example.debug.CalibrationSequences.run(
-                sequence = sequence,
-                outputDir = getApplication().getExternalFilesDir(null)
-            ) { command ->
-                targets.forEach { address ->
-                    bleGattTransport.writeCommand(address, command, bypassPacing = true)
-                }
+            val unfrozen = com.example.debug.CalibrationForegroundService.start(
+                getApplication(), sequence
+            )
+            if (!unfrozen) {
+                addLog("Calibration '$sequence': foreground service unavailable — run may be frozen if backgrounded.")
             }
-            addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
-            android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
+            try {
+                val file = com.example.debug.CalibrationSequences.run(
+                    sequence = sequence,
+                    outputDir = getApplication().getExternalFilesDir(null)
+                ) { command ->
+                    targets.forEach { address ->
+                        bleGattTransport.writeCommand(address, command, bypassPacing = true)
+                    }
+                }
+                addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
+                android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
+            } finally {
+                // finally, not a trailing call: a cancelled scope or a throwing sequence would
+                // otherwise leave an ongoing notification up and the process pinned indefinitely.
+                com.example.debug.CalibrationForegroundService.stop(getApplication())
+            }
         }
     }
 

@@ -22,6 +22,9 @@ import java.io.File
  *  - [DARK_RAMP] covers the bottom of the range that [BRIGHTNESS_RAMP] skipped, where the fitted
  *    curve disagrees with its own lowest measured point by 2×, and asks whether the brightness
  *    command is a finer dimmer than the colour bytes.
+ *  - [SUSTAINED_LOAD] answers whether the link survives an hour flat out, which is the last thing
+ *    standing between the pacing measurements and removing the manual pacing setting. Needs no
+ *    camera and nobody watching.
  *  - Running [RATE_RAMP] with two strips connected answers `multiDeviceThroughputFactor`.
  *
  * Every sequence opens with [syncMarker]: three fast full-white flashes, which is the alignment
@@ -38,10 +41,12 @@ object CalibrationSequences {
     const val RATE_RAMP = "rate_ramp"
     const val SPACING_STAIRCASE = "spacing_staircase"
     const val DARK_RAMP = "dark_ramp"
+    const val SUSTAINED_LOAD = "sustained_load"
     const val HOLD_WHITE = "hold_white"
 
     val ALL = listOf(
-        BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP, HOLD_WHITE
+        BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
+        SUSTAINED_LOAD, HOLD_WHITE
     )
 
     /** One line per write: when it was sent, and what was in it. */
@@ -103,6 +108,7 @@ object CalibrationSequences {
             RATE_RAMP -> rateRamp(::emit)
             SPACING_STAIRCASE -> spacingStaircase(::emit)
             DARK_RAMP -> darkRamp(::emit, ::emitBrightness)
+            SUSTAINED_LOAD -> sustainedLoad(::emit)
             else -> return null
         }
 
@@ -218,6 +224,31 @@ object CalibrationSequences {
                 delay(700)
             }
         }
+        controlBursts(emit)
+    }
+
+    /**
+     * Bursts that send the first colour and **no second write at all**, so the analysis can be
+     * checked end to end rather than trusted.
+     *
+     * The 2026-08-16 run nearly buried its most important finding for want of these. Reading only
+     * the settled colour, a dropped *second* write leaves red — which is what the run was built to
+     * detect — but a lost *first* write leaves blue, identical to a clean success. That scored
+     * 110/110 and called it a sweep, while 68% of first writes were in fact never arriving.
+     *
+     * These bursts must settle on **red**. Any that read blue or black mean the classifier is
+     * reading the wrong window, and every number from that run is suspect — which is exactly what
+     * `find_sync` latching onto the wrong flash did to the first analysis.
+     */
+    private suspend fun controlBursts(emit: (String, Int, Int, Int) -> Unit) {
+        emit("control_marker", 0, 0, 0)
+        delay(700)
+        repeat(10) { index ->
+            emit("control_${index}_reset", 0, 0, 0)
+            delay(500)
+            emit("control_${index}_first", 255, 0, 0)
+            delay(700)
+        }
     }
 
     /**
@@ -269,6 +300,43 @@ object CalibrationSequences {
             delay(1500)
         }
         emitBrightness("bright_restore_100", 100)
+    }
+
+    /**
+     * Writes flat out for an hour, so that "does the link survive sustained load" stops being a
+     * guess. **No camera, no dark room, nobody watching** — the CSV is the entire result.
+     *
+     * This is the one measurement standing between the pacing work and shipping. Removing the
+     * artificial pacing wait leaves writes completion-gated, which the measurements say is right;
+     * but every ramp so far ran flat out for about fifteen seconds, so nothing tested whether an
+     * hour of it disconnects, backs the queue up, or degrades. Three failure modes, and the auto-tune
+     * engine currently only notices the first.
+     *
+     * What makes the CSV readable afterwards: the timestamps alone give achieved rate over time, so
+     * a link that degrades shows as a rate that sags. Colour alternates so a camera *could* be
+     * pointed at it if anyone wants a light-side check, but nothing here depends on that. A marker
+     * row every 30s segments the file without any alignment work.
+     *
+     * Deliberately not a "stress test" in the auto-tune sense: it makes no judgement and asserts
+     * nothing. It produces a trace, and the analysis decides.
+     */
+    private suspend fun sustainedLoad(emit: (String, Int, Int, Int) -> Unit) {
+        val totalMs = 60 * 60 * 1000L
+        val startedAt = System.currentTimeMillis()
+        var index = 0
+        var nextMarkerAt = 30_000L
+        while (System.currentTimeMillis() - startedAt < totalMs) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            if (elapsed >= nextMarkerAt) {
+                emit("sustained_marker_${nextMarkerAt / 1000}s", 0, 0, 0)
+                nextMarkerAt += 30_000L
+            }
+            if (index % 2 == 0) emit("sustained", 255, 0, 0) else emit("sustained", 0, 0, 255)
+            index++
+            // No delay at all: the radio is the pacer, which is exactly the configuration the
+            // pacing removal would ship. Testing anything slower would not test the thing.
+            delay(1)
+        }
     }
 
     private fun writeCsv(sequence: String, outputDir: File?, startedAt: Long): File? {
