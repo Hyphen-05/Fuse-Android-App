@@ -61,9 +61,20 @@ import kotlin.math.sqrt
  *
  * The one place the carrier could bite is if it is unusually low — some cheap drivers run 100-250Hz
  * — in which case deep dimming might flicker on its own and beat against anything the app adds.
- * That is unmeasured, and it is cheap to settle: a rolling-shutter photo (a still, taken while
- * whipping the phone past a lit strip) bands visibly if the light is being PWMed, and the band
- * spacing gives the frequency. No rig, no lock, thirty seconds.
+ * That is unmeasured, and it is cheap to settle with a motion-smear photo. **The method needs three
+ * conditions this file originally failed to state**, and a first attempt on 2026-08-17 missed all
+ * three and came back unreadable:
+ *
+ *  - **Dim the strip first** (brightness ~10-20%, or a colour byte near 24). At full white the duty
+ *    cycle is ~100% and there is nothing to chop — the photo shows a continuous streak whether the
+ *    driver PWMs or not.
+ *  - **Do not let the LEDs clip.** PWM reads as intensity structure along the smear, and a saturated
+ *    pixel has no structure. Tap-to-expose on the strip and drag the exposure slider down.
+ *  - **Move the camera across the strip, not along it.** Swept along its own axis, the LED pitch and
+ *    the chopping land on the same axis and cannot be told apart; swept across, each LED draws a
+ *    clean line that PWM breaks into countable dashes.
+ *
+ * Full method in `tools/calibration/README.md`.
  */
 class DitheringSimulation {
 

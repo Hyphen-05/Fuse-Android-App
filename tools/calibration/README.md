@@ -168,6 +168,25 @@ a finer dimmer than the colour bytes are?** If brightness is a PWM duty cycle he
 bytes — one extra command, and it buys back the resolution the byte grid does not have down there.
 See `DitheringSimulation` for the argument and the numbers.
 
+## Finding the PWM carrier with one photo (method corrected 2026-08-17)
+
+Whether the strips' own dimming carrier is high (invisible, ignore it) or low (100-250Hz, flickers
+on its own under deep dimming and would beat against anything the app adds) is settled by a single
+motion-smeared still. No rig, no dark room, no lock.
+
+The first attempt came back unreadable, and each of its three problems is worth stating as a rule:
+
+| Do | Because |
+|---|---|
+| **Dim the strip to ~10-20% first** | At full white the duty cycle is ~100% and there is nothing to chop. A continuous streak proves nothing. |
+| **Expose so the strip is *not* blown out** | PWM shows as intensity structure along the smear; a saturated pixel has none. Tap the strip to focus/expose, then drag the exposure slider down until it is grey rather than white. |
+| **Sweep the camera *across* the strip, not along it** | Along its own axis, LED pitch and PWM chopping fall on the same axis and are indistinguishable — regular dark bands between LEDs could be either. Across, each LED draws a line that PWM breaks into countable dashes. |
+
+Then: shutter speed comes out of EXIF (`ExposureTime`), count the dashes across one LED's streak,
+and the carrier is `dashes / exposure_seconds`. At 6ms exposure a 1kHz carrier gives ~6 dashes —
+easy to count — and anything that shows *no* dashes at a legible exposure is fast enough not to care
+about.
+
 ## Capturing the dark ramp (the offline-analysis run to do next)
 
 Two phases in one recording, ~2½ minutes. Same rig as any other sequence — dark room, locked
