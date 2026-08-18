@@ -1692,7 +1692,19 @@ class RgbControllerViewModel(
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             addLog("Disconnected from GATT ($address).")
             val wasActive = bleGattTransport.isConnected(address)
-            bleGattTransport.removeConnection(address)
+            // Close it, don't just drop it. Every BluetoothGatt holds a client interface
+            // registration, Android allows an app only a limited number of them, and this path —
+            // unlike the manual disconnect below, which has always closed properly — used to
+            // discard the handle. A device that drops and retries repeatedly would exhaust the
+            // table and then fail every subsequent connect until the process was killed.
+            val droppedGatt = bleGattTransport.removeConnection(address)
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    bleGattTransport.rawDisconnectAndClose(droppedGatt)
+                } catch (e: SecurityException) {
+                    addLog("SecurityException closing dropped GATT for $address.")
+                }
+            }
 
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 

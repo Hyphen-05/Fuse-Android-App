@@ -109,6 +109,10 @@ configuration removing the pacing wait would ship. **No camera, no dark room, no
 CSV is the whole result, and a link that degrades shows up as an achieved rate that sags over time.
 A marker row every 30s segments the file.
 
+`analyse_sustained.py` reads the result. It reports disconnection, degradation and stalls
+**separately and on purpose**: a healthy-looking mean rate can sit on top of a trace that stopped
+dead for four seconds every minute, and averaging is exactly what would hide that.
+
 This is the last measurement standing between the pacing work and shipping it: every ramp so far ran
 flat out for about fifteen seconds, so "does an hour of this disconnect, back the queue up, or
 degrade" is genuinely unmeasured. Run it on a day when the strips are not otherwise wanted; it does
@@ -167,6 +171,7 @@ Run everything from the folder holding the CSVs and the video
 | `analyse_latency.py` | delivery jitter (and why absolute latency is not in this recording) |
 | `analyse_rate_light.py` | light side: which writes the strip actually rendered |
 | `analyse_staircase.py` | `minWriteSpacingMs`, from the staircase run above |
+| `analyse_sustained.py` | whether an hour flat out disconnects, degrades or stalls — CSV only |
 
 `analyse_ramp.py` measures the brightness response: it crops a wall patch (never the emitters —
 those clip), averages it per frame via ffmpeg, aligns on the sync flashes, and fits the exponent.
