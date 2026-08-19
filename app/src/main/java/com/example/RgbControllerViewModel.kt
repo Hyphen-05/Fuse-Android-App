@@ -175,6 +175,7 @@ class RgbControllerViewModel(
                 isPowerOn = prefsRepo.getAppStatePrefBoolean("power_on", true),
                 activeFeatureName = prefsRepo.getAppStatePrefString("active_feature_name", "Colour") ?: "Colour",
                 showFpsTracker = prefsRepo.getAppStatePrefBoolean("show_fps_tracker", false),
+                perceptualSplitEnabled = prefsRepo.getAppStatePrefBoolean("perceptual_split_enabled", false),
                 red = prefsRepo.getAppStatePrefInt("red", 255),
                 green = prefsRepo.getAppStatePrefInt("green", 0),
                 blue = prefsRepo.getAppStatePrefInt("blue", 128),
@@ -824,7 +825,17 @@ class RgbControllerViewModel(
             onFpsUpdate = { address, fps ->
                 _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
             },
-            diagAttribution = { address -> getDiagAttribution(address) }
+            diagAttribution = { address -> getDiagAttribution(address) },
+            // Read off _uiState rather than prefs: this runs on every single write, and a
+            // SharedPreferences lookup per write is not something the hot path should carry.
+            splitEnabled = { _uiState.value.coreControl.perceptualSplitEnabled },
+            // The per-device Dimming value if the device has one, else the global slider. Only used
+            // to seed the stage; once the user moves the slider the brightness command itself
+            // carries the intent through the same boundary.
+            userDimming = { address ->
+                val state = _uiState.value
+                state.connectivity.deviceStatesMap[address]?.brightness ?: state.coreControl.brightness
+            }
         )
 
         ambianceCommandSink.listener = this
@@ -2023,6 +2034,10 @@ class RgbControllerViewModel(
 
     fun setShowFpsTracker(enabled: Boolean) {
         dispatch(RgbIntent.SetShowFpsTracker(enabled))
+    }
+
+    fun setPerceptualSplitEnabled(enabled: Boolean) {
+        dispatch(RgbIntent.SetPerceptualSplitEnabled(enabled))
     }
 
     fun clearErrorMessage() {

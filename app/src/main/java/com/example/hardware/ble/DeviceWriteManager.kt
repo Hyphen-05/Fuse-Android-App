@@ -39,6 +39,10 @@ class DeviceWriteManager(
     // Queued command plus the peak-hold/pacing-bypass metadata it was enqueued with
     // (visualizer-review-2026-07-21.md P2). [priority] compares only against other queued
     // commands of the *same type byte* (index 2) — see [updateCommand].
+    // [bypassPacing] is inert since the pacing wait was removed — there is no wait left to skip.
+    // It stays plumbed through because the audio path passes it and step 4 of Tier E Phase 3 takes
+    // the whole pacing configuration out in one piece; deleting the parameter alone would churn the
+    // transport interface twice. [priority] is unaffected and still live: it is the peak-hold rule.
     private data class QueuedCommand(val bytes: ByteArray, val priority: Float, val bypassPacing: Boolean)
 
     private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<QueuedCommand>()
@@ -49,7 +53,6 @@ class DeviceWriteManager(
 
     // Incremented from the GATT callback thread, drained from the sampler coroutine below.
     private val framesSent = java.util.concurrent.atomic.AtomicInteger(0)
-    @Volatile private var pendingJob: Job? = null
 
     private var consecutiveWatchdogTriggers = 0
     private var lastQueueLogTime = 0L
@@ -110,8 +113,6 @@ class DeviceWriteManager(
      */
     fun release() {
         fpsSamplerJob.cancel()
-        pendingJob?.cancel()
-        pendingJob = null
     }
 
     /**
@@ -222,25 +223,19 @@ class DeviceWriteManager(
         if (isWriting) return
         val cmd = commandQueue.peek() ?: return
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastWriteTime
-
-        // Peak-priority bypass (visualizer-review-2026-07-21.md P2): the frame a flash fires
-        // skips the pacing wait entirely rather than risking the flash landing in the gap between
-        // two paced writes.
-        if (currentPacingMs > 0 && !cmd.bypassPacing) {
-            if (elapsed < currentPacingMs) {
-                if (pendingJob == null || pendingJob?.isActive != true) {
-                    pendingJob = connectionScope.launch(Dispatchers.IO) {
-                        delay(currentPacingMs - elapsed)
-                        pendingJob = null
-                        tryWrite()
-                    }
-                }
-                return
-            }
-        }
-
+        // The artificial pacing wait used to sit here (Tier E Phase 3 step 2, removed 2026-08-19).
+        //
+        // The radio is already the pacer: this method refuses to send while [isWriting], and
+        // [onWriteCompleted] immediately tries again, so writes are completion-gated whatever
+        // `currentPacingMs` says. The extra delay did not slow the link down — it decided how many
+        // computed frames were thrown away *before* the radio was even busy. Measurement (2026-08-16)
+        // put a write at ~4.6ms per strip, so any pacing below that was configuring nothing, and the
+        // 15-minute sustained run on 2026-08-19 came back clean with full coverage, which is what
+        // unblocked removing it.
+        //
+        // `currentPacingMs` survives because it still throttles *upstream capture*:
+        // AmbianceProcessor caps its capture interval with it. That job becomes an explicit frame
+        // cap in step 3; until then the pref is still read, just no longer stacked on the radio.
         isWriting = true
         val cmdToWrite = commandQueue.poll()
         if (cmdToWrite == null) {

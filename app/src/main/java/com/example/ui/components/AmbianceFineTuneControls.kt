@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 import com.example.RgbUiState
+import com.example.ambiance.AmbiancePreset
+import com.example.ambiance.AmbiancePresetStore
 
 /**
  * The seven ambiance tuning sliders, the reset button and the save-as-preset flow.
@@ -429,9 +431,9 @@ fun AmbianceFineTuneControls(
                                         sceneCutSensitivity = sceneCutSensitivity,
                                         noiseDeadband = noiseDeadband
                                     )
-                                    val customPresets = loadCustomPresetsFromPrefs(context)
-                                    val updatedPresets = customPresets.filter { it.name.lowercase() != trimmedName.lowercase() } + newPreset
-                                    saveCustomPresetsToPrefs(context, updatedPresets)
+                                    // Same-name replacement is the store's rule now, so the
+                                    // Ambiance tab's list updates the moment this lands.
+                                    AmbiancePresetStore.save(context, newPreset)
 
                                     viewModel.applyAmbiancePreset(
                                         presetId = trimmedName,

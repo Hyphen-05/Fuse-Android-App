@@ -310,6 +310,38 @@ fun coreControlsReducer(
             newState to effects
         }
 
+        is RgbIntent.SetPerceptualSplitEnabled -> {
+            val newState = state.copy(
+                coreControl = state.coreControl.copy(perceptualSplitEnabled = intent.enabled)
+            )
+            // Resend the colour showing now, in both directions. Turning the split *off* otherwise
+            // leaves the strip holding a normalised colour at a composed brightness — it would stay
+            // wrong until something else wrote a colour, which for a static colour is never.
+            // Turning it *on* has the mirror problem. Brightness first so the stage learns the
+            // user's Dimming setting before it splits the colour against it.
+            //
+            // Any live automation (ambiance, the visualiser) overwrites this within a frame or two,
+            // which is the correct outcome there: its next frame is already right.
+            val effects = listOf(
+                CoreSideEffect.SavePrefBoolean("perceptual_split_enabled", intent.enabled),
+                CoreSideEffect.BroadcastCommand(
+                    command = DuoCoProtocol.createBrightnessCommand(state.coreControl.brightness),
+                    logMessage = "Colour split ${if (intent.enabled) "on" else "off"}: brightness ${state.coreControl.brightness}%",
+                    cancelRunningScenes = false
+                ),
+                CoreSideEffect.BroadcastCommand(
+                    command = DuoCoProtocol.createColorCommand(
+                        state.coreControl.red,
+                        state.coreControl.green,
+                        state.coreControl.blue
+                    ),
+                    logMessage = "Colour split ${if (intent.enabled) "on" else "off"}: resync colour",
+                    cancelRunningScenes = false
+                )
+            )
+            newState to effects
+        }
+
         is RgbIntent.SetShowFpsTracker -> {
             val newState = state.copy(
                 coreControl = state.coreControl.copy(showFpsTracker = intent.enabled)

@@ -230,6 +230,12 @@ class AmbianceProcessor(
             // Lowered from 25 — previous floor read as too bright for content 
             // meant to be very dim.
             val floorTarget = 14
+            // This floor is tuned, and the colour/level split does not get to change it. An earlier
+            // version of the split skipped it, on the theory that moving level to the dimmer made
+            // the floor unnecessary; what that actually did was re-tune ambiance behind Joe's back,
+            // and it was one of the reasons ambiance looked worse with the split on (2026-08-19).
+            // The split's knee now sits at this same value, so ambiance output is byte-identical
+            // whether the split is on or off. Leave both alone together.
             if (maxC in (trueBlackCutoff + 1) until floorTarget) {
                 val boost = floorTarget.toFloat() / maxC
                 fR = (fR * boost).roundToInt().coerceIn(0, 255)

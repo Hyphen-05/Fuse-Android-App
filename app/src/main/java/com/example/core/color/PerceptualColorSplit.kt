@@ -26,8 +26,14 @@ data class SplitColor(val r: Int, val g: Int, val b: Int, val brightnessPercent:
  *
  * ## This transform is appearance-preserving, on purpose
  *
- * It is applied to *every* colour the app sends, so it must not change how anything looks - it
- * reproduces the same emitted light with finer steps, and nothing else.
+ * It is applied to every colour the app sends that falls below [SPLIT_KNEE], so it must not change
+ * how anything looks - it reproduces the same emitted light, and nothing else.
+ *
+ * It does *not* buy finer steps. That claim was in this file until 2026-08-19 and it was wrong:
+ * above byte ~10 the colour axis resolves light more finely than the dimmer does, so splitting up
+ * there costs resolution. Joe saw it immediately in ambiance, which is nothing but smooth
+ * gradients. What the split actually buys is **reach** - colour byte 1 already emits 11% of full
+ * light, so without the dimmer there is no way to be darker than that at all.
  *
  * Scaling all three channels by the same factor k multiplies every channel's light by k^0.4, which
  * leaves the ratios between them - the hue - untouched. So normalise the top channel to 255 for
@@ -53,6 +59,33 @@ object PerceptualColorSplit {
     private const val RESPONSE_EXPONENT = 0.4
 
     /**
+     * Peak channel below which the split is worth doing. Above it, the colour is passed through
+     * untouched.
+     *
+     * A byte step changes light by `0.4/b` in relative terms, so the colour axis gets *finer* as it
+     * climbs; a brightness step changes it by `1/B`, and B falls as the picture darkens. They cross
+     * around byte 10-16:
+     *
+     *     byte 128  colour 0.31%  brightness 1.32%   <- colour is 4x finer
+     *     byte  64  colour 0.62%  brightness 1.74%
+     *     byte  16  colour 2.50%  brightness 3.03%
+     *     byte   8  colour 5.00%  brightness 3.99%   <- brightness takes over
+     *
+     * Splitting above the knee therefore *loses* level resolution — which is what a 2026-08-19
+     * ambiance run showed: smooth gradients, which live at mid and high bytes, came out visibly
+     * coarser. Below the knee the colour axis is not merely coarse, it has run out: byte 1 already
+     * emits 11% of full light, so nothing dimmer than that is expressible at all, and hue near
+     * black has only a handful of ratios left to describe it with.
+     *
+     * 14 rather than 16 so it sits at or above `AmbianceProcessor`'s floor, which lifts dim content
+     * to byte 14. That is not a coincidence to be tidied away later: the floor exists because the
+     * colour axis stops working around there, which is the same fact this constant encodes. It does
+     * mean ambiance output is byte-identical with the split on and off, which is deliberate — that
+     * mode is tuned, and this transform has no business re-tuning it.
+     */
+    private const val SPLIT_KNEE = 14
+
+    /**
      * Splits [r],[g],[b] into full-range colour bytes plus the brightness that restores its level,
      * scaled by the user's own dimming setting.
      *
@@ -71,8 +104,18 @@ object PerceptualColorSplit {
         // user's setting so turning the colour back up does not also restore a stale dim level.
         if (peak == 0) return SplitColor(0, 0, 0, dim)
 
+        // Dimming at zero is the user asking for the lights off, and it has to survive the floor
+        // below. Without this the strip stops at 1% and never goes dark: the slider's bottom end
+        // silently stops working the moment the split is on.
+        if (dim == 0) return SplitColor(0, 0, 0, 0)
+
+        // Above the knee the colour axis is the finer of the two — leave it alone. See [SPLIT_KNEE].
+        if (peak >= SPLIT_KNEE) return SplitColor(cr, cg, cb, dim)
+
         val scale = 255.0 / peak
         val level = (peak / 255.0).pow(RESPONSE_EXPONENT)
+        // Floored at 1 so a colour that is merely dim never rounds all the way to off — an explicit
+        // zero is the only thing that turns the strip off.
         val percent = (level * dim).roundToInt().coerceIn(1, 100)
 
         return SplitColor(

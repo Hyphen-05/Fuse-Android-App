@@ -46,10 +46,29 @@ class PerceptualColorSplitTest {
 
     @Test
     fun `hue survives the rescale`() {
-        val split = PerceptualColorSplit.split(24, 12, 6)
+        val split = PerceptualColorSplit.split(12, 6, 3)
         assertEquals(255, split.r)
         assertEquals(2.0, split.r.toDouble() / split.g, 0.05)
         assertEquals(4.0, split.r.toDouble() / split.b, 0.1)
+    }
+
+    @Test
+    fun `a colour above the knee is left exactly as it is`() {
+        // The colour axis is finer than the dimmer up here, so splitting would cost resolution
+        // rather than buy it. Byte-identical output is the whole point — see SPLIT_KNEE.
+        val split = PerceptualColorSplit.split(24, 12, 6, userDimmingPercent = 80)
+        assertEquals(24, split.r)
+        assertEquals(12, split.g)
+        assertEquals(6, split.b)
+        assertEquals("and the dimmer keeps the user's setting", 80, split.brightnessPercent)
+    }
+
+    @Test
+    fun `the knee does not make light jump`() {
+        // Either side of the boundary the emitted light must still land on the same curve.
+        val below = emitted(PerceptualColorSplit.split(13, 13, 13))
+        val above = emitted(PerceptualColorSplit.split(14, 14, 14))
+        assertTrue("below=$below above=$above", above.first - below.first in 0.0..0.02)
     }
 
     @Test
@@ -73,6 +92,12 @@ class PerceptualColorSplitTest {
         val split = PerceptualColorSplit.split(0, 0, 0, userDimmingPercent = 70)
         assertEquals(0, split.r); assertEquals(0, split.g); assertEquals(0, split.b)
         assertEquals("otherwise turning colour back up restores a stale level", 70, split.brightnessPercent)
+    }
+
+    @Test
+    fun `dimming to zero turns the strip off rather than stopping at one percent`() {
+        val split = PerceptualColorSplit.split(255, 128, 0, userDimmingPercent = 0)
+        assertEquals("the slider's bottom end has to still mean off", 0, split.brightnessPercent)
     }
 
     @Test
