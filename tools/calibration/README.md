@@ -113,7 +113,30 @@ A marker row every 30s segments the file.
 **separately and on purpose**: a healthy-looking mean rate can sit on top of a trace that stopped
 dead for four seconds every minute, and averaging is exactly what would hide that.
 
-### Result, 2026-08-18 (moto, two strips, 15 min) - PARTIAL, do not treat as a pass
+### Result, 2026-08-19 (moto, two strips, 15 min, instrumented) - GOOD ENOUGH TO PROCEED
+
+Re-run with `start_diagnostics` first. **73,990 writes over a dead-steady 15 minutes**: 82 writes/s
+in every single minute bucket, drift -0.3%, zero stalls over 250ms. Telemetry shows fps 77-84 per
+device tracking the offer rate roughly 1:1, in-flight 4.9-8.0ms, `identicalSkipped=0`, no queue
+backup, no watchdog fires.
+
+**The capture still does not cover the whole window, and this is the third method that has failed
+the same way.** `DiagnosticLogger` is a ring buffer, the run wrote ~74,000 enqueue lines into it, and
+only the **last 36 seconds** survived. Logcat had rolled past the window too by the time it was
+checked. So direct disconnect evidence covers 36 seconds, not 15 minutes.
+
+What carries the weight instead is indirect but reasonable: the offer loop's pace is coupled to the
+BLE work it is doing, and a dead link makes `writeCommand` return *faster*, not slower. The rate
+would have moved. It sat at 82±1 for all fifteen minutes.
+
+**Verdict: proceed with Phase 3 step 2.** No failure mode has appeared in any run, the measurements
+already say the pacing wait does nothing the radio isn't doing, and the change is reversible. Chasing
+a fourth capture of the same non-event is not a good use of a session.
+
+**If it is ever run again, stream logcat to disk** - `adb logcat -v time > run.log` for the duration.
+It does not roll, it costs nothing, and it would have settled this on the first attempt.
+
+### Result, 2026-08-18 (moto, two strips, 15 min) - PARTIAL, superseded by the above
 
 Ran the full 15 minutes it was asked for. **273,039 writes offered, zero stalls over 250ms**, and
 the rate *rose* from 221 to 325 writes/s across the run (+47%) - warm-up, not degradation. Nothing
