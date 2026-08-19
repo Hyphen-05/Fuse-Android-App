@@ -76,6 +76,12 @@ class PerceptualColorSplitTest {
     }
 
     @Test
+    fun `dimming to zero turns the strip off rather than stopping at one percent`() {
+        val split = PerceptualColorSplit.split(255, 128, 0, userDimmingPercent = 0)
+        assertEquals("the slider's bottom end has to still mean off", 0, split.brightnessPercent)
+    }
+
+    @Test
     fun `a lit colour never rounds down to off`() {
         val split = PerceptualColorSplit.split(1, 0, 0)
         assertTrue("got ${split.brightnessPercent}", split.brightnessPercent >= 1)

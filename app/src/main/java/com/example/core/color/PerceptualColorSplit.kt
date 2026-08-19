@@ -71,8 +71,15 @@ object PerceptualColorSplit {
         // user's setting so turning the colour back up does not also restore a stale dim level.
         if (peak == 0) return SplitColor(0, 0, 0, dim)
 
+        // Dimming at zero is the user asking for the lights off, and it has to survive the floor
+        // below. Without this the strip stops at 1% and never goes dark: the slider's bottom end
+        // silently stops working the moment the split is on.
+        if (dim == 0) return SplitColor(0, 0, 0, 0)
+
         val scale = 255.0 / peak
         val level = (peak / 255.0).pow(RESPONSE_EXPONENT)
+        // Floored at 1 so a colour that is merely dim never rounds all the way to off — an explicit
+        // zero is the only thing that turns the strip off.
         val percent = (level * dim).roundToInt().coerceIn(1, 100)
 
         return SplitColor(
