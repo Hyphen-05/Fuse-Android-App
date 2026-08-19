@@ -261,6 +261,38 @@ and the carrier is `dashes / exposure_seconds`. At 6ms exposure a 1kHz carrier g
 easy to count — and anything that shows *no* dashes at a legible exposure is fast enough not to care
 about.
 
+### Result, 2026-08-19: no PWM chopping at 15% brightness
+
+Four stills, Pixel, strip dimmed to ~15%, camera swept across the strip. Exposure 8.27ms, ISO 22.
+Three of the four caught a streak; all three agree.
+
+Measured on the longest smear (525px across an 8.27ms exposure = **63 px/ms**):
+
+| | |
+|---|---|
+| samples inside the streak below 50% of peak | 38 of 525 |
+| contiguous dark runs | 2, both at the streak's ends |
+| mean level inside the streak | 230/255 |
+
+The two dark runs are the ramp at each end, at sample 0 and the last sample. There is **no periodic
+structure anywhere along the streak**, on any of the three photos.
+
+At 63 px/ms a 1kHz carrier would chop the streak into eight ~63px dashes, and 5kHz into ~13px
+dashes. Both would be unmissable. So the carrier is **above ~5kHz, or the driver dims by current
+rather than by PWM** — this method cannot separate those, and for our purposes it does not need to.
+
+**What it settles:** dimming via the brightness command is flicker-free at 15%, so there is no
+low-frequency carrier to beat against anything the app does, and no self-flicker under dimming.
+That was the open risk against headroom scaling, and it is now closed. What remains open for
+headroom scaling is *resolution*, not flicker — `dark_ramp` phase 2.
+
+**Caveat worth keeping:** this tested 15%. Some drivers change strategy at very low duty, so 1-5%
+is not covered. `dark_ramp` phase 2 sweeps 1-20% and would show a change of behaviour as a kink.
+
+Note the clipping: the LEDs still read 255 at the streak's core. That does **not** undermine the
+result — a PWM off-period collects zero light, and clipping cannot fill in a genuine zero. Solid
+streaks mean no off-periods, however bright the on-periods were.
+
 ## Capturing the dark ramp (the offline-analysis run to do next)
 
 Two phases in one recording, ~2½ minutes. Same rig as any other sequence — dark room, locked
