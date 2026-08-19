@@ -31,8 +31,8 @@ class ColourSplitStageTest {
     private fun light(byteValue: Int) = (byteValue / 255.0).pow(0.4)
 
     @Test
-    fun colour_becomes_brightness_then_full_range_colour() {
-        val out = stage().process(colour(64, 32, 0))
+    fun a_colour_below_the_knee_becomes_brightness_then_full_range_colour() {
+        val out = stage().process(colour(8, 4, 0))
 
         assertEquals(2, out.size)
         assertEquals(0x01.toByte(), typeOf(out[0]))
@@ -42,21 +42,45 @@ class ColourSplitStageTest {
     }
 
     @Test
+    fun a_colour_above_the_knee_goes_out_untouched_as_one_write() {
+        // The regression Joe caught on hardware: splitting up here moved level off the finer axis
+        // and made smooth gradients coarser. Ambiance lives entirely in this range, so above the
+        // knee the bytes must be exactly what the caller asked for, at one write per frame.
+        val stage = stage()
+
+        // The first colour of a connection also asserts the dimmer, once: nothing is known about
+        // where the strip's brightness actually is until something sets it.
+        val first = stage.process(colour(64, 32, 0))
+        assertEquals(2, first.size)
+        assertEquals(0x01.toByte(), typeOf(first[0]))
+        assertEquals(100, percentOf(first[0]))
+        assertTrue(first[1].contentEquals(colour(64, 32, 0)))
+
+        // Steady state, which is what a gradient actually looks like: one write, bytes untouched.
+        for (peak in listOf(63, 62, 48, 32, 20, 14)) {
+            val original = colour(peak, peak / 2, 0)
+            val out = stage.process(original)
+            assertEquals("peak $peak should not split", 1, out.size)
+            assertTrue("peak $peak should be byte-identical", out[0].contentEquals(original))
+        }
+    }
+
+    @Test
     fun the_split_preserves_appearance() {
-        val out = stage().process(colour(64, 32, 0))
+        val out = stage().process(colour(8, 4, 0))
         val dimmed = percentOf(out[0]) / 100.0
 
         // Each channel's emitted light after the split, scaled by the firmware dimmer, must match
         // what the original bytes emitted on their own.
         val (r, g, b) = rgbOf(out[1])
-        assertTrue(abs(light(r) * dimmed - light(64)) < 0.02)
-        assertTrue(abs(light(g) * dimmed - light(32)) < 0.02)
+        assertTrue(abs(light(r) * dimmed - light(8)) < 0.02)
+        assertTrue(abs(light(g) * dimmed - light(4)) < 0.02)
         assertTrue(abs(light(b) * dimmed - light(0)) < 0.02)
     }
 
     @Test
     fun music_colour_keeps_its_marker_byte() {
-        val out = stage().process(DuoCoProtocol.createMusicColorCommand(10, 20, 30))
+        val out = stage().process(DuoCoProtocol.createMusicColorCommand(2, 4, 6))
 
         val emitted = out.last()
         assertEquals(0x20.toByte(), emitted[7])
@@ -66,10 +90,10 @@ class ColourSplitStageTest {
     @Test
     fun unchanged_level_costs_no_brightness_write() {
         val stage = stage()
-        stage.process(colour(64, 32, 0))
+        stage.process(colour(8, 4, 0))
 
         // Same peak, different hue — a constant-luminance sweep. One write, not two.
-        val out = stage.process(colour(0, 64, 32))
+        val out = stage.process(colour(0, 8, 4))
         assertEquals(1, out.size)
         assertEquals(0x05.toByte(), typeOf(out[0]))
     }
@@ -77,9 +101,9 @@ class ColourSplitStageTest {
     @Test
     fun changed_level_writes_brightness_again() {
         val stage = stage()
-        stage.process(colour(64, 64, 64))
+        stage.process(colour(12, 12, 12))
 
-        val out = stage.process(colour(16, 16, 16))
+        val out = stage.process(colour(3, 3, 3))
         assertEquals(2, out.size)
         assertEquals(0x01.toByte(), typeOf(out[0]))
         assertTrue(percentOf(out[0]) < 100)
@@ -88,7 +112,7 @@ class ColourSplitStageTest {
     @Test
     fun dimming_slider_is_composed_in_rather_than_overwriting_the_level() {
         val stage = stage()
-        val atFull = percentOf(stage.process(colour(64, 32, 0))[0])
+        val atFull = percentOf(stage.process(colour(8, 4, 0))[0])
 
         // The user drags Dimming to 50%. The emitted brightness must be the level *scaled*, not a
         // bare 50 that throws the split level away.
@@ -104,7 +128,7 @@ class ColourSplitStageTest {
         stage.process(colour(255, 255, 255))
         stage.process(brightness(40))
 
-        val out = stage.process(colour(128, 64, 0))
+        val out = stage.process(colour(8, 4, 0))
         assertTrue(percentOf(out[0]) <= 40)
         assertEquals(Triple(255, 128, 0), rgbOf(out[1]))
     }
@@ -138,7 +162,7 @@ class ColourSplitStageTest {
 
         // Proven by what comes next: a mid colour dips below the user's setting, and full white
         // comes back to exactly it rather than to a stale level.
-        val mid = stage.process(colour(64, 64, 64))
+        val mid = stage.process(colour(6, 6, 6))
         assertEquals(0x01.toByte(), typeOf(mid[0]))
         assertTrue(percentOf(mid[0]) < 60)
 
@@ -150,7 +174,7 @@ class ColourSplitStageTest {
     fun a_batched_payload_stays_one_write() {
         // syncPhysicalBulb's shape: power + colour + brightness in a single GATT write.
         val batched = DuoCoProtocol.createPowerCommand(true) +
-            colour(64, 32, 0) +
+            colour(8, 4, 0) +
             brightness(80)
 
         val out = stage().process(batched)

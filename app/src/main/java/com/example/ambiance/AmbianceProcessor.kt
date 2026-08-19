@@ -230,15 +230,13 @@ class AmbianceProcessor(
             // Lowered from 25 — previous floor read as too bright for content 
             // meant to be very dim.
             val floorTarget = 14
-            // The floor exists because dim content vanishes on the colour axis: below byte ~14
-            // there is almost no resolution left to describe it with. ColourSplitStage removes
-            // that constraint by moving level onto the firmware dimmer, and with the split on the
-            // floor becomes actively harmful — it would lift every dark scene to floorTarget's
-            // ~31% of full light and clamp it there. Read per frame like every other setting here,
-            // so the toggle takes effect without restarting the capture.
-            val splitEnabled = preferencesRepository
-                .getAppStatePrefBoolean("perceptual_split_enabled", false)
-            if (!splitEnabled && maxC in (trueBlackCutoff + 1) until floorTarget) {
+            // This floor is tuned, and the colour/level split does not get to change it. An earlier
+            // version of the split skipped it, on the theory that moving level to the dimmer made
+            // the floor unnecessary; what that actually did was re-tune ambiance behind Joe's back,
+            // and it was one of the reasons ambiance looked worse with the split on (2026-08-19).
+            // The split's knee now sits at this same value, so ambiance output is byte-identical
+            // whether the split is on or off. Leave both alone together.
+            if (maxC in (trueBlackCutoff + 1) until floorTarget) {
                 val boost = floorTarget.toFloat() / maxC
                 fR = (fR * boost).roundToInt().coerceIn(0, 255)
                 fG = (fG * boost).roundToInt().coerceIn(0, 255)
