@@ -49,6 +49,14 @@ object CalibrationSequences {
         SUSTAINED_LOAD, HOLD_WHITE
     )
 
+    /**
+     * How long [sustainedLoad] runs when the caller does not say. Joe's call on 2026-08-18: the
+     * plan asks for an hour, an hour is also an hour of strobing his room and of the shared test
+     * phone, and 15 minutes catches a gross disconnect, a sag or a stall pattern. Pass
+     * `--ei minutes 60` for the run the plan actually asks for.
+     */
+    private const val DEFAULT_SUSTAINED_MINUTES = 15
+
     /** One line per write: when it was sent, and what was in it. */
     private val log = StringBuilder()
 
@@ -65,6 +73,7 @@ object CalibrationSequences {
     suspend fun run(
         sequence: String,
         outputDir: File?,
+        sustainedMinutes: Int = 0,
         send: (ByteArray) -> Unit
     ): File? {
         log.setLength(0)
@@ -108,7 +117,7 @@ object CalibrationSequences {
             RATE_RAMP -> rateRamp(::emit)
             SPACING_STAIRCASE -> spacingStaircase(::emit)
             DARK_RAMP -> darkRamp(::emit, ::emitBrightness)
-            SUSTAINED_LOAD -> sustainedLoad(::emit)
+            SUSTAINED_LOAD -> sustainedLoad(::emit, sustainedMinutes)
             else -> return null
         }
 
@@ -308,8 +317,15 @@ object CalibrationSequences {
      *
      * This is the one measurement standing between the pacing work and shipping. Removing the
      * artificial pacing wait leaves writes completion-gated, which the measurements say is right;
-     * but every ramp so far ran flat out for about fifteen seconds, so nothing tested whether an
-     * hour of it disconnects, backs the queue up, or degrades. Three failure modes, and the auto-tune
+     * but every ramp so far ran flat out for about fifteen seconds, so nothing tested whether a
+     * long run of it disconnects, backs the queue up, or degrades.
+     *
+     * **Duration is a parameter, and the default is a compromise Joe chose on 2026-08-18.** The
+     * plan asks "does an hour hold"; an hour is also an hour of strobing in his room and an hour
+     * of the shared test phone. 15 minutes catches a gross disconnect, a sag or a stall pattern,
+     * and that is what is being run. It does *not* answer the hour question — anything that only
+     * shows up after 20 minutes of thermal load is still unmeasured, so a clean 15 is permission
+     * to proceed, not proof. Pass `--ei minutes 60` when the full run is wanted. Three failure modes, and the auto-tune
      * engine currently only notices the first.
      *
      * What makes the CSV readable afterwards: the timestamps alone give achieved rate over time, so
@@ -320,8 +336,8 @@ object CalibrationSequences {
      * Deliberately not a "stress test" in the auto-tune sense: it makes no judgement and asserts
      * nothing. It produces a trace, and the analysis decides.
      */
-    private suspend fun sustainedLoad(emit: (String, Int, Int, Int) -> Unit) {
-        val totalMs = 60 * 60 * 1000L
+    private suspend fun sustainedLoad(emit: (String, Int, Int, Int) -> Unit, minutes: Int) {
+        val totalMs = (if (minutes > 0) minutes else DEFAULT_SUSTAINED_MINUTES) * 60 * 1000L
         val startedAt = System.currentTimeMillis()
         var index = 0
         var nextMarkerAt = 30_000L

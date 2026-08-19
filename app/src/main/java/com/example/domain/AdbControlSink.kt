@@ -25,7 +25,7 @@ class AdbControlSink {
          * writes a CSV of what was sent when. Debug tooling only: it exists so the feel harness's
          * strip model can be built on measured hardware behaviour instead of guessed constants.
          */
-        fun onAdbRunCalibration(sequence: String)
+        fun onAdbRunCalibration(sequence: String, minutes: Int = 0)
     }
 
     @Volatile

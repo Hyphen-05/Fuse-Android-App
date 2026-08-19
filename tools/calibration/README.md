@@ -113,6 +113,32 @@ A marker row every 30s segments the file.
 **separately and on purpose**: a healthy-looking mean rate can sit on top of a trace that stopped
 dead for four seconds every minute, and averaging is exactly what would hide that.
 
+### Result, 2026-08-18 (moto, two strips, 15 min) - PARTIAL, do not treat as a pass
+
+Ran the full 15 minutes it was asked for. **273,039 writes offered, zero stalls over 250ms**, and
+the rate *rose* from 221 to 325 writes/s across the run (+47%) - warm-up, not degradation. Nothing
+in the trace suggests the app-side loop struggles.
+
+**But it does not clear Phase 3 step 2, for two reasons.**
+
+1. **The CSV cannot see the link.** It records offered writes, and the offer loop runs happily
+   against a dead connection. A mid-run disconnect would look identical to a clean run.
+2. **The telemetry that *would* have shown it was not captured.** Diagnostics were not started
+   before the run, and by the time that was noticed the logcat buffer had rolled past the window.
+   That is a process error, not a property of the sequence: `start_diagnostics` before
+   `run_calibration`, and the 1Hz DeviceWriteManager line answers it directly.
+
+Also note the run was 15 minutes rather than 60 (Joe's call - an hour is an hour of strobing his
+room and of the shared phone). Anything that only appears after ~20 minutes of thermal load remains
+unmeasured either way.
+
+**To actually clear it:** re-run with `start_diagnostics` first, then check the exported log for
+`Disconnected from GATT` and for `fps` staying non-zero throughout.
+
+Unrelated but worth recording, from a drop observed later the same night: both strips dropped
+together at 01:26 and **both reconnected within two seconds** through the backoff-retry path - which
+is the path the GATT-close fix touches. Reconnection works on real hardware after that change.
+
 This is the last measurement standing between the pacing work and shipping it: every ramp so far ran
 flat out for about fifteen seconds, so "does an hour of this disconnect, back the queue up, or
 degrade" is genuinely unmeasured. Run it on a day when the strips are not otherwise wanted; it does

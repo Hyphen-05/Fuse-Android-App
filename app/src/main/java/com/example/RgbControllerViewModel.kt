@@ -2670,7 +2670,7 @@ class RgbControllerViewModel(
      * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
      * start, the sequence still runs, it is just freezable again.
      */
-    override fun onAdbRunCalibration(sequence: String) {
+    override fun onAdbRunCalibration(sequence: String, minutes: Int) {
         viewModelScope.launch {
             stopMusicSync()
             val targets = getCurrentlyControlledDeviceAddresses()
@@ -2688,7 +2688,8 @@ class RgbControllerViewModel(
             try {
                 val file = com.example.debug.CalibrationSequences.run(
                     sequence = sequence,
-                    outputDir = getApplication().getExternalFilesDir(null)
+                    outputDir = getApplication().getExternalFilesDir(null),
+                    sustainedMinutes = minutes
                 ) { command ->
                     targets.forEach { address ->
                         bleGattTransport.writeCommand(address, command, bypassPacing = true)

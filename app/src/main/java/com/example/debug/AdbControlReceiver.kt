@@ -170,8 +170,12 @@ class AdbControlReceiver : BroadcastReceiver() {
                     Log.w(TAG, "run_calibration: no active RgbControllerViewModel listener registered")
                     return
                 }
-                listener.onAdbRunCalibration(sequence)
-                Log.i(TAG, "run_calibration: sequence=$sequence started")
+                // Optional --ei minutes N, currently only sustained_load reads it. Lets the
+                // duration change without a rebuild, which matters for the one sequence whose
+                // whole point is how long it runs.
+                val minutes = intent.getIntExtra("minutes", 0)
+                listener.onAdbRunCalibration(sequence, minutes)
+                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes started")
             }
 
             "status" -> {
