@@ -113,7 +113,22 @@ A marker row every 30s segments the file.
 **separately and on purpose**: a healthy-looking mean rate can sit on top of a trace that stopped
 dead for four seconds every minute, and averaging is exactly what would hide that.
 
-### Result, 2026-08-19 (moto, two strips, 15 min, instrumented) - GOOD ENOUGH TO PROCEED
+### Result, 2026-08-19 (moto, two strips, 3 min, logcat streamed) - CLEAN, FULL COVERAGE
+
+The run that actually answers it. 3 minutes, 12,791 writes, **71 writes/s in every minute bucket**,
+zero stalls. And this time the window is fully covered: `adb logcat -v time` streamed to disk spans
+02:01:54 to 02:06:04, bracketing the whole run, with **zero disconnects, zero unexpected drops and
+zero watchdog fires**.
+
+Streaming logcat to a file is the fix for the capture problem that defeated three previous attempts,
+and it is free. `DiagnosticLogger` is still a ring buffer and still only kept the last 13 ticks -
+that no longer matters, because it is no longer the only record.
+
+**Phase 3 step 2 is cleared.** Shorter than the hour the plan asked for, so anything that only
+appears under long thermal load remains unmeasured; but across 3 minutes fully observed and 15
+minutes observed indirectly, no failure mode of any kind has appeared.
+
+### Result, 2026-08-19 (moto, two strips, 15 min, instrumented) - superseded by the above
 
 Re-run with `start_diagnostics` first. **73,990 writes over a dead-steady 15 minutes**: 82 writes/s
 in every single minute bucket, drift -0.3%, zero stalls over 250ms. Telemetry shows fps 77-84 per
