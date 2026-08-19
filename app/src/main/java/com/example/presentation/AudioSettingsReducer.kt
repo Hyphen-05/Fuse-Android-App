@@ -42,7 +42,7 @@ sealed interface AudioSideEffect {
     data class StopAmbianceCapture(val restoreState: Boolean) : AudioSideEffect
 }
 
-private data class VisualizerConfig(
+internal data class VisualizerConfig(
     val attack: Float, val decay: Float, val flash: Float, val gamma: Float, val idleDelay: Long,
     val noiseGate: Float, val bassGain: Float,
     val midGain: Float, val highGain: Float, val paletteCycling: Boolean, val beatMult: Float,
@@ -75,7 +75,54 @@ private data class VisualizerConfig(
 // for the original 16 fields. flashFloor/flashRange/anchor.../hueBreath.../sustain.../whiteFlashRecoveryMs
 // are new (mapping-proposal-audio-to-led-2026-07-21.md §5/§6) — there is no ViewModel counterpart for
 // those yet, this reducer is their first home.
-private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset) {
+/**
+ * How many distinct hues a preset's anchor can ever visit, given its jump size.
+ *
+ * The anchor only ever moves by `hueAnchorJumpDeg`, so it walks a cyclic group: the count is
+ * `360 / gcd(jump, 360)`. Computed in half-degrees because the jumps are `Float` and 137.5 is a
+ * real value in the table — at that granularity the golden angle yields 144 anchors rather than the
+ * "never repeats" the plan doc claims, which is plenty but is worth stating accurately.
+ */
+internal fun distinctAnchorHues(jumpDeg: Float): Int {
+    val halfDegrees = Math.round(jumpDeg * 2f) % 720
+    if (halfDegrees <= 0) return 1
+    var a = halfDegrees
+    var b = 720
+    while (b != 0) { val t = b; b = a % b; a = t }
+    return 720 / a
+}
+
+/**
+ * Whether a preset is mathematically trapped in a handful of colours (IMPROVEMENT_PLAN D.1).
+ *
+ * Two conditions have to hold together. The jump has to divide 360 nearly evenly — 90° gives four
+ * hues, 120° three, 180° two — **and** `hueDriftDegPerSec` has to be zero, because any continuous
+ * drift walks the anchor off the lattice and out of the trap. That is why Bass Thump and Ambient
+ * Chill are fine at 60°: they drift. Breath does not count, since it tilts around each anchor
+ * without moving it.
+ */
+internal fun isHueConfined(jumpDeg: Float, driftDegPerSec: Float): Boolean =
+    driftDegPerSec == 0f && jumpDeg > 0f && distinctAnchorHues(jumpDeg) < 12
+
+/**
+ * The unlocked jump for a confined preset: the same leap, nudged off the lattice.
+ *
+ * +3.5° rather than the golden angle for all three, because the leap size *is* the preset's
+ * character — Laser Sharp's 180° flip and Punchy's 90° step are meant to feel different, and
+ * collapsing them onto one value would make them look alike. At half-degree granularity the nudged
+ * values (93.5°, 123.5°, 174.5°) are each coprime with 720, so all three go from 2-4 hues to 720.
+ * `PresetHueCoverageTest` pins that rather than trusting the arithmetic here.
+ */
+internal fun unlockedHueJump(jumpDeg: Float): Float = jumpDeg + 3.5f
+
+/** [visualizerConfigFor], with D.1's hue unlock applied when the user has it switched on. */
+internal fun visualizerConfigFor(preset: String, unlockHues: Boolean): VisualizerConfig {
+    val config = visualizerConfigFor(preset)
+    if (!unlockHues || !isHueConfined(config.hueAnchorJumpDeg, config.hueDriftDegPerSec)) return config
+    return config.copy(hueAnchorJumpDeg = unlockedHueJump(config.hueAnchorJumpDeg))
+}
+
+internal fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset) {
     "Punchy" -> VisualizerConfig(
         attack = 0.95f, decay = 0.35f, flash = 0.6f, gamma = 0.35f, idleDelay = 2000L,
         noiseGate = 8.0f, bassGain = 1.2f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,
@@ -245,6 +292,23 @@ fun audioSettingsReducer(
     deviceAutomationMode: Map<String, RgbControllerViewModel.AutomationType>
 ): Pair<RgbUiState, List<AudioSideEffect>> {
     return when (intent) {
+        is RgbIntent.SetUnlockPresetHues -> {
+            // Re-applies to the preset showing right now, so the toggle can be judged against live
+            // audio without reselecting anything — which is the whole point of it being a toggle.
+            val config = visualizerConfigFor(state.audioSettings.visualizerPreset, intent.enabled)
+            val newState = state.copy(
+                audioSettings = state.audioSettings.copy(
+                    unlockPresetHues = intent.enabled,
+                    hueAnchorJumpDeg = config.hueAnchorJumpDeg
+                )
+            )
+            val effects = listOf(
+                AudioSideEffect.SaveAudioPrefBoolean("unlock_preset_hues", intent.enabled),
+                AudioSideEffect.SaveAudioPrefFloat("hue_anchor_jump_deg", config.hueAnchorJumpDeg)
+            )
+            newState to effects
+        }
+
         is RgbIntent.SetVisualizerPreset -> {
             val currentMusicMode = state.audioSettings.musicMode
             val featureName = if (currentMusicMode == "phone_mic" || currentMusicMode == "on_device") {
@@ -252,7 +316,7 @@ fun audioSettingsReducer(
             } else {
                 state.coreControl.activeFeatureName
             }
-            val config = visualizerConfigFor(intent.preset)
+            val config = visualizerConfigFor(intent.preset, state.audioSettings.unlockPresetHues)
 
             val newState = state.copy(
                 audioSettings = state.audioSettings.copy(

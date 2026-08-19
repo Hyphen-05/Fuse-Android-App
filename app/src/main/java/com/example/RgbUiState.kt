@@ -156,6 +156,11 @@ data class AudioSettingsState(
     // implement that one preset's documented fallback behavior.
     val anchorTimerMs: Long = 0L,
     val hueAnchorJumpDeg: Float = 60f,
+    /**
+     * Frees the confined presets from their handful of colours (IMPROVEMENT_PLAN D.1). Off by
+     * default: it changes presets Joe has tuned, so it is his to switch on and judge.
+     */
+    val unlockPresetHues: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)
@@ -266,6 +271,7 @@ sealed interface RgbIntent {
     data class SetModeSpeed(val speed: Int) : RgbIntent
     data class SetWarmth(val percent: Int) : RgbIntent
     data class SetShowFpsTracker(val enabled: Boolean) : RgbIntent
+    data class SetUnlockPresetHues(val enabled: Boolean) : RgbIntent
     data class SetPerceptualSplitEnabled(val enabled: Boolean) : RgbIntent
     // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.
     object ClearErrorMessage : RgbIntent

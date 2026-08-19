@@ -226,6 +226,7 @@ class RgbControllerViewModel(
                 anchorBeatsPerAdvance = prefsRepo.getAppStatePrefInt("anchor_beats_per_advance", 2),
                 anchorTimerMs = prefsRepo.getAppStatePrefLong("anchor_timer_ms", 0L),
                 hueAnchorJumpDeg = prefsRepo.getAppStatePrefFloat("hue_anchor_jump_deg", 60f),
+                unlockPresetHues = prefsRepo.getAppStatePrefBoolean("unlock_preset_hues", false),
                 hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
                 hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
                 breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
@@ -2029,6 +2030,10 @@ class RgbControllerViewModel(
 
     fun setPerceptualSplitEnabled(enabled: Boolean) {
         dispatch(RgbIntent.SetPerceptualSplitEnabled(enabled))
+    }
+
+    fun setUnlockPresetHues(enabled: Boolean) {
+        dispatch(RgbIntent.SetUnlockPresetHues(enabled))
     }
 
     fun clearErrorMessage() {

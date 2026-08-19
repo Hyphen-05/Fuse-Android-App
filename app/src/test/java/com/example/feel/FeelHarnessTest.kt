@@ -1,6 +1,7 @@
 package com.example.feel
 
 import com.example.RgbIntent
+import com.example.AudioSettingsState
 import com.example.RgbUiState
 import com.example.core.audio.AudioDspProcessor
 import com.example.core.protocol.DuoCoProtocol
@@ -28,9 +29,9 @@ class FeelHarnessTest {
     private val outputDir = File("build/reports/feel")
 
     /** Drives the shipped reducer so presets are exactly what the app applies, not a copy. */
-    private fun settingsFor(preset: String) =
+    private fun settingsFor(preset: String, unlockHues: Boolean = false) =
         audioSettingsReducer(
-            RgbUiState(),
+            RgbUiState(audioSettings = AudioSettingsState(unlockPresetHues = unlockHues)),
             RgbIntent.SetVisualizerPreset(preset),
             emptyList(),
             emptyMap()
@@ -40,9 +41,10 @@ class FeelHarnessTest {
         preset: String,
         pcm: ShortArray,
         connectedStripCount: Int = 1,
-        pacingMs: Int = 50
+        pacingMs: Int = 50,
+        unlockHues: Boolean = false
     ): Pair<List<StripFrame>, StripStats> {
-        val settings = settingsFor(preset)
+        val settings = settingsFor(preset, unlockHues)
         val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
         val strip = VirtualStrip(connectedStripCount = connectedStripCount)
 
@@ -59,6 +61,34 @@ class FeelHarnessTest {
             strip.write(nowMs, DuoCoProtocol.createMusicColorCommand(result.r, result.g, result.b))
         }
         return strip.timeline(durationMs) to strip.stats()
+    }
+
+    /**
+     * IMPROVEMENT_PLAN D.1, measured rather than argued.
+     *
+     * `PresetHueCoverageTest` proves the anchor *can* reach the whole wheel once unlocked; that is
+     * arithmetic on one field. This runs the same audio through the real DSP and the real protocol
+     * encoders and asks what the strip actually shows, which is the number Joe was reacting to when
+     * he said the presets look like two colours.
+     */
+    @Test
+    fun unlockingPresetHuesWidensMeasuredWheelCoverage() {
+        val pcm = OfflineAudio.syntheticTrack(seconds = 20.0)
+
+        for (preset in listOf("Punchy", "Strobe Blast")) {
+            val locked = FeelAnalysis.analyse(runPreset(preset, pcm).first)
+            val unlocked = FeelAnalysis.analyse(runPreset(preset, pcm, unlockHues = true).first)
+
+            println(
+                "%-14s wheel coverage: locked %.0f%% -> unlocked %.0f%%".format(
+                    preset, locked.hueCoverage * 100, unlocked.hueCoverage * 100
+                )
+            )
+            assert(unlocked.hueCoverage > locked.hueCoverage) {
+                "$preset should cover more of the wheel unlocked, got " +
+                    "${unlocked.hueCoverage} vs ${locked.hueCoverage}"
+            }
+        }
     }
 
     @Test

@@ -980,6 +980,34 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("colour_split_switch")
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("unlock_hues_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Unlock Preset Colours",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Strobe Blast, Punchy and Laser Sharp step by an angle that divides " +
+                            "the colour wheel, so they only ever reach 2-4 colours. This nudges the " +
+                            "step off the lattice — same size leap, no repeats.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.unlockPresetHues,
+                    onCheckedChange = { viewModel.setUnlockPresetHues(it) },
+                    modifier = Modifier.testTag("unlock_hues_switch")
+                )
+            }
         }
     }
 
