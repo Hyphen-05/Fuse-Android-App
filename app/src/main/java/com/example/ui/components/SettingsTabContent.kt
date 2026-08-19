@@ -919,6 +919,33 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("fps_tracker_switch")
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("colour_split_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Split Colour and Level",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Send hue on the colour bytes and level on the strip's own dimmer. " +
+                            "Finer steps in dim scenes; costs an extra write when the level changes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.coreControl.perceptualSplitEnabled,
+                    onCheckedChange = { viewModel.setPerceptualSplitEnabled(it) },
+                    modifier = Modifier.testTag("colour_split_switch")
+                )
+            }
         }
     }
 

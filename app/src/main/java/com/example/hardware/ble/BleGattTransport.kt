@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import com.example.core.color.ColourSplitStage
 import com.example.core.protocol.DuoCoProtocol
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -60,12 +61,20 @@ interface BleGattTransport {
         onLog: (String) -> Unit
     )
 
-    /** Points the [DeviceWriteManager] dependency hooks at the current ViewModel. Called once from init. */
+    /**
+     * Points the [DeviceWriteManager] dependency hooks at the current ViewModel. Called once from init.
+     *
+     * [splitEnabled] and [userDimming] drive [ColourSplitStage] in [writeCommand]; they are hooks
+     * for the same reason the rest are, the transport being a singleton that outlives the ViewModel
+     * holding the preference and the Dimming slider's value.
+     */
     fun registerWriteHooks(
         pacingProvider: (address: String) -> Int,
         calibrate: (address: String, command: ByteArray) -> ByteArray,
         onFpsUpdate: (address: String, fps: Int) -> Unit,
-        diagAttribution: (address: String) -> String
+        diagAttribution: (address: String) -> String,
+        splitEnabled: () -> Boolean = { false },
+        userDimming: (address: String) -> Int = { 100 }
     )
 
     /** Raw `getRemoteDevice(...).connectGatt(...)` + store into activeConnections. May throw. */
@@ -169,6 +178,11 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     @Volatile private var calibrate: (String, ByteArray) -> ByteArray = { _, cmd -> cmd }
     @Volatile private var onFpsUpdate: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var diagAttribution: (String) -> String = { "" }
+    @Volatile private var splitEnabled: () -> Boolean = { false }
+    @Volatile private var userDimming: (String) -> Int = { 100 }
+
+    /** Per-device colour/level split state. Absent when the feature is off. See [ColourSplitStage]. */
+    private val splitStages = ConcurrentHashMap<String, ColourSplitStage>()
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
@@ -223,28 +237,38 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         pacingProvider: (String) -> Int,
         calibrate: (String, ByteArray) -> ByteArray,
         onFpsUpdate: (String, Int) -> Unit,
-        diagAttribution: (String) -> String
+        diagAttribution: (String) -> String,
+        splitEnabled: () -> Boolean,
+        userDimming: (String) -> Int
     ) {
         this.pacingProvider = pacingProvider
         this.calibrate = calibrate
         this.onFpsUpdate = onFpsUpdate
         this.diagAttribution = diagAttribution
+        this.splitEnabled = splitEnabled
+        this.userDimming = userDimming
     }
 
     private fun buildWriteManager(
         address: String,
         gatt: BluetoothGatt,
         charac: BluetoothGattCharacteristic
-    ) = DeviceWriteManager(
-        address = address,
-        gatt = gatt,
-        charac = charac,
-        connectionScope = connectionScope,
-        pacingMsProvider = { pacingProvider(address) },
-        calibrate = { addr, cmd -> calibrate(addr, cmd) },
-        onFpsUpdate = { addr, fps -> onFpsUpdate(addr, fps) },
-        diagAttribution = { addr -> diagAttribution(addr) }
-    )
+    ): DeviceWriteManager {
+        // A rebuilt manager starts with no `lastIssuedColour`, so nothing is known about what the
+        // strip is showing; the split stage's cached level and dim have to go the same way, or a
+        // brightness write the new connection needs could be skipped as "already there".
+        splitStages.remove(address)
+        return DeviceWriteManager(
+            address = address,
+            gatt = gatt,
+            charac = charac,
+            connectionScope = connectionScope,
+            pacingMsProvider = { pacingProvider(address) },
+            calibrate = { addr, cmd -> calibrate(addr, cmd) },
+            onFpsUpdate = { addr, fps -> onFpsUpdate(addr, fps) },
+            diagAttribution = { addr -> diagAttribution(addr) }
+        )
+    }
 
     override fun connect(context: Context, address: String) {
         val adapter = bluetoothAdapter ?: return
@@ -368,8 +392,26 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         )
     }
 
+    /**
+     * The one choke point every colour the app sends passes through, which is why [ColourSplitStage]
+     * lives here rather than at the dozen call sites that build colour commands.
+     *
+     * A split emits the brightness and the colour with the *same* [priority] and [bypassPacing] as
+     * the frame they came from. They queue under different type bytes, so each is compared only
+     * against its own axis, and giving them equal priority keeps the two axes' peak-hold decisions
+     * in agreement: a held peak that survives on colour survives on brightness too.
+     */
     override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
-        deviceWriteManagers[address]?.updateCommand(command, priority, bypassPacing)
+        val manager = deviceWriteManagers[address] ?: return
+        if (!splitEnabled()) {
+            // Dropping the stage is what makes the toggle reversible: re-enabling starts from a
+            // clean slate rather than composing against a colour from before it was turned off.
+            if (splitStages.isNotEmpty()) splitStages.remove(address)
+            manager.updateCommand(command, priority, bypassPacing)
+            return
+        }
+        val stage = splitStages.getOrPut(address) { ColourSplitStage { userDimming(address) } }
+        stage.process(command).forEach { manager.updateCommand(it, priority, bypassPacing) }
     }
 
     override fun notifyWriteCompleted(address: String) {
@@ -384,6 +426,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         discoveryGate.forget(address)
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
+        splitStages.remove(address)
         deviceWriteManagers.remove(address)?.release()
         return gatt
     }
