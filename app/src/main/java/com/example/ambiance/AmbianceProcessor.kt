@@ -25,7 +25,6 @@ class AmbianceProcessor(
     // The reads themselves stay per-frame: once the file is loaded they're in-memory map lookups,
     // and they're what makes a slider move show up on the strip straight away.
     private val prefs = context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE)
-    private val preferencesRepository = com.example.data.repository.AppPreferencesRepositoryImpl(context)
 
     private data class EmaState(
         val emaLinR: Double, val emaLinG: Double, val emaLinB: Double
@@ -37,11 +36,9 @@ class AmbianceProcessor(
             val nowMs = System.currentTimeMillis()
             
             val updateRateCapFps = prefs.getInt("update_rate_cap_fps", 20).coerceAtLeast(1)
-            val slowestDevicePacing = preferencesRepository
-                .getPacingPrefInt(SLOWEST_PACING_PREF_KEY, DEFAULT_SLOWEST_PACING_MS)
-            
+
             val fpsIntervalMs = 1000 / updateRateCapFps
-            val effectiveIntervalMs = max(fpsIntervalMs, slowestDevicePacing)
+            val effectiveIntervalMs = max(fpsIntervalMs, AMBIANCE_MIN_INTERVAL_MS)
             if (nowMs - lastCaptureTimeMs < effectiveIntervalMs) return
             val deltaMs = (nowMs - lastCaptureTimeMs).coerceAtLeast(1L).coerceAtMost(500L)
             lastCaptureTimeMs = nowMs
@@ -316,5 +313,21 @@ class AmbianceProcessor(
  * assumed 100. It only shows before anything has connected — when ambiance has nothing to write to
  * anyway — so both now take the conservative value rather than the fast one.
  */
-internal const val SLOWEST_PACING_PREF_KEY = "slowest_connected_pacing"
-internal const val DEFAULT_SLOWEST_PACING_MS = 100
+/**
+ * Floor on how often ambiance captures the screen, in ms.
+ *
+ * Capture used to be floored by the *BLE pacing* pref instead — `max(fpsInterval, slowestConnected
+ * Pacing)` — which was pacing's second, real job and the reason Tier E Phase 3 could not simply
+ * delete the pacing configuration. It is a constant now so that configuration can go (step 4), and
+ * so what governs ambiance's rate is the user's own `update_rate_cap_fps` and nothing else.
+ *
+ * **50 because that is what the setup actually runs at today**, verified on the moto 2026-08-19:
+ * `slowest_connected_pacing` reads 50 and `update_rate_cap_fps` is unset, so the effective interval
+ * is `max(1000/20, 50)` = 50ms either way. Joe's ambiance tuning therefore sees no change at all.
+ * The plan doc's assumption of 10fps was wrong — it was reading defaults, not the device.
+ *
+ * A setup whose stored pacing was slower than 50 would previously have captured slower than this;
+ * it now captures at the user's cap instead. That is faster, never slower, and no such setup exists
+ * on either of Joe's phones.
+ */
+internal const val AMBIANCE_MIN_INTERVAL_MS = 50

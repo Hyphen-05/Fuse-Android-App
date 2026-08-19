@@ -1195,20 +1195,11 @@ class RgbControllerViewModel(
                 }
         }
 
-        // Reactively sync slowest connected device's pacing to shared preferences for Ambiance capture service
-        viewModelScope.launch {
-            _uiState.collect { state ->
-                val connected = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
-                val slowest = if (connected.isEmpty()) {
-                    0
-                } else {
-                    connected.keys.mapNotNull { addr ->
-                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
-                    }.maxOrNull() ?: 0
-                }
-                prefsRepo.putPacingPrefInt("slowest_connected_pacing", slowest)
-            }
-        }
+        // The `slowest_connected_pacing` mirror that used to live here is gone (2026-08-19). It
+        // existed so the ambiance capture service could floor its capture interval by BLE pacing;
+        // ambiance uses its own AMBIANCE_MIN_INTERVAL_MS constant now, and nothing else ever read
+        // the pref. It was writing to SharedPreferences on every single _uiState emission to feed
+        // a reader that no longer exists.
 
         viewModelScope.launch {
             var lastActive = false

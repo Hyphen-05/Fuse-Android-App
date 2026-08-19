@@ -30,7 +30,6 @@ class AmbianceOutputInterpolator(
     // One repository for the object's lifetime. This used to be constructed inside scheduleTick(),
     // i.e. every 20–100ms for as long as ambiance ran, and each construction opens six
     // SharedPreferences handles.
-    private val preferencesRepository = com.example.data.repository.AppPreferencesRepositoryImpl(context)
 
     fun start() {
         com.example.DiagnosticLogger.log(
@@ -75,9 +74,9 @@ class AmbianceOutputInterpolator(
     }
 
     private fun scheduleTick() {
-        val pacingMs = preferencesRepository
-            .getPacingPrefInt(SLOWEST_PACING_PREF_KEY, DEFAULT_SLOWEST_PACING_MS)
-            .coerceAtLeast(20)
+        // Was the BLE pacing pref; a constant now for the same reason as AmbianceProcessor's floor.
+        // Today's value on Joe's setup was 50 either way, so the tick rate is unchanged.
+        val pacingMs = AMBIANCE_MIN_INTERVAL_MS
 
         handler?.postDelayed({
             val now = android.os.SystemClock.elapsedRealtime()
