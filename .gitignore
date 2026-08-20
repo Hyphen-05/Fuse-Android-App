@@ -48,3 +48,7 @@ visualizer-review-*.md
 
 # Session handoff notes — internal, deliberately local-only (see CLAUDE.md)
 HANDOFF-*.md
+
+# Real music for the feel harness. Never committed: it is Joe's own copyrighted audio and this
+# repo is public, and the files are megabytes each. tools/feel-audio/README.md says how to make one.
+tools/feel-audio/*.wav

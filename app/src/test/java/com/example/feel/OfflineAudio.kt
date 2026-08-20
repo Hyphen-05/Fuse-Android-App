@@ -117,6 +117,90 @@ object OfflineAudio {
         return out
     }
 
+    /** The sections [structuredTrack] lays out, with the second range each occupies. */
+    enum class Section(val fromSec: Double, val toSec: Double) {
+        INTRO(0.0, 8.0),
+        BUILD(8.0, 16.0),
+        CHORUS(16.0, 26.0),
+        BREAKDOWN(26.0, 32.0),
+        CHORUS_2(32.0, 40.0)
+    }
+
+    /**
+     * A 40s track with actual musical structure, for the Tier D work.
+     *
+     * [syntheticTrack] contrasts sparse against dense at a constant level, which is the right test
+     * for "does this preset pump". It cannot test the Tier D questions at all, because those are
+     * about *loudness relative to the song*: a quiet intro should not look like a chorus, and a
+     * quiet track should not produce a dim, sluggish show. Both need a track whose level actually
+     * moves, so this one runs intro → build → chorus → breakdown → chorus.
+     *
+     * Deterministic, like its sibling: the same bytes every run, so before/after numbers compare.
+     */
+    fun structuredTrack(bpm: Double = 120.0): ShortArray {
+        val seconds = Section.entries.maxOf { it.toSec }
+        val total = (seconds * SAMPLE_RATE).toInt()
+        val out = ShortArray(total)
+        val beatSamples = (60.0 / bpm * SAMPLE_RATE).toInt()
+        var noiseState = 0x2F6E2B1
+        fun noise(): Double {
+            noiseState = noiseState * 1103515245 + 12345
+            return ((noiseState ushr 16) and 0x7FFF) / 16384.0 - 1.0
+        }
+
+        for (n in 0 until total) {
+            val t = n.toDouble() / SAMPLE_RATE
+            val section = Section.entries.first { t >= it.fromSec && t < it.toSec || it == Section.CHORUS_2 }
+
+            // Level is what separates the sections; the build ramps rather than stepping, so a
+            // section classifier has a trajectory to read rather than an edge.
+            val level = when (section) {
+                Section.INTRO -> 0.25
+                Section.BUILD -> {
+                    val p = (t - section.fromSec) / (section.toSec - section.fromSec)
+                    0.25 + 0.55 * p
+                }
+                Section.CHORUS, Section.CHORUS_2 -> 0.95
+                Section.BREAKDOWN -> 0.15
+            }
+
+            // Density moves with the section too: a chorus is not merely louder, it is busier.
+            val kickEvery = when (section) {
+                Section.INTRO -> beatSamples * 2
+                Section.BUILD -> beatSamples
+                Section.CHORUS, Section.CHORUS_2 -> beatSamples / 2
+                Section.BREAKDOWN -> 0
+            }
+
+            var sample = 0.0
+            sample += level * (0.10 * sin(2 * PI * 110.0 * t) + 0.08 * sin(2 * PI * 164.81 * t))
+
+            if (kickEvery > 0) {
+                val intoKick = (n % kickEvery).toDouble() / SAMPLE_RATE
+                if (intoKick < 0.18) {
+                    val env = exp(-intoKick * 22.0)
+                    sample += level * 0.85 * env * sin(2 * PI * 55.0 * intoKick)
+                }
+                val intoHat = ((n + beatSamples / 2) % beatSamples).toDouble() / SAMPLE_RATE
+                if (intoHat < 0.05) {
+                    val env = exp(-intoHat * 90.0)
+                    sample += level * 0.30 * env * noise()
+                }
+            }
+
+            out[n] = (sample.coerceIn(-1.0, 1.0) * Short.MAX_VALUE * 0.9).toInt().toShort()
+        }
+        return out
+    }
+
+    /**
+     * The same recording, quieter — a track mastered low, or a phone held further from the speaker.
+     *
+     * The show should survive this. Anything judging level against a fixed threshold will not.
+     */
+    fun atGain(pcm: ShortArray, gain: Double): ShortArray =
+        ShortArray(pcm.size) { (pcm[it] * gain).toInt().coerceIn(-32768, 32767).toShort() }
+
     /**
      * Reads 16-bit PCM mono/stereo WAV, for when a real track matters more than the synthetic one.
      * Stereo is averaged to mono, matching what a single mic channel would hear.

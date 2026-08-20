@@ -292,6 +292,12 @@ fun audioSettingsReducer(
     deviceAutomationMode: Map<String, RgbControllerViewModel.AutomationType>
 ): Pair<RgbUiState, List<AudioSideEffect>> {
     return when (intent) {
+        is RgbIntent.SetMusicalDynamicsEnabled -> {
+            state.copy(
+                audioSettings = state.audioSettings.copy(musicalDynamicsEnabled = intent.enabled)
+            ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("musical_dynamics_enabled", intent.enabled))
+        }
+
         is RgbIntent.SetUnlockPresetHues -> {
             // Re-applies to the preset showing right now, so the toggle can be judged against live
             // audio without reselecting anything — which is the whole point of it being a toggle.

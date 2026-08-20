@@ -63,6 +63,17 @@ object FeelAnalysis {
         return if (raw > 180.0) 360.0 - raw else raw
     }
 
+    /**
+     * [analyse] restricted to one stretch of the run, for comparing a chorus against a verse.
+     *
+     * Frames are absolute-timestamped, and the first frame of a window carries no delta, so a
+     * window's change-rate metrics are measured from its own start rather than the run's.
+     */
+    fun analyseWindow(frames: List<StripFrame>, fromMs: Long, toMs: Long): FeelMetrics {
+        val base = frames.firstOrNull()?.atMs ?: 0L
+        return analyse(frames.filter { it.atMs - base >= fromMs && it.atMs - base < toMs })
+    }
+
     fun analyse(frames: List<StripFrame>): FeelMetrics {
         if (frames.size < 2) return FeelMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         val durationSec = (frames.last().atMs - frames.first().atMs) / 1000.0

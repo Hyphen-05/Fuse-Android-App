@@ -1008,6 +1008,34 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("unlock_hues_switch")
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("musical_dynamics_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Musical Dynamics",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Judge loudness against the song rather than fixed levels, so an " +
+                            "intro, a build and a chorus look different. Quiet passages hold back " +
+                            "so the loud ones land.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.musicalDynamicsEnabled,
+                    onCheckedChange = { viewModel.setMusicalDynamicsEnabled(it) },
+                    modifier = Modifier.testTag("musical_dynamics_switch")
+                )
+            }
         }
     }
 

@@ -75,6 +75,22 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // real time instead of only half as much). tau = -REF_DT_MS / ln(originalPerFrameFactor).
     private val AUTO_GAIN_FAST_TAU_MS = 755f  // from the original 0.97f/frame
     private val AUTO_GAIN_SLOW_TAU_MS = 2864f // from the original 0.992f/frame
+
+    /**
+     * Auto-gain time constants used when musical dynamics is on (Tier D.2/D.3).
+     *
+     * The stock values are the reason the show does not track the music. The gain ceiling follows
+     * the material with a 0.75-2.9s time constant, which is a compressor: a quiet verse pulls the
+     * ceiling down within a couple of seconds, so the verse maps into the same output range as the
+     * chorus and the two look alike. Measured on real music, the correlation between how loud the
+     * song was and how bright the strip went was **+0.03** — indistinguishable from none.
+     *
+     * Musical dynamics are a 10-30s phenomenon, so the reference has to be slower than they are.
+     * These keep auto-gain's real job — coping with a phone across the room, or a quietly mastered
+     * track — while leaving the dynamics inside a song intact.
+     */
+    private val DYNAMIC_AUTO_GAIN_FAST_TAU_MS = 8_000f
+    private val DYNAMIC_AUTO_GAIN_SLOW_TAU_MS = 45_000f
     private val UI_AMPLITUDE_DECAY_TAU_MS = 1138f // from the original 0.98f/frame
 
     // visualizer-review-2026-07-22.md C5 (P3 macro-dynamics): see the ceiling/floor tracker and
@@ -137,6 +153,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // assignment) — preserved for fidelity, not removed as part of this refactor's scope.
     @Suppress("unused")
     private var lastBeatTime = 0L
+
+    /**
+     * Tier D.2/D.3/D.4. Always fed, only consulted when the user has musical dynamics switched on —
+     * so switching it on mid-song acts on a reference that is already warm rather than spending
+     * thirty seconds learning while the user watches.
+     */
+    private val musicalContext = MusicalContext()
 
     private val beatDetector = BeatDetector()
     private var beatPulsePeak = 0.0f
@@ -321,6 +344,19 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
         val totalEnergy = bassVal + midVal + highVal
 
+        // --- Tier D.2/D.3/D.4: musical context ---
+        // Updated every frame regardless, so the loudness distribution is warm whenever the user
+        // turns the feature on. `dynamics` is null when it is off, and every consumer below falls
+        // back to exactly what it did before — the toggle has to be bit-identical when off.
+        val musicalDynamics = musicalContext.update(totalEnergy, dtMs, nowMs)
+        val dynamics = if (state.musicalDynamicsEnabled) musicalDynamics else null
+
+        // The gate that decides "is there music here at all". Absolute thresholds are what make a
+        // quietly-mastered track produce no show; this one is the lower of the preset's number and
+        // the level this material has taught us, and can never sink below silence.
+        val effectiveNoiseGate = dynamics?.effectiveNoiseGate(state.noiseGateThreshold)
+            ?: state.noiseGateThreshold
+
         // 1. Add totalEnergy to 6-second window for mean and variance
         val oldEnergy = energyHistory[energyHistoryIdx]
         energyHistory[energyHistoryIdx] = totalEnergy
@@ -455,7 +491,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             maxCooldownMs = state.beatCooldownMs,
             now = nowMs
         )
-        val isBeat = result.isBeat && totalEnergy >= state.noiseGateThreshold
+        val isBeat = result.isBeat && totalEnergy >= effectiveNoiseGate
         if (isBeat || nowMs - lastDiagnosticSampleMs >= 1500L) {
             if (!isBeat) lastDiagnosticSampleMs = nowMs
             DiagnosticLogger.log(
@@ -556,7 +592,12 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // visualizer-review-2026-07-22.md C5: for ~2s after a macro-dynamics drop fires, both
         // trigger mechanisms get a temporarily widened dynamic range -- part of the drop "moment"
         // alongside the guaranteed anchor jump and white blast above.
-        val dropBoostedFlashRange = if (nowMs < dropFlashRangeBoostUntilMs) state.flashRange * 1.5f else state.flashRange
+        // Scaled by the musical context so beats hit harder in a chorus than in an intro. Only
+        // the variable range is scaled — `flashFloor`'s "every detected beat gets a visible pulse"
+        // guarantee (A3) stays whole, so restraint never becomes invisibility.
+        val dropBoostedFlashRange =
+            (if (nowMs < dropFlashRangeBoostUntilMs) state.flashRange * 1.5f else state.flashRange) *
+                (dynamics?.intensity ?: 1f)
 
         // visualizer-review-2026-07-22.md B1: bound how late a scheduled flash is allowed to fire.
         // Without this, if predictiveWeight only crosses 0.15 well after scheduledFlashAtMs (grid
@@ -623,7 +664,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // mechanism ever is), and ordinary statistical noise in near-zero flux readings routinely
         // crosses its own adaptive threshold by chance. Requiring real absolute energy first closes
         // that hole without touching the relative onset math itself.
-        if (result.causalIsCandidate && totalEnergy >= state.noiseGateThreshold && nowMs - lastFastTriggerFlashAtMs > 150L) {
+        if (result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && nowMs - lastFastTriggerFlashAtMs > 150L) {
             val fastWeight = 1f - predictiveWeight
             if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
@@ -675,7 +716,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val dtSec = dtMs.toFloat() / 1000f
         val bpmConf = result.bpmConfidence.coerceIn(0f, 1f)
         val tempoLockedDriftDegPerSec = (result.bpm.toFloat() / 60f) * state.hueDegreesPerBeat
-        val driftDegPerSec = state.hueDriftDegPerSec * (1f - bpmConf) + tempoLockedDriftDegPerSec * bpmConf
+        // Colour travels at the music's energy too: slow in a breakdown, quick in a drop.
+        val driftDegPerSec = (state.hueDriftDegPerSec * (1f - bpmConf) + tempoLockedDriftDegPerSec * bpmConf) *
+            (dynamics?.intensity ?: 1f)
         hueAnchor = (hueAnchor + driftDegPerSec * dtSec + 360f) % 360f
 
         // Breath: a bounded tilt around the anchor, never an accumulator — it can't walk away.
@@ -742,17 +785,24 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // fixed on Visualizer. dtMs=0 on the first frame yields a decay factor of 1.0 (no
             // decay), matching this class's existing "0 on first frame" convention elsewhere.
             val dtF = dtMs.toFloat()
+            // Slowing these under musical dynamics was tried and reverted: the ceiling is a *max*
+            // tracker, so a long time constant leaves it parked at the song's loudest moment and
+            // everything else normalises small. Measured, it cut Ambient Chill's brightness spread
+            // from 0.55 to 0.06 and pushed the tracking correlation slightly negative. The
+            // compression it causes is real, but the fix is not simply a longer memory.
+            val fastTau = AUTO_GAIN_FAST_TAU_MS
+            val slowTau = AUTO_GAIN_SLOW_TAU_MS
             val decayFactorBass = if (bassVal < avgBass) {
-                kotlin.math.exp(-dtF / AUTO_GAIN_FAST_TAU_MS)
+                kotlin.math.exp(-dtF / fastTau)
             } else {
-                kotlin.math.exp(-dtF / AUTO_GAIN_SLOW_TAU_MS)
+                kotlin.math.exp(-dtF / slowTau)
             }
             maxObservedBass = maxOf(maxObservedBass * decayFactorBass, bassVal, 10.0f)
 
             val decayFactorMid = if (smoothedMid < maxObservedMid * 0.5f) {
-                kotlin.math.exp(-dtF / AUTO_GAIN_FAST_TAU_MS)
+                kotlin.math.exp(-dtF / fastTau)
             } else {
-                kotlin.math.exp(-dtF / AUTO_GAIN_SLOW_TAU_MS)
+                kotlin.math.exp(-dtF / slowTau)
             }
             maxObservedMid = maxOf(maxObservedMid * decayFactorMid, smoothedMid, 10.0f)
         } else {
@@ -806,7 +856,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val midContribution = ((smoothedMid - midFloor) / rangeMid).coerceIn(0.0f, 1.0f)
 
         var bc = bassContribution
-        bc = if (smoothedBass >= state.noiseGateThreshold) {
+        bc = if (smoothedBass >= effectiveNoiseGate) {
             Math.pow(bc.toDouble(), 1.5).toFloat()
         } else {
             0.0f
@@ -820,7 +870,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // treatment; this only shapes the ongoing ambient/ (for Beat Only) flash-magnitude level.
         // 0.85/0.30 are judgment calls, not measured -- chosen to be a real, felt difference
         // without blowing out the preset's own tuned dynamic range.
-        val macroBoost = 0.85f + 0.30f * macroPercentile
+        // With musical dynamics on, the master scalar replaces the modest C5 boost outright.
+        // C5 spans 0.85-1.15 by design, deliberately small; the whole point of D.3/D.4 is a span
+        // wide enough that a breakdown reads as a breakdown, so the two cannot both apply.
+        val macroBoost = dynamics?.intensity ?: (0.85f + 0.30f * macroPercentile)
+
+        // The floor moves with the music too. Without this a breakdown cannot actually go dark:
+        // `value` is floored at the preset's minimum brightness, so scaling everything above it
+        // still leaves the strip sitting at that floor through the quietest passage in the song.
+        val effectiveMinBrightness = state.visualizerMinBrightness * (dynamics?.intensity ?: 1f)
 
         var value: Float
         var ambientValue: Float
@@ -828,9 +886,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / activeFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
-            value = maxOf(state.visualizerMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength) * macroBoost).coerceIn(0f, 1f))
+            value = maxOf(effectiveMinBrightness, (beatEnvelope * maxOf(0.5f, state.audioFlashStrength) * macroBoost).coerceIn(0f, 1f))
             // Beat Only has no ambient term at all — its floor is the closest thing to "no flash."
-            ambientValue = state.visualizerMinBrightness
+            ambientValue = effectiveMinBrightness
         } else {
             var baseValVal = (valBase * sensitivityMultiplier).coerceIn(0.0f, 1.0f)
             baseValVal = Math.pow(baseValVal.toDouble(), state.audioGammaExponent.toDouble()).toFloat().coerceIn(0.0f, 1.0f)
@@ -861,8 +919,8 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             val t = elapsedMs.toFloat() / activeFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
             val beatFlash = beatEnvelope * state.audioFlashStrength
-            value = maxOf(state.visualizerMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
-            ambientValue = maxOf(state.visualizerMinBrightness, ambientLevel.coerceIn(0f, 1f))
+            value = maxOf(effectiveMinBrightness, (ambientLevel + beatFlash).coerceIn(0f, 1f))
+            ambientValue = maxOf(effectiveMinBrightness, ambientLevel.coerceIn(0f, 1f))
         }
         if (state.sustainResponse == "BRIGHTNESS_SWELL") {
             // +0.10 is the one sustain-response magnitude the proposal doc gives explicitly
@@ -873,7 +931,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
         val (r, g, b) = ColorConverter.hsvToRgb(smoothedHue, sat, value)
 
-        val isBelow = totalEnergy < state.noiseGateThreshold
+        val isBelow = totalEnergy < effectiveNoiseGate
         val isIdle: Boolean
         if (isBelow) {
             if (silenceStartTime == 0L) {
