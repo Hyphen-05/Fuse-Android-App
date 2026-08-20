@@ -162,8 +162,10 @@ class AmbianceProcessor(
             val emaSrgbG = ColorConverter.linearToSrgb(emaState.emaLinG)
             val emaSrgbB = ColorConverter.linearToSrgb(emaState.emaLinB)
 
-            val aggDelta = (abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)) / 3.0
-            val isSceneCut = aggDelta > sceneCutSensitivity
+            val aggDelta = AmbianceSceneCut.delta(
+                aggRawR, aggRawG, aggRawB, emaSrgbR, emaSrgbG, emaSrgbB
+            )
+            val isSceneCut = AmbianceSceneCut.isCut(aggDelta, sceneCutSensitivity.toDouble())
             wasSceneCut = isSceneCut
 
             var newEmaLinR: Double; var newEmaLinG: Double; var newEmaLinB: Double
