@@ -168,10 +168,32 @@ data class AudioSettingsState(
      */
     val musicalDynamicsEnabled: Boolean = false,
     /**
-     * Flashes on a phase-locked beat clock instead of on whichever onset clears a threshold. See
-     * [com.example.core.audio.BeatClock] and `BeatAccuracyTest`. Off by default.
+     * Flashes on a phase-locked beat clock instead of on whichever onset clears a threshold.
+     *
+     * **Measured on 100 annotated GTZAN clips and it does not beat the shipped path** — F 50%
+     * against 53%, buying no precision for 7 points of recall. Kept, off, because it is the only
+     * candidate that is decisive where the tempo lock is genuine (synthetic four-on-the-floor 65%
+     * to 92%) and because the next attempt should start from it rather than from nothing. See
+     * `GtzanBeatAccuracyTest`, which ranks all of them on one number.
      */
     val beatClockEnabled: Boolean = false,
+    /**
+     * Stops the causal trigger firing twice inside one beat, by scaling its refractory period to
+     * the detected tempo instead of a flat 150ms.
+     *
+     * **Measured and rejected as a default**: precision 44% to 47%, recall 69% to 56%, F 53% to
+     * 50%. A refractory started by an offbeat swallows the beat after it, so it costs about as many
+     * true flashes as false ones. See `GtzanBeatAccuracyTest`.
+     */
+    val beatRefractoryEnabled: Boolean = false,
+    /**
+     * Keeps the causal trigger as the thing that fires, but drops the flashes that land between
+     * beats, using the beat clock's phase as a referee.
+     *
+     * **Measured and rejected as a default**: F 51% against 53%. The best of the three suppression
+     * candidates, and still not a win, which is the finding — see `GtzanBeatAccuracyTest`.
+     */
+    val beatVetoEnabled: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)

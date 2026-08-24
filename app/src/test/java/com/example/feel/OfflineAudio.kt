@@ -217,6 +217,7 @@ object OfflineAudio {
 
         var pos = 12
         var channels = 1
+        var sampleRate = SAMPLE_RATE
         var bitsPerSample = 16
         var dataStart = -1
         var dataLength = 0
@@ -226,6 +227,7 @@ object OfflineAudio {
             when (chunkId) {
                 "fmt " -> {
                     channels = le16(pos + 10)
+                    sampleRate = le32(pos + 12)
                     bitsPerSample = le16(pos + 22)
                 }
                 "data" -> {
@@ -248,6 +250,33 @@ object OfflineAudio {
                 acc += le16(at).toShort().toInt()
             }
             out[i] = (acc / channels).toShort()
+        }
+        return if (sampleRate == SAMPLE_RATE) out else resampleTo44k(out, sampleRate)
+    }
+
+    /**
+     * Linear resample to [SAMPLE_RATE].
+     *
+     * [frames] derives its timestamps from the sample index, and the DSP's band edges are bin
+     * numbers, so a file at another rate would be analysed at the wrong speed *and* through the
+     * wrong frequency bands — GTZAN, the obvious source of real annotated audio, is 22.05kHz, and
+     * read raw it would report every beat at twice its true tempo.
+     *
+     * Linear interpolation rather than a windowed-sinc: it costs a little aliasing well above the
+     * bands beat detection reads (the bass/mid split lives under 2kHz), and it keeps the harness
+     * dependency-free, which is the property that matters for a test everyone has to be able to run.
+     */
+    private fun resampleTo44k(input: ShortArray, fromRate: Int): ShortArray {
+        if (input.isEmpty() || fromRate <= 0) return input
+        val ratio = SAMPLE_RATE.toDouble() / fromRate
+        val outLength = (input.size * ratio).toInt()
+        val out = ShortArray(outLength)
+        for (i in 0 until outLength) {
+            val source = i / ratio
+            val i0 = source.toInt()
+            val i1 = (i0 + 1).coerceAtMost(input.size - 1)
+            val t = source - i0
+            out[i] = ((1 - t) * input[i0] + t * input[i1]).toInt().coerceIn(-32768, 32767).toShort()
         }
         return out
     }

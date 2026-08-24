@@ -83,6 +83,16 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         /** The shipped flat cooldown between fast-causal triggers. */
         const val FAST_TRIGGER_COOLDOWN_MS = 150L
 
+        /**
+         * With the tempo-scaled refractory on, the share of a beat that must pass before the causal
+         * trigger may fire again. Just over half, so it cannot fire on the eighth between beats but
+         * still allows a beat that arrives early because the tempo drifted.
+         */
+        const val REFRACTORY_BEAT_FRACTION = 0.55f
+
+        /** How far from a tick a causal flash may land before it is treated as an offbeat. */
+        const val VETO_TOLERANCE = 0.2f
+
     }
 
     // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
@@ -723,19 +733,21 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // transient itself happened then, and that is what the clock has to be judged against.
         if (isBeat) beatClock.observeOnset(nowMs - beatDetector.lookaheadMs)
 
-        val clockTick = if (state.beatClockEnabled) {
+        // The clock runs unconditionally — it is a few arithmetic operations a frame, and keeping
+        // it warm means the flags below decide only what it is *allowed to do*, not whether it has
+        // any idea where the beat is. The first version updated it only when its own flag was set,
+        // which silently made the offbeat veto a no-op: the referee was never on the pitch.
+        val clockTick = run {
             // The phase reference is the DP grid, not the detection frame. `BeatDetector` runs a
             // *centred* detector with a 180ms lookahead, so `isBeat` arrives about a fifth of a
             // second after the beat it describes — seeding a clock from it puts every tick a fifth
             // of a beat late at 128bpm, which measured as recall ~50% with the ticks landing
             // between the beats. `nextPredictedBeatMs` is expressed in the music's own time.
             beatClock.update(nowMs, result.bpm, result.bpmConfidence, result.nextPredictedBeatMs)
-        } else {
-            false
         }
         // Running is not the same as right — see [BeatClock.isTrusted].
         val clockRunning = state.beatClockEnabled && beatClock.isTrusted
-        if (clockTick && musicPresent && beatClock.isTrusted) {
+        if (clockTick && musicPresent && state.beatClockEnabled && beatClock.isTrusted) {
             // Same peak as the predictive scheduler's: the carried strength of the last real
             // detection, so a clock tick is not louder than the beat that justified it.
             val peak = state.flashFloor +
@@ -756,7 +768,24 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // measured worse on its own — mean F 61% to 50% — because with the scheduler dead it was
         // the only thing flashing at all. What stands it down now is a *trusted* clock, and
         // nothing else.
-        if (!clockRunning && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > FAST_TRIGGER_COOLDOWN_MS) {
+        // A flat 150ms refractory is a third of a beat at 128bpm, so the trigger is free to fire on
+        // the eighth as well as the beat — which is exactly what it does: on 80 of 100 real GTZAN
+        // clips the flashes fit the *double* grid better than the true one. Scaling the refractory
+        // to the tempo the detector already knows is the smallest thing that can stop it.
+        val causalRefractoryMs = if (state.beatRefractoryEnabled && result.bpm > 0f) {
+            maxOf(FAST_TRIGGER_COOLDOWN_MS.toFloat(), (60_000f / result.bpm) * REFRACTORY_BEAT_FRACTION).toLong()
+        } else {
+            FAST_TRIGGER_COOLDOWN_MS
+        }
+        // The clock as referee rather than driver. Suppressing by time alone cannot tell an offbeat
+        // from a beat — the tempo-scaled refractory above buys 3 points of precision and gives back
+        // 13 of recall, because a refractory started by an offbeat swallows the beat after it. The
+        // clock knows *where* the beat is, so it can drop the flashes that are not on one while
+        // leaving the causal trigger to decide that something happened at all.
+        val vetoedAsOffbeat = state.beatVetoEnabled && beatClock.isTrusted &&
+            (beatClock.distanceFromTick(nowMs) ?: 0f) > VETO_TOLERANCE
+
+        if (!clockRunning && !vetoedAsOffbeat && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > causalRefractoryMs) {
             val fastWeight = 1f - predictiveWeight
             if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a

@@ -193,6 +193,22 @@ class BeatClock {
     }
 
     /**
+     * How far [atMs] sits from the nearest tick, as a share of a period (0 on the beat, 0.5 exactly
+     * between two). Returns null when the clock has no time to keep.
+     *
+     * This is the clock used as a *referee* rather than as a driver: the causal trigger still
+     * decides when something happened, and this says whether it happened on a beat.
+     */
+    fun distanceFromTick(atMs: Long): Float? {
+        if (!running || periodMs <= 0f) return null
+        val previousTick = nextTickMs - periodMs.toLong()
+        var error = (atMs - previousTick).toFloat()
+        while (error > periodMs / 2f) error -= periodMs
+        while (error < -periodMs / 2f) error += periodMs
+        return abs(error) / periodMs
+    }
+
+    /**
      * Reports a real onset the detector found, so the clock can be checked against the audio.
      *
      * [onsetMs] must be the time the transient actually happened, not the frame the centred
