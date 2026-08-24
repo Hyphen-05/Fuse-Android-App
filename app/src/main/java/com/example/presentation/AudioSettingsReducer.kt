@@ -298,6 +298,12 @@ fun audioSettingsReducer(
             ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("musical_dynamics_enabled", intent.enabled))
         }
 
+        is RgbIntent.SetPulseTrackerEnabled -> {
+            state.copy(
+                audioSettings = state.audioSettings.copy(pulseTrackerEnabled = intent.enabled)
+            ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("pulse_tracker_enabled", intent.enabled))
+        }
+
         is RgbIntent.SetUnlockPresetHues -> {
             // Re-applies to the preset showing right now, so the toggle can be judged against live
             // audio without reselecting anything — which is the whole point of it being a toggle.

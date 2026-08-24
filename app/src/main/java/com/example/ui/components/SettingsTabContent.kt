@@ -1036,6 +1036,34 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("musical_dynamics_switch")
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("pulse_tracker_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Beat Tracking",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Flash on a tracked beat rather than on every onset that clears a " +
+                            "threshold. Measured better on music with a clear pulse and slightly " +
+                            "worse without one, so it only takes over while it is keeping steady time.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.pulseTrackerEnabled,
+                    onCheckedChange = { viewModel.setPulseTrackerEnabled(it) },
+                    modifier = Modifier.testTag("pulse_tracker_switch")
+                )
+            }
         }
     }
 

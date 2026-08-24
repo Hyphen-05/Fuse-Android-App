@@ -311,6 +311,7 @@ sealed interface RgbIntent {
     data class SetShowFpsTracker(val enabled: Boolean) : RgbIntent
     data class SetUnlockPresetHues(val enabled: Boolean) : RgbIntent
     data class SetMusicalDynamicsEnabled(val enabled: Boolean) : RgbIntent
+    data class SetPulseTrackerEnabled(val enabled: Boolean) : RgbIntent
     data class SetPerceptualSplitEnabled(val enabled: Boolean) : RgbIntent
     // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.
     object ClearErrorMessage : RgbIntent

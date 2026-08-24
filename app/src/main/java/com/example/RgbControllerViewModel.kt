@@ -232,6 +232,7 @@ class RgbControllerViewModel(
                 hueAnchorJumpDeg = prefsRepo.getAppStatePrefFloat("hue_anchor_jump_deg", 60f),
                 unlockPresetHues = prefsRepo.getAppStatePrefBoolean("unlock_preset_hues", false),
                 musicalDynamicsEnabled = prefsRepo.getAppStatePrefBoolean("musical_dynamics_enabled", false),
+                pulseTrackerEnabled = prefsRepo.getAppStatePrefBoolean("pulse_tracker_enabled", false),
                 hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
                 hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
                 breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
@@ -2081,6 +2082,10 @@ class RgbControllerViewModel(
 
     fun setMusicalDynamicsEnabled(enabled: Boolean) {
         dispatch(RgbIntent.SetMusicalDynamicsEnabled(enabled))
+    }
+
+    fun setPulseTrackerEnabled(enabled: Boolean) {
+        dispatch(RgbIntent.SetPulseTrackerEnabled(enabled))
     }
 
     fun clearErrorMessage() {
