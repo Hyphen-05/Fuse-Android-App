@@ -1064,6 +1064,35 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("pulse_tracker_switch")
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("flash_floor_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Short Flash Tail",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Hold a beat flash only as long as the link actually needs (~5ms a " +
+                            "write) instead of the 125ms the old pacing setting implied. Flashes " +
+                            "get a much shorter tail and should read as tighter; whether that is " +
+                            "better is what the toggle is for.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.flashFloorUsesMeasuredInFlight,
+                    onCheckedChange = { viewModel.setFlashFloorUsesMeasuredInFlight(it) },
+                    modifier = Modifier.testTag("flash_floor_switch")
+                )
+            }
         }
     }
 

@@ -4,8 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,161 +31,20 @@ import com.example.ActiveDeviceState
 import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 import com.example.RgbUiState
-import com.example.ambiance.AmbianceCaptureState
 import com.example.db.SavedDevice
-import com.example.domain.model.AppScene
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: RgbControllerViewModel,
     permissionsGranted: Boolean,
     permissionsBlocked: Boolean,
     onGrantPermissions: () -> Unit,
-    onStartAmbianceCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
-    val scenes by viewModel.scenes.collectAsState()
 
     val activeComposeColor = Color(uiState.coreControl.red, uiState.coreControl.green, uiState.coreControl.blue)
-
-    var showCreateSceneDialogFromHome by rememberSaveable { mutableStateOf(false) }
-    var selectedSceneId by rememberSaveable { mutableStateOf<String?>(null) }
-    var sceneToDelete by remember { mutableStateOf<AppScene?>(null) }
-    var sceneToRename by remember { mutableStateOf<AppScene?>(null) }
-    var sceneToEdit by remember { mutableStateOf<AppScene?>(null) }
-    var renameInputText by remember { mutableStateOf("") }
-    var showMenuForSceneId by remember { mutableStateOf<String?>(null) }
-
-    fun getSceneDescription(scene: AppScene): String {
-        val state = scene.state
-        val modeName = when (state?.groupASelection) {
-            "Colour" -> "Solid Colour"
-            "CCT" -> "Color Temp (CCT)"
-            "HardwareMode" -> "LED Animation"
-            "Audio" -> "Audio Visualizer"
-            "Ambiance" -> "Video Ambiance"
-            else -> "Settings Only"
-        }
-        val brightnessStr = if (state?.brightness != null) ", ${state.brightness}%" else ""
-        return "$modeName$brightnessStr"
-    }
-
-    if (showCreateSceneDialogFromHome) {
-        val currentGlobalMode = if (!uiState.coreControl.isPowerOn) "Power Off"
-            else when {
-                uiState.coreControl.activeFeatureName == "Colour" -> "Colour"
-                uiState.coreControl.activeFeatureName == "CCT" -> "CCT"
-                uiState.coreControl.activeFeatureName.startsWith("Audio") || uiState.coreControl.activeFeatureName.startsWith("LED Visualiser") -> "Audio"
-                uiState.coreControl.activeFeatureName.startsWith("Ambiance") -> "Ambiance"
-                else -> "HardwareMode"
-            }
-        SceneCreationDialog(
-            devices = savedDevices,
-            currentGlobalMode = currentGlobalMode,
-            availableScenes = scenes,
-            onDismissRequest = { showCreateSceneDialogFromHome = false },
-            onSaveScene = { name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds ->
-                viewModel.saveScene(name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds)
-                showCreateSceneDialogFromHome = false
-            }
-        )
-    }
-
-    if (sceneToEdit != null) {
-        val currentGlobalMode = sceneToEdit?.state?.groupASelection ?: ""
-        SceneCreationDialog(
-            devices = savedDevices,
-            currentGlobalMode = currentGlobalMode,
-            availableScenes = scenes,
-            sceneToEdit = sceneToEdit,
-            onDismissRequest = { sceneToEdit = null },
-            onSaveScene = { name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds ->
-                viewModel.updateScene(sceneToEdit!!.id, name, groupA, includeBrightness, includeModeSpeed, targetScope, macList, includeAmbianceSettings, includeCalibrationSettings, includeAudioSettings, chainedSceneId, chainedSceneDelaySeconds)
-                sceneToEdit = null
-            }
-        )
-    }
-
-    if (sceneToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { sceneToDelete = null },
-            title = { Text("Delete Scene", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
-            text = { Text("Are you sure you want to delete the scene '${sceneToDelete?.name}'?") },
-            shape = RoundedCornerShape(24.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            confirmButton = {
-                Button(
-                    onClick = {
-                        sceneToDelete?.let {
-                            viewModel.deleteScene(it.id)
-                        }
-                        sceneToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    ),
-                    modifier = Modifier.height(44.dp),
-                    shape = CircleShape
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { sceneToDelete = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (sceneToRename != null) {
-        AlertDialog(
-            onDismissRequest = { sceneToRename = null },
-            title = { Text("Rename Scene", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter a new name for scene '${sceneToRename?.name}':", style = MaterialTheme.typography.bodyMedium)
-                    OutlinedTextField(
-                        value = renameInputText,
-                        onValueChange = { renameInputText = it },
-                        singleLine = true,
-                        placeholder = { Text("New Scene Name") },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("rename_scene_input")
-                    )
-                }
-            },
-            shape = RoundedCornerShape(24.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val trimmed = renameInputText.trim()
-                        if (trimmed.isNotEmpty()) {
-                            sceneToRename?.let {
-                                viewModel.renameScene(it.id, trimmed)
-                            }
-                            sceneToRename = null
-                        }
-                    },
-                    enabled = renameInputText.isNotBlank(),
-                    modifier = Modifier.height(44.dp),
-                    shape = CircleShape
-                ) {
-                    Text("Rename")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { sceneToRename = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 
     LazyColumn(
         modifier = modifier,
@@ -586,196 +442,109 @@ fun HomeScreen(
                                 }
                             }
                         }
+
+                        // --- RGB channel sliders, under the wheel ---
+                        // Same card, because they are the same act as picking on the wheel: the
+                        // wheel is for choosing a colour by eye, these are for saying exactly which
+                        // one. Both write through viewModel.setColor, so each follows the other.
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            RgbChannelSlider(
+                                label = "Red",
+                                value = uiState.coreControl.red,
+                                channelColor = Color.Red,
+                                onValueChange = {
+                                    viewModel.setColor(it, uiState.coreControl.green, uiState.coreControl.blue)
+                                },
+                                testTag = "red_slider"
+                            )
+                            RgbChannelSlider(
+                                label = "Green",
+                                value = uiState.coreControl.green,
+                                channelColor = Color.Green,
+                                onValueChange = {
+                                    viewModel.setColor(uiState.coreControl.red, it, uiState.coreControl.blue)
+                                },
+                                testTag = "green_slider"
+                            )
+                            RgbChannelSlider(
+                                label = "Blue",
+                                value = uiState.coreControl.blue,
+                                channelColor = Color.Blue,
+                                onValueChange = {
+                                    viewModel.setColor(uiState.coreControl.red, uiState.coreControl.green, it)
+                                },
+                                testTag = "blue_slider"
+                            )
+                        }
                     }
                 }
             }
         } // End of connectionState == CONNECTED
 
-        // --- Grid-based Quick Access Scenes ---
-        val gridItems = scenes + listOf(null)
-        val chunked = gridItems.chunked(2)
-        chunked.forEach { rowItems ->
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    rowItems.forEach { scene ->
-                        if (scene != null) {
-                            val chipInteractionSource = remember { MutableInteractionSource() }
-                            val isSelected = selectedSceneId == scene.id
-                            Card(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = RoundedCornerShape(20.dp)
-                                    )
-                                    .combinedClickable(
-                                        interactionSource = chipInteractionSource,
-                                        indication = androidx.compose.foundation.LocalIndication.current,
-                                        onClick = {
-                                            selectedSceneId = scene.id
-                                            viewModel.applyScene(scene)
-                                            if (scene.state.groupASelection == "Ambiance" &&
-                                                scene.state.ambianceIsOn == true &&
-                                                !AmbianceCaptureState.isActive.value) {
-                                                onStartAmbianceCapture()
-                                            }
-                                        },
-                                        onLongClick = {
-                                            showMenuForSceneId = scene.id
-                                        }
-                                    )
-                                    .testTag("scene_chip_${scene.id}")
-                                    .joyfulPress(chipInteractionSource),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
-                                )
-                            ) {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(32.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.AutoAwesome,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
+    }
+}
 
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = scene.name,
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = getSceneDescription(scene),
-                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
+/**
+ * One RGB channel on the Home colour card, built from the same pieces as Dimming and CCT: a
+ * title/value row above an [ExpressiveSlider].
+ *
+ * The two differences from those are the range and the track. It runs 0-255 rather than 0-100
+ * because a colour channel *is* a byte and quantising it to a hundred steps would make some values
+ * unreachable, and the track is a black-to-channel gradient for the same reason CCT's is a warmth
+ * gradient — the control shows what it does.
+ */
+@Composable
+private fun RgbChannelSlider(
+    label: String,
+    value: Int,
+    channelColor: Color,
+    onValueChange: (Int) -> Unit,
+    testTag: String
+) {
+    val trackGradient = remember(channelColor) {
+        androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Black, channelColor))
+    }
 
-                                    DropdownMenu(
-                                        expanded = showMenuForSceneId == scene.id,
-                                        onDismissRequest = { showMenuForSceneId = null },
-                                        shape = RoundedCornerShape(16.dp),
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Edit", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)) },
-                                            onClick = {
-                                                showMenuForSceneId = null
-                                                sceneToEdit = scene
-                                            },
-                                            leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "Edit Scene", modifier = Modifier.size(18.dp)) }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Rename", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)) },
-                                            onClick = {
-                                                showMenuForSceneId = null
-                                                sceneToRename = scene
-                                                renameInputText = scene.name
-                                            },
-                                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = "Rename Scene", modifier = Modifier.size(18.dp)) }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Delete", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.error) },
-                                            onClick = {
-                                                showMenuForSceneId = null
-                                                sceneToDelete = scene
-                                            },
-                                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = "Delete Scene", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp)) }
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            val addInteractionSource = remember { MutableInteractionSource() }
-                            Card(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .border(
-                                        width = 1.dp,
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                        shape = RoundedCornerShape(20.dp)
-                                    )
-                                    .clickable(
-                                        interactionSource = addInteractionSource,
-                                        indication = androidx.compose.foundation.LocalIndication.current
-                                    ) {
-                                        showCreateSceneDialogFromHome = true
-                                    }
-                                    .testTag("create_scene_chip_home")
-                                    .joyfulPress(addInteractionSource),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Create Scene",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Column {
-                                        Text(
-                                            text = "Create",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            text = "New Scene",
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (rowItems.size < 2) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            )
+            Text(
+                text = "$value",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            )
         }
+
+        ExpressiveSlider(
+            value = value,
+            onValueChange = onValueChange,
+            labelPrefix = label,
+            maxValue = 255,
+            activeColor = Color.Transparent,
+            inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            contentColor = Color.White,
+            trackBrush = trackGradient,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(testTag)
+        )
     }
 }
 

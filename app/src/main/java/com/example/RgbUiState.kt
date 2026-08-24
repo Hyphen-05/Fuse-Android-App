@@ -198,6 +198,21 @@ data class AudioSettingsState(
      * steady, falling back to the shipped path when it is not. See `GtzanBeatAccuracyTest`.
      */
     val pulseTrackerEnabled: Boolean = false,
+    /**
+     * Floors the beat-flash decay window against the *measured* in-flight time per write rather
+     * than [com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS].
+     *
+     * The floor exists so a flash's decay envelope spans a couple of wire writes instead of landing
+     * in the gap between two (visualizer-review-2026-07-21.md P2). It was sized against the pacing
+     * pref, which was a stored guess; the removal of pacing (Tier E Phase 3 step 4) kept the number
+     * it resolved to, 50, so the floor stayed at 125ms. The link actually clears a write in ~4.6ms
+     * per strip, which would put the floor near 12ms — a much shorter tail on every flash.
+     *
+     * Off by default: shorter is not obviously better, it is *different*, and it is a change to how
+     * flashes look. On, the floor tracks the link live and doubles by itself when a second strip
+     * joins, which is the thing a stored number could never do.
+     */
+    val flashFloorUsesMeasuredInFlight: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)
@@ -315,6 +330,7 @@ sealed interface RgbIntent {
     data class SetUnlockPresetHues(val enabled: Boolean) : RgbIntent
     data class SetMusicalDynamicsEnabled(val enabled: Boolean) : RgbIntent
     data class SetPulseTrackerEnabled(val enabled: Boolean) : RgbIntent
+    data class SetFlashFloorUsesMeasuredInFlight(val enabled: Boolean) : RgbIntent
     data class SetPerceptualSplitEnabled(val enabled: Boolean) : RgbIntent
     // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.
     object ClearErrorMessage : RgbIntent

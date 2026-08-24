@@ -579,6 +579,10 @@ fun MainScreen() {
             } else if (selectedTab == 1) {
                 ModesScreen(
                     viewModel = viewModel,
+                    onStartAmbianceCapture = {
+                        val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                        mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp)
@@ -608,10 +612,6 @@ fun MainScreen() {
                     permissionsBlocked = permissionsBlocked,
                     onGrantPermissions = {
                         if (permissionsBlocked) openAppSettings() else requestBluetoothPermissions()
-                    },
-                    onStartAmbianceCapture = {
-                        val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                        mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
                     },
                     modifier = Modifier
                         .fillMaxSize()
@@ -903,7 +903,7 @@ fun ExpressiveNavigationBar(
         ) {
             val tabs = listOf(
                 NavigationItemData(0, Icons.Default.Home, "Home", "nav_controller"),
-                NavigationItemData(1, Icons.Default.Palette, "Modes", "nav_modes"),
+                NavigationItemData(1, Icons.Default.Palette, "Scenes", "nav_modes"),
                 NavigationItemData(4, Icons.Default.MusicNote, "Music", "nav_music"),
                 NavigationItemData(5, Icons.Default.FilterAlt, "Ambiance", "nav_ambiance"),
                 NavigationItemData(2, Icons.Default.Bluetooth, "Devices", "nav_devices"),

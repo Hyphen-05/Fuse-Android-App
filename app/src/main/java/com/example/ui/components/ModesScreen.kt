@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -59,6 +60,7 @@ fun getColorValue(name: String): Color {
 @Composable
 fun ModesScreen(
     viewModel: RgbControllerViewModel,
+    onStartAmbianceCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -89,206 +91,218 @@ fun ModesScreen(
         }
     }
 
-    Column(
+    // One scroll container for the whole tab. These sections used to sit in a plain Column with
+    // the grid taking whatever height was left, which held up while the fixed part was a banner
+    // and two cards — but Scenes grows with however many the user has saved, and in a Column that
+    // content had nowhere to go and no way to scroll to it. As full-span items they scroll with
+    // the modes.
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 145.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp),
         modifier = modifier
             .fillMaxSize()
-            .padding(top = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .testTag("modes_grid")
     ) {
 
-
-        // --- Connection / Demo mode Alert Banner ---
-        val isConnected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED
-        AnimatedVisibility(visible = !isConnected) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("modes_connection_warning_banner")
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Info",
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                    Text(
-                        text = "Device is disconnected. Simulating hardware command updates.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
+        // --- Saved Scenes ---
+        // Top of the tab, above the modes it shares the screen with: a scene restores a whole
+        // setup, so it is the coarser choice of the two and the one reached for first.
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            ScenesSection(
+                viewModel = viewModel,
+                onStartAmbianceCapture = onStartAmbianceCapture
+            )
         }
 
-        // --- Mode Speed Slider ---
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("mode_speed_card"),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Effect Speed",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    )
-                    Text(
-                        text = "${uiState.coreControl.modeSpeed}%",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                }
-                ExpressiveSlider(
-                    value = uiState.coreControl.modeSpeed,
-                    onValueChange = { viewModel.setModeSpeed(it) },
-                    labelPrefix = "Speed",
-                    activeColor = MaterialTheme.colorScheme.primary,
-                    inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // --- Connection / Demo mode Alert Banner ---
+            val isConnected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED
+            AnimatedVisibility(visible = !isConnected) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("mode_speed_slider")
-                )
-            }
-        }
-
-        // --- Filter Chips & Rename Action ---
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Categories",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // Only allow renaming if a specific category is selected
-                if (selectedCategory != "All") {
-                    TextButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            categoryToRename = selectedCategory
-                            showRenameCategoryDialog = true
-                        },
-                        modifier = Modifier.testTag("rename_category_btn")
+                        .testTag("modes_connection_warning_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Rename Category",
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Info",
+                            tint = MaterialTheme.colorScheme.secondary
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Rename Category", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = "Device is disconnected. Simulating hardware command updates.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
                     }
                 }
             }
 
-            // Category Chips Row
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            // --- Mode Speed Slider ---
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("mode_speed_card"),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
-                items(categories) { category ->
-                    val isSelected = selectedCategory == category
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            selectedCategory = category
-                        },
-                        label = {
-                            Text(text = category)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("category_chip_$category")
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Effect Speed",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                        Text(
+                            text = "${uiState.coreControl.modeSpeed}%",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                    ExpressiveSlider(
+                        value = uiState.coreControl.modeSpeed,
+                        onValueChange = { viewModel.setModeSpeed(it) },
+                        labelPrefix = "Speed",
+                        activeColor = MaterialTheme.colorScheme.primary,
+                        inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("mode_speed_slider")
                     )
                 }
+            }
+
+            // --- Filter Chips & Rename Action ---
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Categories",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Only allow renaming if a specific category is selected
+                    if (selectedCategory != "All") {
+                        TextButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                categoryToRename = selectedCategory
+                                showRenameCategoryDialog = true
+                            },
+                            modifier = Modifier.testTag("rename_category_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Rename Category",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Rename Category", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+
+                // Category Chips Row
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(categories) { category ->
+                        val isSelected = selectedCategory == category
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                selectedCategory = category
+                            },
+                            label = {
+                                Text(text = category)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("category_chip_$category")
+                        )
+                    }
+                }
+            }
             }
         }
 
-        // --- Grid of Custom Mode Items ---
+        // --- Custom Mode Items ---
         if (filteredModes.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Category,
-                        contentDescription = "No modes found",
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Text(
-                        text = "No Modes",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = "No modes found",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Text(
+                            text = "No Modes",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 145.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 32.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("modes_grid")
-            ) {
-                items(filteredModes) { mode ->
-                    val isActive = uiState.coreControl.modeIndex == mode.byteValue
-                    CustomModeGridItem(
-                        mode = mode,
-                        isActive = isActive,
-                        onSelect = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.setMode(mode.byteValue)
-                        },
-                        onEdit = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            modeToEdit = mode
-                        }
-                    )
-                }
+            items(filteredModes) { mode ->
+                val isActive = uiState.coreControl.modeIndex == mode.byteValue
+                CustomModeGridItem(
+                    mode = mode,
+                    isActive = isActive,
+                    onSelect = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.setMode(mode.byteValue)
+                    },
+                    onEdit = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        modeToEdit = mode
+                    }
+                )
             }
         }
     }

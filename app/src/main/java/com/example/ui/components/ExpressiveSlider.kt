@@ -39,9 +39,14 @@ import kotlin.math.min
 
 @Composable
 fun ExpressiveSlider(
-    value: Int, // 0 - 100
+    value: Int, // 0 - [maxValue]
     onValueChange: (Int) -> Unit,
     labelPrefix: String = "Brightness",
+    // Top of the range [value] is expressed in. 100 for every percentage control (brightness,
+    // warmth, speed); 255 for the RGB channels on the Home colour card, which need the full byte
+    // rather than 100 steps quantised across it. Nothing else about the slider changes with it —
+    // the track, the haptics and the animation all work off the resolved fraction below.
+    maxValue: Int = 100,
     activeColor: Color = MaterialTheme.colorScheme.primary,
     inactiveColor: Color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
     contentColor: Color = MaterialTheme.colorScheme.onPrimary,
@@ -55,7 +60,8 @@ fun ExpressiveSlider(
         inactiveColor
     }
 
-    var dragPercent by remember(value) { mutableStateOf(value / 100f) }
+    val range = maxValue.coerceAtLeast(1)
+    var dragPercent by remember(value, range) { mutableStateOf(value / range.toFloat()) }
 
     val animatedPercent by animateFloatAsState(
         targetValue = dragPercent,
@@ -115,7 +121,7 @@ fun ExpressiveSlider(
                         isTapped = true
                         val percent = (offset.x / size.width).coerceIn(0f, 1f)
                         dragPercent = percent
-                        onValueChange((percent * 100).toInt())
+                        onValueChange(kotlin.math.round(percent * range).toInt())
                         val success = tryAwaitRelease()
                         isTapped = false
                     }
@@ -130,7 +136,7 @@ fun ExpressiveSlider(
                     change.consume()
                     val percent = (change.position.x / size.width).coerceIn(0f, 1f)
                     dragPercent = percent
-                    onValueChange((percent * 100).toInt())
+                    onValueChange(kotlin.math.round(percent * range).toInt())
                 }
             }
     ) {

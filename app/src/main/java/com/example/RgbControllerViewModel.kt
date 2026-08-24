@@ -233,6 +233,7 @@ class RgbControllerViewModel(
                 unlockPresetHues = prefsRepo.getAppStatePrefBoolean("unlock_preset_hues", false),
                 musicalDynamicsEnabled = prefsRepo.getAppStatePrefBoolean("musical_dynamics_enabled", false),
                 pulseTrackerEnabled = prefsRepo.getAppStatePrefBoolean("pulse_tracker_enabled", false),
+                flashFloorUsesMeasuredInFlight = prefsRepo.getAppStatePrefBoolean("flash_floor_measured_in_flight", false),
                 hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
                 hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
                 breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
@@ -1998,11 +1999,27 @@ class RgbControllerViewModel(
      * flashes look and therefore Joe's call on hardware, not a refactor's.
      *
      * Still 0 — "no floor" — when nothing is connected, exactly as before.
+     *
+     * `flashFloorUsesMeasuredInFlight` switches the basis to the link's own measured issued -> ack
+     * time, the slowest across the devices this frame reaches. That is the number the floor always
+     * wanted: it tracks the link live and doubles by itself when a second strip joins, where a
+     * stored value could do neither. Off by default — it shortens every flash's tail by roughly an
+     * order of magnitude, which is a change to how flashes look and wants judging on hardware.
+     *
+     * Falls back to the constant when the toggle is on but nothing has been measured yet: the EMA
+     * only moves once a write has been acked, and a freshly connected strip would otherwise floor
+     * against 0 (= no floor at all) for the first second.
      */
     private fun currentEffectivePacingMs(): Int {
         val addresses = getCurrentlyControlledDeviceAddresses()
         if (addresses.isEmpty()) return 0
-        return com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS
+        if (!_uiState.value.audioSettings.flashFloorUsesMeasuredInFlight) {
+            return com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS
+        }
+        val inFlight = _telemetry.value.deviceInFlightMs
+        val slowest = addresses.mapNotNull { inFlight[it] }.filter { it > 0.0 }.maxOrNull()
+            ?: return com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS
+        return kotlin.math.round(slowest).toInt().coerceAtLeast(1)
     }
 
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
@@ -2090,6 +2107,10 @@ class RgbControllerViewModel(
 
     fun setPulseTrackerEnabled(enabled: Boolean) {
         dispatch(RgbIntent.SetPulseTrackerEnabled(enabled))
+    }
+
+    fun setFlashFloorUsesMeasuredInFlight(enabled: Boolean) {
+        dispatch(RgbIntent.SetFlashFloorUsesMeasuredInFlight(enabled))
     }
 
     fun clearErrorMessage() {
