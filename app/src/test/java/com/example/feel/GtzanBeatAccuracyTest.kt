@@ -78,7 +78,7 @@ class GtzanBeatAccuracyTest {
         return out
     }
 
-    private fun settingsFor(preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false): AudioSettingsState =
+    private fun settingsFor(preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false): AudioSettingsState =
         audioSettingsReducer(
             RgbUiState(audioSettings = AudioSettingsState()),
             RgbIntent.SetVisualizerPreset(preset),
@@ -87,11 +87,12 @@ class GtzanBeatAccuracyTest {
         ).first.audioSettings.copy(
             beatClockEnabled = beatClock,
             beatRefractoryEnabled = refractory,
-            beatVetoEnabled = veto
+            beatVetoEnabled = veto,
+            pulseTrackerEnabled = pulse
         )
 
-    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false): List<Long> {
-        val settings = settingsFor(preset, beatClock, refractory, veto)
+    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false): List<Long> {
+        val settings = settingsFor(preset, beatClock, refractory, veto, pulse)
         val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
         val pcm = OfflineAudio.readWav(clip.wav)
         val out = ArrayList<Long>()
@@ -118,7 +119,7 @@ class GtzanBeatAccuracyTest {
             var offF = 0.0; var onF = 0.0; var offP = 0.0; var onP = 0.0
             for (clip in group) {
                 val off = BeatAccuracy.score(clip.beatsMs, flashes(clip, "Punchy", false))
-                val on = BeatAccuracy.score(clip.beatsMs, flashes(clip, "Punchy", true))
+                val on = BeatAccuracy.score(clip.beatsMs, flashes(clip, "Punchy", false, pulse = true))
                 offF += off.fMeasure; onF += on.fMeasure
                 offP += off.precision; onP += on.precision
             }
@@ -150,7 +151,8 @@ class GtzanBeatAccuracyTest {
             "beat clock" to { c -> flashes(c, "Punchy", true) },
             "refractory" to { c -> flashes(c, "Punchy", false, refractory = true) },
             "offbeat veto" to { c -> flashes(c, "Punchy", false, veto = true) },
-            "veto+refractory" to { c -> flashes(c, "Punchy", false, refractory = true, veto = true) }
+            "veto+refractory" to { c -> flashes(c, "Punchy", false, refractory = true, veto = true) },
+            "pulse tracker" to { c -> flashes(c, "Punchy", false, pulse = true) }
         )
         println("\n=== Every candidate, ${all.size} real clips, Punchy ===")
         println("%18s %8s %8s %8s %10s".format("candidate", "F", "P", "R", "continuity"))

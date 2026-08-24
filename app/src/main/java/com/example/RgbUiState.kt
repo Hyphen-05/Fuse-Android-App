@@ -194,6 +194,11 @@ data class AudioSettingsState(
      * candidates, and still not a win, which is the finding — see `GtzanBeatAccuracyTest`.
      */
     val beatVetoEnabled: Boolean = false,
+    /**
+     * Drives the flashing from [com.example.core.audio.PulseTracker] whenever that tracker is
+     * steady, falling back to the shipped path when it is not. See `GtzanBeatAccuracyTest`.
+     */
+    val pulseTrackerEnabled: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)

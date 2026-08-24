@@ -93,6 +93,12 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         /** How far from a tick a causal flash may land before it is treated as an offbeat. */
         const val VETO_TOLERANCE = 0.2f
 
+        /**
+         * How steady [PulseTracker] must be before it is allowed to drive the flashing. 0.7 is the
+         * measured knee: above it, 44% of clips at F=75%; above 0.8, 26% of clips at F=84%.
+         */
+        const val PULSE_STEADY_ENOUGH = 0.7f
+
     }
 
     // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
@@ -251,6 +257,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     /** Keeps time between detections when the beat clock is on. See [BeatClock]. */
     private val beatClock = BeatClock()
 
+    /** The rebuilt front end. Runs always; only allowed to flash when its flag is on. */
+    private val pulseTracker = PulseTracker()
+
     // visualizer-review-2026-07-22.md C7/P5: EMA-smoothed spectral crest (peak/mean magnitude
     // ratio), consumed by the saturation calculation further down in process(). Starts at 1.0 --
     // "flat spectrum," the crestRatio value for a silent/uniform first frame.
@@ -348,6 +357,10 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // Read before the gate below: it zeroes quiet bins, and zeroed bins would drive the
         // geometric mean to nothing and make room tone read as the most tonal signal there is.
         val musicPresent = musicPresence.update(magnitude, numBins, nowMs)
+
+        // Same reason as MusicPresence: the gate below zeroes quiet bins, and the whole point of
+        // the tracker's log compression is to hear the quiet detail a percussion track lives in.
+        val pulseBeat = pulseTracker.process(magnitude, numBins, nowMs)
 
         // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
         val threshold = noiseFloor * 1.5f
@@ -733,6 +746,26 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // transient itself happened then, and that is what the clock has to be judged against.
         if (isBeat) beatClock.observeOnset(nowMs - beatDetector.lookaheadMs)
 
+        // The rebuilt tracker drives the flashing whenever it is steady, and hands straight back
+        // when it is not. Measured on 100 annotated GTZAN clips: it scores F=57% overall against
+        // the shipped path's 53%, but the average is not the point — steadiness sorts the corpus
+        // hard. Clips where it holds still score 84%, clips where it does not score 38%, and it is
+        // the same tracker in both. So it is worth listening to exactly when it is sure.
+        val pulseSteady = state.pulseTrackerEnabled && pulseTracker.stability >= PULSE_STEADY_ENOUGH
+        if (pulseBeat && pulseSteady && musicPresent) {
+            val peak = state.flashFloor +
+                dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence
+            if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
+                flashFiredThisFrame = true
+                predictiveFlashThisFrame = true
+                applyHueNudge(state.hueBeatNudgeDeg)
+                if (useWhiteFlash) {
+                    val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
+                    whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+                }
+            }
+        }
+
         // The clock runs unconditionally — it is a few arithmetic operations a frame, and keeping
         // it warm means the flags below decide only what it is *allowed to do*, not whether it has
         // any idea where the beat is. The first version updated it only when its own flag was set,
@@ -785,7 +818,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val vetoedAsOffbeat = state.beatVetoEnabled && beatClock.isTrusted &&
             (beatClock.distanceFromTick(nowMs) ?: 0f) > VETO_TOLERANCE
 
-        if (!clockRunning && !vetoedAsOffbeat && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > causalRefractoryMs) {
+        if (!clockRunning && !pulseSteady && !vetoedAsOffbeat && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > causalRefractoryMs) {
             val fastWeight = 1f - predictiveWeight
             if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
