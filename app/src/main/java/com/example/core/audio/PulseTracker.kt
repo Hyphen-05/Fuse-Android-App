@@ -66,8 +66,34 @@ class PulseTracker(
      * kick drum's periodicity is not diluted by a vocal line that has none — the bands are split on
      * a log scale, because that is how the interesting content is distributed.
      */
-    private val bands: Int = 2
+    private val bands: Int = 2,
+    /**
+     * Which decoder turns the onset curve into beats.
+     *
+     * The curve is the same either way, which is the point of the switch — it is the only way to
+     * find out whether the front end or the decoder is what limits accuracy.
+     */
+    private val decoder: Decoder = Decoder.AUTOCORRELATION,
+    /** Window over which onset strength is normalised into a 0..1 activation for the DBN. */
+    private val activationWindow: Int = ACTIVATION_WINDOW,
+    /** How many standard deviations above the local mean counts as a full-strength onset. */
+    private val activationScale: Double = ACTIVATION_SCALE,
+    /** DBN only: cost of changing tempo at a beat boundary. */
+    private val transitionLambda: Double = 100.0,
+    /** DBN only: reciprocal of the share of a beat that counts as on the beat. */
+    private val observationLambda: Int = 16,
+    /**
+     * DBN only: whether the activation is peak-picked before the decoder sees it.
+     *
+     * The DBN's observation model asks "is a beat happening right now", and the answer it expects
+     * looks like what a trained network emits — near zero almost everywhere, near one on beats.
+     * A raw flux z-score is nothing like that: it is high at *every* onset, so the model gets
+     * equally strong evidence for a beat on the offbeat hat as on the beat.
+     */
+    private val peakPickedActivation: Boolean = false
 ) {
+
+    enum class Decoder { AUTOCORRELATION, DBN }
 
     /** Current tempo estimate, 0 before there is one. */
     var bpm: Float = 0f
@@ -95,6 +121,26 @@ class PulseTracker(
 
     private var previousLog: FloatArray? = null
     private var frameIndex = 0
+
+    private val dbn = if (decoder == Decoder.DBN) {
+        BeatDbn(
+            frameIntervalMs = frameIntervalMs,
+            transitionLambda = transitionLambda,
+            observationLambda = observationLambda
+        )
+    } else {
+        null
+    }
+
+    /** Rolling mean and mean-square of onset strength, for the activation normalisation. */
+    private var activationMean = 0.0
+    private var activationSquareMean = 0.0
+    private var previousFlux = 0f
+    private var risingFlux = false
+
+    /** The 0..1 activation the DBN was last given. */
+    var activation: Float = 0f
+        private set
 
     /** Rolling onset-strength curves, one per band. 512 frames is ~12s. */
     private val odf = Array(bands) { FloatArray(HISTORY) }
@@ -128,17 +174,32 @@ class PulseTracker(
         if (odfCount < HISTORY) odfCount++
         onsetStrength = flux.sum()
 
-        if (frameIndex - lastTempoFrame >= TEMPO_INTERVAL_FRAMES && odfCount >= MIN_FRAMES_FOR_TEMPO) {
-            lastTempoFrame = frameIndex
-            estimateTempoAndPhase()
-        }
-
+        val summedFlux = onsetStrength
         var isBeat = false
-        if (periodFrames > 0.0 && frameIndex >= nextBeatFrame) {
-            isBeat = true
-            nextBeatFrame += periodFrames
-            // A stalled or skipped frame must not produce a burst of catch-up beats.
-            if (nextBeatFrame <= frameIndex) nextBeatFrame = frameIndex + periodFrames
+
+        if (decoder == Decoder.DBN) {
+            val dbnDecoder = dbn!!
+            activation = normaliseActivation(summedFlux)
+            isBeat = dbnDecoder.process(activation)
+            bpm = dbnDecoder.bpm
+            confidence = dbnDecoder.beatProbability
+            // The DBN carries no single period, so steadiness is read off the tempo it currently
+            // considers most likely rather than off a fresh estimate.
+            if (frameIndex - lastTempoFrame >= TEMPO_INTERVAL_FRAMES) {
+                lastTempoFrame = frameIndex
+                if (bpm > 0f) updateStability(60_000.0 / bpm / frameIntervalMs)
+            }
+        } else {
+            if (frameIndex - lastTempoFrame >= TEMPO_INTERVAL_FRAMES && odfCount >= MIN_FRAMES_FOR_TEMPO) {
+                lastTempoFrame = frameIndex
+                estimateTempoAndPhase()
+            }
+            if (periodFrames > 0.0 && frameIndex >= nextBeatFrame) {
+                isBeat = true
+                nextBeatFrame += periodFrames
+                // A stalled or skipped frame must not produce a burst of catch-up beats.
+                if (nextBeatFrame <= frameIndex) nextBeatFrame = frameIndex + periodFrames
+            }
         }
 
         frameIndex++
@@ -204,6 +265,37 @@ class PulseTracker(
             if (bin < bandEdges[b + 1]) return b
         }
         return bands - 1
+    }
+
+    /**
+     * Turns raw onset strength into something that can be read as a probability.
+     *
+     * The DBN's observation model treats the activation as "how likely is it that a beat is
+     * happening right now", so the scale has to be meaningful and local: absolute flux varies by
+     * orders of magnitude between a quiet folk recording and a limited master, and a fixed mapping
+     * would hand the model near-zero activations for one and saturated ones for the other.
+     * Standardising against a rolling mean and spread makes it the same question in both.
+     */
+    private fun normaliseActivation(flux: Float): Float {
+        val alpha = 1.0 / activationWindow
+        activationMean += (flux - activationMean) * alpha
+        activationSquareMean += (flux * flux - activationSquareMean) * alpha
+        val variance = (activationSquareMean - activationMean * activationMean).coerceAtLeast(0.0)
+        val spread = kotlin.math.sqrt(variance)
+        if (spread < 1e-6) return 0f
+        val z = (flux - activationMean) / (spread * activationScale)
+        val strength = z.coerceIn(0.0, 1.0).toFloat()
+        if (!peakPickedActivation) return strength
+
+        // Causal peak picking: report strength on the frame the curve stops rising, and nothing on
+        // the way up or down. One frame of delay (23ms), which is well inside the tolerance a beat
+        // is judged by, in exchange for an activation that means "an onset happened here" rather
+        // than "energy is currently changing".
+        val wasRising = risingFlux
+        risingFlux = flux > previousFlux
+        val peaked = wasRising && !risingFlux
+        previousFlux = flux
+        return if (peaked) strength else 0f
     }
 
     // --- stages 2 and 3: tempo and phase ------------------------------------------------------
@@ -543,6 +635,12 @@ class PulseTracker(
 
         /** Share of a small period disagreement applied per estimate. */
         const val PERIOD_FOLLOW = 0.3
+
+        /** Frames the activation normalisation averages over. ~2s. */
+        const val ACTIVATION_WINDOW = 86
+
+        /** Spreads above the local mean that count as a full-strength onset. */
+        const val ACTIVATION_SCALE = 4.0
 
         /** How fast the steadiness measure follows a change in the estimate. */
         const val STABILITY_FOLLOW = 0.25

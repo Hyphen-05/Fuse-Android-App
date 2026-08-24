@@ -122,6 +122,71 @@ class PulseTrackerTest {
             report("bands=$v") { PulseTracker(bands = v) }
         }
 
+        println("-- decoder --")
+        report("autocorrelation") { PulseTracker(decoder = PulseTracker.Decoder.AUTOCORRELATION) }
+        report("dbn") { PulseTracker(decoder = PulseTracker.Decoder.DBN) }
+
+        println("-- dbn: tempo-change cost --")
+        for (v in listOf(20.0, 60.0, 100.0, 200.0, 400.0)) {
+            report("transitionLambda=$v") {
+                PulseTracker(decoder = PulseTracker.Decoder.DBN, transitionLambda = v)
+            }
+        }
+
+        println("-- dbn: share of a beat that is 'on the beat' --")
+        for (v in listOf(4, 8, 16, 32)) {
+            report("observationLambda=$v") {
+                PulseTracker(decoder = PulseTracker.Decoder.DBN, observationLambda = v)
+            }
+        }
+
+        println("-- dbn: activation scaling --")
+        for (v in listOf(1.0, 1.5, 2.0, 3.0)) {
+            report("activationScale=$v") {
+                PulseTracker(decoder = PulseTracker.Decoder.DBN, activationScale = v)
+            }
+        }
+        for (v in listOf(43, 86, 172, 344)) {
+            report("activationWindow=$v") {
+                PulseTracker(decoder = PulseTracker.Decoder.DBN, activationWindow = v)
+            }
+        }
+
+        println("-- dbn: peak-picked activation and scale --")
+        for (peak in listOf(false, true)) {
+            for (v in listOf(2.0, 3.0, 4.0, 6.0)) {
+                report("peak=$peak scale=$v") {
+                    PulseTracker(
+                        decoder = PulseTracker.Decoder.DBN,
+                        peakPickedActivation = peak,
+                        activationScale = v
+                    )
+                }
+            }
+        }
+
+        println("-- dbn: bands --")
+        for (v in listOf(1, 2, 4)) {
+            report("dbn bands=$v") {
+                PulseTracker(decoder = PulseTracker.Decoder.DBN, bands = v)
+            }
+        }
+
+        println("-- dbn: best of each axis, together --")
+        for (ol in listOf(8, 16, 32)) {
+            for (b in listOf(1, 2, 4)) {
+                report("dbn scale=4 obs=$ol bands=$b") {
+                    PulseTracker(
+                        decoder = PulseTracker.Decoder.DBN,
+                        peakPickedActivation = false,
+                        activationScale = 4.0,
+                        observationLambda = ol,
+                        bands = b
+                    )
+                }
+            }
+        }
+
         println("-- best of each axis, together --")
         report("tuned") {
             PulseTracker(
@@ -140,6 +205,37 @@ class PulseTrackerTest {
      * Everything is scored from [WARMUP_MS] on, for both the beats and the annotations.
      */
     private fun after(times: List<Long>, fromMs: Long) = times.filter { it >= fromMs }
+
+    /** The two decoders head to head on the whole set, on an identical onset curve. */
+    @Test
+    fun `autocorrelation against dbn on the full corpus`() {
+        val all = clips()
+        assumeTrue("GTZAN not present at $root", all.isNotEmpty())
+        println("\n=== Decoders head to head, ${all.size} clips ===")
+        println("%12s %16s %16s".format("genre", "F acf -> dbn", "P acf -> dbn"))
+        var acfF = 0.0; var dbnF = 0.0; var acfP = 0.0; var dbnP = 0.0
+        for ((genre, group) in all.groupBy { it.genre }.toSortedMap()) {
+            var gAcfF = 0.0; var gDbnF = 0.0; var gAcfP = 0.0; var gDbnP = 0.0
+            for (clip in group) {
+                val beats = after(clip.beatsMs, WARMUP_MS)
+                val acf = BeatAccuracy.score(beats, after(track(clip,
+                    PulseTracker(decoder = PulseTracker.Decoder.AUTOCORRELATION)), WARMUP_MS))
+                val dbn = BeatAccuracy.score(beats, after(track(clip,
+                    PulseTracker(decoder = PulseTracker.Decoder.DBN)), WARMUP_MS))
+                gAcfF += acf.fMeasure; gDbnF += dbn.fMeasure
+                gAcfP += acf.precision; gDbnP += dbn.precision
+            }
+            val n = group.size
+            println("%12s %7d%% ->%5d%% %7d%% ->%5d%%".format(
+                genre, BeatAccuracy.pct(gAcfF / n), BeatAccuracy.pct(gDbnF / n),
+                BeatAccuracy.pct(gAcfP / n), BeatAccuracy.pct(gDbnP / n)))
+            acfF += gAcfF; dbnF += gDbnF; acfP += gAcfP; dbnP += gDbnP
+        }
+        val n = all.size
+        println("%12s %7d%% ->%5d%% %7d%% ->%5d%%".format(
+            "ALL", BeatAccuracy.pct(acfF / n), BeatAccuracy.pct(dbnF / n),
+            BeatAccuracy.pct(acfP / n), BeatAccuracy.pct(dbnP / n)))
+    }
 
     @Test
     fun `pulse tracker accuracy on real music`() {
