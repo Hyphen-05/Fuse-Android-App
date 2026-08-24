@@ -81,14 +81,8 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
     private companion object {
         /** The shipped flat cooldown between fast-causal triggers. */
-        const val FAST_TRIGGER_COOLDOWN_MS = 150f
+        const val FAST_TRIGGER_COOLDOWN_MS = 150L
 
-        /**
-         * With tighter gating on, how much of the locked beat period must pass before the fast
-         * trigger may fire again. 0.55 is just over half a beat, so it cannot fire on the eighth
-         * between beats but still leaves room for a genuinely early beat when the tempo drifts.
-         */
-        const val FAST_TRIGGER_BEAT_FRACTION = 0.55f
     }
 
     // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
@@ -695,7 +689,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // evidence of anything in this frame.
         // The beat clock, when it is running, owns the flashing outright — see the block below.
         if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && !flashIsStale && predictiveWeight > 0.15f && musicPresent &&
-            !(state.beatClockEnabled && beatClock.isRunning)) {
+            !(state.beatClockEnabled && beatClock.isTrusted)) {
             // Peak uses the *carried* strength/confidence from the most recent detection, not
             // this frame's `result` -- detection for this exact beat hasn't arrived yet (that's
             // the whole point of scheduling ahead of it). visualizer-review-2026-07-22.md A3: only
@@ -724,6 +718,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // to clear a threshold. See [BeatClock] for the measurements that forced it. When the clock
         // is running it owns the flashing outright: both the scheduler above and the causal trigger
         // below stand down, because every one of them firing as well is the precision problem.
+        // Check the clock against the audio, not just against the tempo estimate it came from.
+        // `isBeat` describes a moment ~lookaheadMs in the past (the detector is centred), so the
+        // transient itself happened then, and that is what the clock has to be judged against.
+        if (isBeat) beatClock.observeOnset(nowMs - beatDetector.lookaheadMs)
+
         val clockTick = if (state.beatClockEnabled) {
             // The phase reference is the DP grid, not the detection frame. `BeatDetector` runs a
             // *centred* detector with a 180ms lookahead, so `isBeat` arrives about a fifth of a
@@ -734,8 +733,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         } else {
             false
         }
-        val clockRunning = state.beatClockEnabled && beatClock.isRunning
-        if (clockTick && musicPresent) {
+        // Running is not the same as right — see [BeatClock.isTrusted].
+        val clockRunning = state.beatClockEnabled && beatClock.isTrusted
+        if (clockTick && musicPresent && beatClock.isTrusted) {
             // Same peak as the predictive scheduler's: the carried strength of the last real
             // detection, so a clock tick is not louder than the beat that justified it.
             val peak = state.flashFloor +
@@ -751,31 +751,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             }
         }
 
-        // --- Tighter beat gating (Settings > Misc), measured 2026-08-21 ------------------------
-        // `BeatAccuracyTest` put the shipped mean F-measure at 60% on a ten-track corpus with known
-        // beats — and the shape of the failure was not missed beats. Recall was 69-99%; *precision*
-        // was 24-57%, and on six of ten tracks the grid the flashes best fitted was the **double**
-        // grid, at up to F=97%. The strip was flashing on the offbeats as well as the beats.
-        //
-        // Both mechanisms fire. The scheduled flash lands on the beat, and then this one fires again
-        // on the hat between beats, because its two gates barely bind: `fastWeight > 0.05` is true
-        // whenever the lock is anything short of total, and a flat 150ms cooldown is a third of a
-        // beat at 128bpm. So the tighter rule is: once the grid is confident the scheduled flash
-        // *is* the beat, and an onset arriving between beats is a hat or a syncopation.
-        //
-        // Off by default. It changes what Joe has tuned by eye, and the numbers are only a claim
-        // about a synthetic corpus until he has heard it on real music.
-        val lockedPeriodMs = if (result.bpm > 0f) 60_000f / result.bpm else 0f
-        val fastCooldownMs = if (state.beatClockEnabled && lockedPeriodMs > 0f) {
-            maxOf(FAST_TRIGGER_COOLDOWN_MS, lockedPeriodMs * FAST_TRIGGER_BEAT_FRACTION).toLong()
-        } else {
-            FAST_TRIGGER_COOLDOWN_MS.toLong()
-        }
-        val fastWeightFloor = if (state.beatClockEnabled) 0.5f else 0.05f
-
-        if (!clockRunning && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > fastCooldownMs) {
+        // The fast causal trigger keeps its shipped gates exactly. Tightening them was tried
+        // (a cooldown scaled to the locked beat period, and a much higher fastWeight floor) and
+        // measured worse on its own — mean F 61% to 50% — because with the scheduler dead it was
+        // the only thing flashing at all. What stands it down now is a *trusted* clock, and
+        // nothing else.
+        if (!clockRunning && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > FAST_TRIGGER_COOLDOWN_MS) {
             val fastWeight = 1f - predictiveWeight
-            if (fastWeight > fastWeightFloor) {
+            if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
                 // detection's strength/confidence, since mechanism 2 fires ahead of/instead of
                 // the centered detector) scaled down further by how little we trust "not locked."

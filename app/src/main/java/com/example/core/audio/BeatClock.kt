@@ -61,7 +61,37 @@ class BeatClock {
     private var disagreeSinceMs = 0L
     private var disagreeTarget = 0f
 
+    /** Rolling record of whether recent real onsets landed on a tick. */
+    private val agreementWindow = BooleanArray(AGREEMENT_WINDOW)
+    private var agreementIdx = 0
+    private var agreementCount = 0
+    private var agreementHits = 0
+
     val isRunning: Boolean get() = running
+
+    /**
+     * Whether the clock has earned the right to drive the flashing.
+     *
+     * Running and being right are different things, and conflating them was what made the first
+     * version of this worse than what it replaced: on material where the tempo estimate is wrong
+     * the clock still starts, still keeps perfect time to the wrong pulse, and — because it takes
+     * the flashing over — silences the causal trigger that was at least reacting to real onsets.
+     * Measured, that turned F=63% into 6% on the shuffle track while turning 65% into 92% on
+     * four-on-the-floor.
+     *
+     * So the clock has to be *checked against the audio*, not just against the tempo estimate it
+     * was built from. [observeOnset] feeds it real transients; this asks whether enough of them
+     * recently landed where the clock said a beat would be. When they have not, the clock keeps
+     * running and keeps being steered — it just does not get to flash, and the causal trigger
+     * carries on as before until agreement comes back.
+     */
+    val isTrusted: Boolean
+        get() = running && agreementCount >= MIN_AGREEING_ONSETS &&
+            agreementHits.toFloat() / agreementCount >= MIN_AGREEMENT
+
+    /** Share of recent onsets that landed on a tick, for diagnostics. */
+    val agreement: Float
+        get() = if (agreementCount == 0) 0f else agreementHits.toFloat() / agreementCount
 
     /**
      * Advances the clock one frame.
@@ -162,12 +192,38 @@ class BeatClock {
         return false
     }
 
+    /**
+     * Reports a real onset the detector found, so the clock can be checked against the audio.
+     *
+     * [onsetMs] must be the time the transient actually happened, not the frame the centred
+     * detector announced it on — those differ by the detector's lookahead, and comparing the
+     * announcement to the clock would read a perfectly locked clock as a fifth of a beat out.
+     */
+    fun observeOnset(onsetMs: Long) {
+        if (!running || periodMs <= 0f) return
+        val previousTick = nextTickMs - periodMs.toLong()
+        var error = (onsetMs - previousTick).toFloat()
+        while (error > periodMs / 2f) error -= periodMs
+        while (error < -periodMs / 2f) error += periodMs
+        val onBeat = abs(error) <= periodMs * ONSET_TOLERANCE
+
+        if (agreementWindow[agreementIdx] && agreementCount == AGREEMENT_WINDOW) agreementHits--
+        agreementWindow[agreementIdx] = onBeat
+        if (onBeat) agreementHits++
+        agreementIdx = (agreementIdx + 1) % AGREEMENT_WINDOW
+        if (agreementCount < AGREEMENT_WINDOW) agreementCount++
+    }
+
     /** Drops the lock. The next detection with a confident tempo starts a new one. */
     fun reset() {
         running = false
         weakSinceMs = 0L
         disagreeSinceMs = 0L
         disagreeTarget = 0f
+        agreementIdx = 0
+        agreementCount = 0
+        agreementHits = 0
+        java.util.Arrays.fill(agreementWindow, false)
         periodMs = 0f
         nextTickMs = 0L
         ticks = 0
@@ -224,5 +280,17 @@ class BeatClock {
 
         /** The soonest the next tick may be placed, as a share of a period from now. */
         const val MIN_NEXT_TICK_FRACTION = 0.5f
+
+        /** How many recent onsets the trust decision is made over. */
+        const val AGREEMENT_WINDOW = 8
+
+        /** How many of them there must be before the question can be answered at all. */
+        const val MIN_AGREEING_ONSETS = 4
+
+        /** Share of them that must have landed on a tick for the clock to drive the flashing. */
+        const val MIN_AGREEMENT = 0.5f
+
+        /** How close to a tick an onset counts as landing on it, as a share of a period. */
+        const val ONSET_TOLERANCE = 0.15f
     }
 }
