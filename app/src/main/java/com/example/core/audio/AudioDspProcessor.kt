@@ -43,7 +43,18 @@ data class AudioDspResult(
     // wire's pacing-bypass priority, AlternatingFlash's device round-robin, the P0 diagnostic log)
     // must use this instead of `isBeat`, or it fires ~200-300ms late against a mostly-decayed
     // envelope.
-    val flashFiredThisFrame: Boolean = false
+    val flashFiredThisFrame: Boolean = false,
+    // Diagnostics only — nothing in the pipeline reads these back. Added 2026-08-21 so beat
+    // accuracy can be measured against the tempo lock that is supposed to be driving it
+    // (`BeatAccuracyTest`); without them the only way to see the lock is a logcat line.
+    val bpm: Float = 0f,
+    val bpmConfidence: Float = 0f,
+    /** True on frames where the predictive scheduler, rather than the causal trigger, flashed. */
+    val predictiveFlash: Boolean = false,
+    /** Diagnostic: whether the beat clock had a tempo to keep on this frame. */
+    val beatClockRunning: Boolean = false,
+    /** Diagnostic: whether the detector offered a grid position to steer by on this frame. */
+    val hasBeatGrid: Boolean = false
 )
 
 /**
@@ -67,6 +78,18 @@ data class AudioDspResult(
  * deliberately deferred issue; the same preserve-as-is rule applies here.
  */
 class AudioDspProcessor(private val backend: AudioBackend) {
+
+    private companion object {
+        /** The shipped flat cooldown between fast-causal triggers. */
+        const val FAST_TRIGGER_COOLDOWN_MS = 150f
+
+        /**
+         * With tighter gating on, how much of the locked beat period must pass before the fast
+         * trigger may fire again. 0.55 is just over half a beat, so it cannot fire on the eighth
+         * between beats but still leaves room for a genuinely early beat when the tempo drifts.
+         */
+        const val FAST_TRIGGER_BEAT_FRACTION = 0.55f
+    }
 
     // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
     // conversion to exp(-dtMs/tau), chosen so the decay reduces to the original per-frame
@@ -214,6 +237,16 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
     private var smoothedHue = 0.0f
 
+    /**
+     * "Is there music at all", judged on spectral shape rather than level — see [MusicPresence].
+     * The three flash paths below consult it so the show stops when the song does instead of
+     * finding beats in room tone once the percentile floor has adapted down to it.
+     */
+    private val musicPresence = MusicPresence()
+
+    /** Keeps time between detections when the beat clock is on. See [BeatClock]. */
+    private val beatClock = BeatClock()
+
     // visualizer-review-2026-07-22.md C7/P5: EMA-smoothed spectral crest (peak/mean magnitude
     // ratio), consumed by the saturation calculation further down in process(). Starts at 1.0 --
     // "flat spectrum," the crestRatio value for a silent/uniform first frame.
@@ -307,6 +340,10 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         } else {
             0.0f
         }
+
+        // Read before the gate below: it zeroes quiet bins, and zeroed bins would drive the
+        // geometric mean to nothing and make room tone read as the most tonal signal there is.
+        val musicPresent = musicPresence.update(magnitude, numBins, nowMs)
 
         // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
         val threshold = noiseFloor * 1.5f
@@ -491,7 +528,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             maxCooldownMs = state.beatCooldownMs,
             now = nowMs
         )
-        val isBeat = result.isBeat && totalEnergy >= effectiveNoiseGate
+        val isBeat = result.isBeat && totalEnergy >= effectiveNoiseGate && musicPresent
         if (isBeat || nowMs - lastDiagnosticSampleMs >= 1500L) {
             if (!isBeat) lastDiagnosticSampleMs = nowMs
             DiagnosticLogger.log(
@@ -555,6 +592,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // visualizer-review-2026-07-22.md A1/A2/A4: true only on the frame a flash actually
         // rendered its peak (either trigger mechanism below), not on detection's isBeat frame.
         var flashFiredThisFrame = false
+        var predictiveFlashThisFrame = false
 
         // Relax the hue nudge toward 0 before this frame's triggers can kick it again, so a kick
         // always lands at full size. Keyed to the flash triggers rather than isBeat on purpose:
@@ -572,8 +610,27 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // (nextPredictedBeatMs, causalFlux/causalIsCandidate) -- no detection/tuning math changed.
         val predictiveWeight = result.bpmConfidence.coerceIn(0f, 1f)
 
+        // visualizer-review-2026-07-22.md C5: for ~2s after a macro-dynamics drop fires, both
+        // trigger mechanisms get a temporarily widened dynamic range -- part of the drop "moment"
+        // alongside the guaranteed anchor jump and white blast above.
+        // Scaled by the musical context so beats hit harder in a chorus than in an intro. Only
+        // the variable range is scaled — `flashFloor`'s "every detected beat gets a visible pulse"
+        // guarantee (A3) stays whole, so restraint never becomes invisibility.
+        val dropBoostedFlashRange =
+            (if (nowMs < dropFlashRangeBoostUntilMs) state.flashRange * 1.5f else state.flashRange) *
+                (dynamics?.intensity ?: 1f)
+
         // Mechanism 1: re-derive the schedule only when the grid has actually advanced to a new
         // upcoming beat, not every frame (nextPredictedBeatMs is stable between grid rebuilds).
+        //
+        // **Measured 2026-08-21 and left exactly as it is.** `nextPredictedBeatMs` is the first grid
+        // beat still ahead of `now`, so on the frame that `now` reaches beat B it has already rolled
+        // over to B+1 — this re-arms before the firing block below can act, and with the default
+        // `flashTimingOffsetMs` of 0 the scheduler therefore fires **0% of all flashes** (0% at 0ms,
+        // 8-41% at any non-zero offset; `BeatAccuracyTest`). Everything Joe sees comes from the fast
+        // causal trigger. Firing before re-arming *does* wake the mechanism up, and it measured
+        // **worse** overall — mean F-measure 61% to 55% — because both paths then flash and
+        // precision falls further. The fix is not the ordering; see `BeatClock`.
         val predictedBeatMs = result.nextPredictedBeatMs
         if (predictedBeatMs != null && predictedBeatMs != scheduledForBeatMs) {
             scheduledForBeatMs = predictedBeatMs
@@ -587,44 +644,6 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             scheduledFlashAtMs = 0L
             scheduledFlashFired = false
             scheduledFlashSettled = true
-        }
-
-        // visualizer-review-2026-07-22.md C5: for ~2s after a macro-dynamics drop fires, both
-        // trigger mechanisms get a temporarily widened dynamic range -- part of the drop "moment"
-        // alongside the guaranteed anchor jump and white blast above.
-        // Scaled by the musical context so beats hit harder in a chorus than in an intro. Only
-        // the variable range is scaled — `flashFloor`'s "every detected beat gets a visible pulse"
-        // guarantee (A3) stays whole, so restraint never becomes invisibility.
-        val dropBoostedFlashRange =
-            (if (nowMs < dropFlashRangeBoostUntilMs) state.flashRange * 1.5f else state.flashRange) *
-                (dynamics?.intensity ?: 1f)
-
-        // visualizer-review-2026-07-22.md B1: bound how late a scheduled flash is allowed to fire.
-        // Without this, if predictiveWeight only crosses 0.15 well after scheduledFlashAtMs (grid
-        // jitter, a confidence dip that recovers late), the flash fires immediately at that later
-        // moment instead of being skipped -- unbounded lateness, not just unbounded earliness.
-        val flashIsStale = scheduledFlashAtMs != 0L && (nowMs - scheduledFlashAtMs) > 80L
-        if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && !flashIsStale && predictiveWeight > 0.15f) {
-            // Peak uses the *carried* strength/confidence from the most recent detection, not
-            // this frame's `result` -- detection for this exact beat hasn't arrived yet (that's
-            // the whole point of scheduling ahead of it). visualizer-review-2026-07-22.md A3: only
-            // the variable flashRange portion is scaled by predictiveWeight -- the flashFloor
-            // guarantee stays whole once a flash decides to fire at all, so a mid-confidence song
-            // (bpmConfidence ~0.5, or the first several seconds of any song before lock) doesn't
-            // get a systematically halved flash. Previously the whole sum was scaled, silently
-            // breaking the item-16 "every detected beat gets a minimum visible pulse" guarantee.
-            val peak = state.flashFloor + (dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
-            if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
-                scheduledFlashFired = true
-                flashFiredThisFrame = true
-                applyHueNudge(state.hueBeatNudgeDeg)
-                scheduledFlashConfirmDeadlineMs = nowMs + 150L
-                if (useWhiteFlash) {
-                    val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
-                    whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
-                }
-                DiagnosticLogger.log("FlashSchedule", "fired mechanism=predictive backend=${backend.name} atMs=$nowMs targetMs=$scheduledFlashAtMs peak=$peak weight=$predictiveWeight")
-            }
         }
 
         // Confirmation/correction: a real detected beat arriving while a scheduled flash awaits
@@ -664,9 +683,99 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // mechanism ever is), and ordinary statistical noise in near-zero flux readings routinely
         // crosses its own adaptive threshold by chance. Requiring real absolute energy first closes
         // that hole without touching the relative onset math itself.
-        if (result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && nowMs - lastFastTriggerFlashAtMs > 150L) {
+        // visualizer-review-2026-07-22.md B1: bound how late a scheduled flash is allowed to fire.
+        // Without this, if predictiveWeight only crosses 0.15 well after scheduledFlashAtMs (grid
+        // jitter, a confidence dip that recovers late), the flash fires immediately at that later
+        // moment instead of being skipped -- unbounded lateness, not just unbounded earliness.
+        val flashIsStale = scheduledFlashAtMs != 0L && (nowMs - scheduledFlashAtMs) > 80L
+        // `musicPresent` is what stops this firing after the song ends. The grid extrapolates
+        // forward by whole periods for as long as the lock survives, and the lock is computed from
+        // an 8s flux history, so it outlives the audio by several seconds — and unlike the other
+        // two paths this one had no energy check of any kind, because a prediction is by design not
+        // evidence of anything in this frame.
+        // The beat clock, when it is running, owns the flashing outright — see the block below.
+        if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && !flashIsStale && predictiveWeight > 0.15f && musicPresent &&
+            !(state.beatClockEnabled && beatClock.isRunning)) {
+            // Peak uses the *carried* strength/confidence from the most recent detection, not
+            // this frame's `result` -- detection for this exact beat hasn't arrived yet (that's
+            // the whole point of scheduling ahead of it). visualizer-review-2026-07-22.md A3: only
+            // the variable flashRange portion is scaled by predictiveWeight -- the flashFloor
+            // guarantee stays whole once a flash decides to fire at all, so a mid-confidence song
+            // (bpmConfidence ~0.5, or the first several seconds of any song before lock) doesn't
+            // get a systematically halved flash. Previously the whole sum was scaled, silently
+            // breaking the item-16 "every detected beat gets a minimum visible pulse" guarantee.
+            val peak = state.flashFloor + (dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence) * predictiveWeight
+            if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
+                scheduledFlashFired = true
+                flashFiredThisFrame = true
+                predictiveFlashThisFrame = true
+                applyHueNudge(state.hueBeatNudgeDeg)
+                scheduledFlashConfirmDeadlineMs = nowMs + 150L
+                if (useWhiteFlash) {
+                    val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
+                    whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+                }
+                DiagnosticLogger.log("FlashSchedule", "fired mechanism=predictive backend=${backend.name} atMs=$nowMs targetMs=$scheduledFlashAtMs peak=$peak weight=$predictiveWeight")
+            }
+        }
+
+        // --- Beat clock (Settings > Misc), measured 2026-08-21 ---------------------------------
+        // One flash per beat, kept by a phase-locked clock rather than by whichever onset happened
+        // to clear a threshold. See [BeatClock] for the measurements that forced it. When the clock
+        // is running it owns the flashing outright: both the scheduler above and the causal trigger
+        // below stand down, because every one of them firing as well is the precision problem.
+        val clockTick = if (state.beatClockEnabled) {
+            // The phase reference is the DP grid, not the detection frame. `BeatDetector` runs a
+            // *centred* detector with a 180ms lookahead, so `isBeat` arrives about a fifth of a
+            // second after the beat it describes — seeding a clock from it puts every tick a fifth
+            // of a beat late at 128bpm, which measured as recall ~50% with the ticks landing
+            // between the beats. `nextPredictedBeatMs` is expressed in the music's own time.
+            beatClock.update(nowMs, result.bpm, result.bpmConfidence, result.nextPredictedBeatMs)
+        } else {
+            false
+        }
+        val clockRunning = state.beatClockEnabled && beatClock.isRunning
+        if (clockTick && musicPresent) {
+            // Same peak as the predictive scheduler's: the carried strength of the last real
+            // detection, so a clock tick is not louder than the beat that justified it.
+            val peak = state.flashFloor +
+                dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence
+            if (triggerFlash(nowMs, peak, effectiveBeatFlashDecayMs)) {
+                flashFiredThisFrame = true
+                predictiveFlashThisFrame = true
+                applyHueNudge(state.hueBeatNudgeDeg)
+                if (useWhiteFlash) {
+                    val depth = (carriedFlashStrength * carriedFlashConfidence).coerceIn(0f, 1f)
+                    whiteHotFlashOffset = (1f - depth).coerceIn(0f, 1f)
+                }
+            }
+        }
+
+        // --- Tighter beat gating (Settings > Misc), measured 2026-08-21 ------------------------
+        // `BeatAccuracyTest` put the shipped mean F-measure at 60% on a ten-track corpus with known
+        // beats — and the shape of the failure was not missed beats. Recall was 69-99%; *precision*
+        // was 24-57%, and on six of ten tracks the grid the flashes best fitted was the **double**
+        // grid, at up to F=97%. The strip was flashing on the offbeats as well as the beats.
+        //
+        // Both mechanisms fire. The scheduled flash lands on the beat, and then this one fires again
+        // on the hat between beats, because its two gates barely bind: `fastWeight > 0.05` is true
+        // whenever the lock is anything short of total, and a flat 150ms cooldown is a third of a
+        // beat at 128bpm. So the tighter rule is: once the grid is confident the scheduled flash
+        // *is* the beat, and an onset arriving between beats is a hat or a syncopation.
+        //
+        // Off by default. It changes what Joe has tuned by eye, and the numbers are only a claim
+        // about a synthetic corpus until he has heard it on real music.
+        val lockedPeriodMs = if (result.bpm > 0f) 60_000f / result.bpm else 0f
+        val fastCooldownMs = if (state.beatClockEnabled && lockedPeriodMs > 0f) {
+            maxOf(FAST_TRIGGER_COOLDOWN_MS, lockedPeriodMs * FAST_TRIGGER_BEAT_FRACTION).toLong()
+        } else {
+            FAST_TRIGGER_COOLDOWN_MS.toLong()
+        }
+        val fastWeightFloor = if (state.beatClockEnabled) 0.5f else 0.05f
+
+        if (!clockRunning && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > fastCooldownMs) {
             val fastWeight = 1f - predictiveWeight
-            if (fastWeight > 0.05f) {
+            if (fastWeight > fastWeightFloor) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
                 // detection's strength/confidence, since mechanism 2 fires ahead of/instead of
                 // the centered detector) scaled down further by how little we trust "not locked."
@@ -999,7 +1108,12 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             isBeat = isBeat,
             bassLevel = bc,
             midHighLevel = midContribution,
-            flashFiredThisFrame = flashFiredThisFrame
+            flashFiredThisFrame = flashFiredThisFrame,
+            bpm = result.bpm,
+            bpmConfidence = result.bpmConfidence,
+            predictiveFlash = predictiveFlashThisFrame,
+            beatClockRunning = clockRunning,
+            hasBeatGrid = result.nextPredictedBeatMs != null
         )
     }
 

@@ -260,14 +260,14 @@ class DeviceWriteManager(
             if (!success) {
                 // Forget the dedupe baseline: this colour did not reach the radio, so an identical
                 // resend is a genuine retry rather than a redundant frame.
-                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
+                if (WriteDedupe.colourBaselineOf(cmdToWrite.bytes) != null) lastIssuedColour = null
                 Log.w("BleWriteQueue", "writeCharacteristic() returned false for $address")
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() returned false (write failure) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
                 )
             } else {
-                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = cmdToWrite.bytes
+                WriteDedupe.colourBaselineOf(cmdToWrite.bytes)?.let { lastIssuedColour = it }
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() initiated (write success) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
@@ -275,7 +275,7 @@ class DeviceWriteManager(
             }
         } catch (e: Exception) {
             isWriting = false
-            if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
+            if (WriteDedupe.colourBaselineOf(cmdToWrite.bytes) != null) lastIssuedColour = null
             com.example.DiagnosticLogger.log(
                 "DeviceWriteManager",
                 "writeCharacteristic() Exception for $address: ${android.util.Log.getStackTraceString(e)}. (${diagAttribution(address)})"

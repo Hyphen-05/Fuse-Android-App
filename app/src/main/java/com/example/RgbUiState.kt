@@ -167,6 +167,11 @@ data class AudioSettingsState(
      * dynamics, so it is Joe's to switch on and judge. See [com.example.core.audio.MusicalContext].
      */
     val musicalDynamicsEnabled: Boolean = false,
+    /**
+     * Flashes on a phase-locked beat clock instead of on whichever onset clears a threshold. See
+     * [com.example.core.audio.BeatClock] and `BeatAccuracyTest`. Off by default.
+     */
+    val beatClockEnabled: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)

@@ -166,6 +166,10 @@ class RgbControllerViewModel(
         private val deviceStateStore = DeviceStateStore(application)
     private val deviceAutomationMode = java.util.concurrent.ConcurrentHashMap<String, AutomationType>()
     private val deviceRestoredFeatureName = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** The mode that was running when an automation took over, so it can be put back. */
+    private val deviceRestoredModeIndex = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    /** Whether a colour had ever been chosen at all — see the bright-pink note in saveDeviceState. */
+    private val deviceRestoredHasColour = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     enum class AutomationType { AUDIO, AMBIANCE }
     
         
@@ -739,8 +743,20 @@ class RgbControllerViewModel(
             val brightness = devState?.brightness ?: s.coreControl.brightness
             val power = devState?.isPowerOn ?: s.coreControl.isPowerOn
 
+            // Remember the feature *as it was*, not squashed to "Colour". This used to store
+            // "Colour" for anything that was not CCT, which is why restoreDeviceState below had
+            // nothing to restore a running mode with — and why it fell back to writing r/g/b that,
+            // on an install where the colour picker has never been touched, are still the
+            // (255, 0, 128) default. That default is the "bright pink" Joe reported on 2026-08-20:
+            // always pink, never another colour, because it is a constant and not a stale reading.
             val featureName = devState?.activeFeatureName ?: s.coreControl.activeFeatureName
-            deviceRestoredFeatureName[macAddress] = if (featureName == "Colour" || featureName == "CCT") featureName else "Colour"
+            deviceRestoredFeatureName[macAddress] = featureName
+            deviceRestoredModeIndex[macAddress] = devState?.modeIndex ?: s.coreControl.modeIndex
+            // Whether a colour has ever actually been chosen in this install. A device entry only
+            // exists once something has driven it, and the "red" pref is written by SetColor and
+            // SetWarmth alike, so its absence means nothing has ever picked one.
+            deviceRestoredHasColour[macAddress] =
+                devState != null || prefsRepo.getAppStatePrefInt("red", -1) >= 0
             
             deviceAutomationMode[macAddress] = mode
             
@@ -766,13 +782,13 @@ class RgbControllerViewModel(
                 if (state != null) {
                     val powerCmd = DuoCoProtocol.createPowerCommand(state.power)
                     val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.brightness)
-                    val colorCmd = DuoCoProtocol.createColorCommand(state.red, state.green, state.blue)
-                    
+
                     sendCommandToDeviceDirect(macAddress, powerCmd)
                     sendCommandToDeviceDirect(macAddress, brightnessCmd)
-                    sendCommandToDeviceDirect(macAddress, colorCmd)
-                    
+
                     val memoryFeatureName = deviceRestoredFeatureName.remove(macAddress)
+                    val restoredModeIndex = deviceRestoredModeIndex.remove(macAddress) ?: 0
+                    val hasColour = deviceRestoredHasColour.remove(macAddress) ?: true
                     val restoredFeatureName = if (memoryFeatureName != null) {
                         memoryFeatureName
                     } else {
@@ -780,6 +796,32 @@ class RgbControllerViewModel(
                         val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
                         val isCct = rgb[0] == state.red && rgb[1] == state.green && rgb[2] == state.blue
                         if (isCct) "CCT" else "Colour"
+                    }
+
+                    // Restore what was actually showing. Same shape as the per-device restore in
+                    // CoreControlsReducer's ToggleActiveControl branch, which has always done this
+                    // correctly — this path was the one that only ever knew how to send a colour.
+                    when {
+                        restoredFeatureName == "CCT" -> {
+                            val kelvin = com.example.ui.components.ColorUtils.warmthToKelvin(state.warmth)
+                            val rgb = com.example.ui.components.ColorUtils.convertKelvinToRgb(kelvin)
+                            sendCommandToDeviceDirect(macAddress, DuoCoProtocol.createColorCommand(rgb[0], rgb[1], rgb[2]))
+                        }
+                        restoredFeatureName == "Colour" -> {
+                            if (hasColour) {
+                                sendCommandToDeviceDirect(macAddress, DuoCoProtocol.createColorCommand(state.red, state.green, state.blue))
+                            } else {
+                                // Writing the default here is exactly the bright-pink bug. Nothing
+                                // has ever chosen a colour, so there is nothing to go back to.
+                                addLog("Restore: no colour has ever been chosen, leaving $macAddress as it is")
+                            }
+                        }
+                        restoredFeatureName.startsWith("Audio") || restoredFeatureName.startsWith("Ambiance") -> {
+                            // Nothing to send — the feature that was running is the one being stopped.
+                        }
+                        else -> {
+                            sendCommandToDeviceDirect(macAddress, DuoCoProtocol.createModeCommand(restoredModeIndex))
+                        }
                     }
                     
                     _uiState.update { current ->
