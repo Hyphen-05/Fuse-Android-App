@@ -22,10 +22,6 @@ interface AppPreferencesRepository {
     fun getAmbiancePrefString(key: String, defValue: String?): String?
     fun putAmbiancePrefString(key: String, value: String)
 
-    fun getPacingPrefInt(key: String, defValue: Int): Int
-    fun putPacingPrefInt(key: String, value: Int)
-    fun clearPacingPrefs()
-
     fun getProtocolOverrideAll(): Map<String, *>
     fun removeProtocolOverride(key: String)
     fun putProtocolOverrideString(key: String, value: String)

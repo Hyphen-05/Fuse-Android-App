@@ -10,14 +10,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Pacing-aware BLE write queue with a stall watchdog for a single device.
+ * Completion-gated BLE write queue with a stall watchdog for a single device.
+ *
+ * There is no pacing here any more. The artificial wait went in Tier E Phase 3 step 2 (2026-08-19)
+ * and the configuration that fed it went in step 4: [tryWrite] refuses to send while [isWriting]
+ * and [onWriteCompleted] immediately tries again, so the radio is the pacer. What the link is
+ * actually achieving is measured — [inFlightMsEstimate] — rather than configured.
  *
  * Extracted verbatim (Phase 6, part BLE) from the former inner class
  * `RgbControllerViewModel.DeviceWriteManager` — the queue/pacing/watchdog logic is byte-for-byte
  * identical. The only change is how it obtains its dependencies: instead of reaching into the
  * enclosing ViewModel for prefs/telemetry/calibration, it now takes them as constructor lambdas so
  * this class can live in `hardware/ble/` decoupled from `presentation`:
- *  - [pacingMsProvider] replaces the direct `prefsRepo.getPacingPrefInt(address, 50)` read.
  *  - [onFpsUpdate] replaces the direct `_telemetry.update { ... deviceAchievedFps ... }` write.
  *  - [calibrate] replaces the direct `processCommandWithCalibration(address, command)` call.
  *  - [diagAttribution] replaces the direct `getDiagAttribution(address)` call used in log strings.
@@ -31,25 +35,21 @@ class DeviceWriteManager(
     val gatt: BluetoothGatt,
     val charac: BluetoothGattCharacteristic,
     private val connectionScope: CoroutineScope,
-    private val pacingMsProvider: () -> Int,
     private val calibrate: (String, ByteArray) -> ByteArray,
-    private val onFpsUpdate: (String, Int) -> Unit,
+    private val onFpsUpdate: (String, Int, Double) -> Unit,
     private val diagAttribution: (String) -> String
 ) {
-    // Queued command plus the peak-hold/pacing-bypass metadata it was enqueued with
+    // Queued command plus the peak-hold metadata it was enqueued with
     // (visualizer-review-2026-07-21.md P2). [priority] compares only against other queued
     // commands of the *same type byte* (index 2) — see [updateCommand].
-    // [bypassPacing] is inert since the pacing wait was removed — there is no wait left to skip.
-    // It stays plumbed through because the audio path passes it and step 4 of Tier E Phase 3 takes
-    // the whole pacing configuration out in one piece; deleting the parameter alone would churn the
-    // transport interface twice. [priority] is unaffected and still live: it is the peak-hold rule.
-    private data class QueuedCommand(val bytes: ByteArray, val priority: Float, val bypassPacing: Boolean)
+    // The `bypassPacing` flag that used to ride along here went with the pacing configuration in
+    // Tier E Phase 3 step 4; it had been inert since step 2 removed the wait it skipped.
+    private data class QueuedCommand(val bytes: ByteArray, val priority: Float)
 
     private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<QueuedCommand>()
     @Volatile var isWriting = false
     @Volatile var lastWriteTime = 0L
     val writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-    var currentPacingMs = pacingMsProvider()
 
     // Incremented from the GATT callback thread, drained from the sampler coroutine below.
     private val framesSent = java.util.concurrent.atomic.AtomicInteger(0)
@@ -90,15 +90,15 @@ class DeviceWriteManager(
             delay(1000L)
             val fps = framesSent.getAndSet(0)
             val skipped = identicalSkipped.getAndSet(0)
-            onFpsUpdate(address, fps)
+            onFpsUpdate(address, fps, inFlightMsEstimate)
             if (fps > 0 || skipped > 0) {
-                // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
+                // P0 (visualizer-review-2026-07-21.md): what the link actually settles at per
                 // device during a real session. `identicalSkipped` rides along because the ratio of
                 // skipped to sent is the direct read on how much of a preset's computed output the
                 // byte grid cannot express — 97% on a slow fade, in simulation.
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
-                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps, " +
+                    "Link settled: address=$address, fps=$fps, " +
                         "inFlightMs=${"%.1f".format(inFlightMsEstimate)}, identicalSkipped=$skipped. " +
                         "(${diagAttribution(address)})"
                 )
@@ -116,16 +116,15 @@ class DeviceWriteManager(
     }
 
     /**
-     * [priority] and [bypassPacing] implement the peak-hold/peak-priority write rule
+     * [priority] implements the peak-hold/peak-priority write rule
      * (visualizer-review-2026-07-21.md P2): previously this dequeued *any* existing same-type
      * command in favor of the latest one, so a computed flash peak could be silently overwritten
-     * by the very next (lower-value) DSP frame before the pacing timer ever let it write. Now, a
+     * by the very next (lower-value) DSP frame before the radio ever let it write. Now, a
      * still-queued command of the same type is only replaced if its priority is <= the new one's —
      * a higher-priority command that hasn't been written yet survives lower-priority frames until
-     * it's actually sent, at which point normal latest-wins resumes. [bypassPacing] marks the exact
-     * frame a flash fires so [tryWrite] can skip the pacing wait for that one write.
+     * it's actually sent, at which point normal latest-wins resumes.
      */
-    fun updateCommand(command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false) {
+    fun updateCommand(command: ByteArray, priority: Float = Float.MAX_VALUE) {
         val processed = calibrate(address, command)
 
         // A colour identical to the one already on the strip changes nothing, and enqueuing it would
@@ -164,11 +163,11 @@ class DeviceWriteManager(
                 "Backpressure triggered (Queue size > 20)! Polled/dropped command. address=$address. (${diagAttribution(address)})"
             )
         }
-        commandQueue.offer(QueuedCommand(processed, priority, bypassPacing))
+        commandQueue.offer(QueuedCommand(processed, priority))
         val qSizeAfter = commandQueue.size
         com.example.DiagnosticLogger.log(
             "DeviceWriteManager",
-            "Write enqueued: address=$address, cmdHex=${processed.joinToString("") { String.format("%02X", it) }}, priority=$priority, bypassPacing=$bypassPacing, queueSizeBefore=$qSizeBefore, queueSizeAfter=$qSizeAfter. (${diagAttribution(address)})"
+            "Write enqueued: address=$address, cmdHex=${processed.joinToString("") { String.format("%02X", it) }}, priority=$priority, queueSizeBefore=$qSizeBefore, queueSizeAfter=$qSizeAfter. (${diagAttribution(address)})"
         )
 
         val now = System.currentTimeMillis()
@@ -226,16 +225,15 @@ class DeviceWriteManager(
         // The artificial pacing wait used to sit here (Tier E Phase 3 step 2, removed 2026-08-19).
         //
         // The radio is already the pacer: this method refuses to send while [isWriting], and
-        // [onWriteCompleted] immediately tries again, so writes are completion-gated whatever
-        // `currentPacingMs` says. The extra delay did not slow the link down — it decided how many
-        // computed frames were thrown away *before* the radio was even busy. Measurement (2026-08-16)
-        // put a write at ~4.6ms per strip, so any pacing below that was configuring nothing, and the
-        // 15-minute sustained run on 2026-08-19 came back clean with full coverage, which is what
-        // unblocked removing it.
+        // [onWriteCompleted] immediately tries again, so writes are completion-gated. The extra
+        // delay did not slow the link down — it decided how many computed frames were thrown away
+        // *before* the radio was even busy. Measurement (2026-08-16) put a write at ~4.6ms per
+        // strip, so any pacing below that was configuring nothing, and the 15-minute sustained run
+        // on 2026-08-19 came back clean with full coverage, which is what unblocked removing it.
         //
-        // `currentPacingMs` survives because it still throttles *upstream capture*:
-        // AmbianceProcessor caps its capture interval with it. That job becomes an explicit frame
-        // cap in step 3; until then the pref is still read, just no longer stacked on the radio.
+        // `currentPacingMs` outlived the wait only to throttle upstream capture; step 3 replaced
+        // that with AmbianceProcessor's own AMBIANCE_MIN_INTERVAL_MS, and step 4 removed the
+        // field, the pref and the UI behind it.
         isWriting = true
         val cmdToWrite = commandQueue.poll()
         if (cmdToWrite == null) {

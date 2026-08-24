@@ -20,7 +20,6 @@ data class ConnectivityState(
     val isScanning: Boolean = false,
     val scannedDevices: List<ScannedRgbDevice> = emptyList(),
     val deviceConnectionStates: Map<String, BleConnectionState> = emptyMap(),
-    val devicePacingMs: Map<String, Int> = emptyMap(),
     val isTestPatternRunning: Map<String, Boolean> = emptyMap(),
     val deviceStatesMap: Map<String, ActiveDeviceState> = emptyMap()
 )
@@ -264,7 +263,11 @@ data class TelemetryState(
     val musicAmplitudes: List<Float> = emptyList(),
     val visualizerHue: Float = 0.0f,
     val logMessages: List<String> = emptyList(),
-    val deviceAchievedFps: Map<String, Int> = emptyMap()
+    val deviceAchievedFps: Map<String, Int> = emptyMap(),
+    // Measured issued -> onCharacteristicWrite EMA per device (DeviceWriteManager.inFlightMsEstimate).
+    // Replaced the pacing pref as the number the Settings screen shows: pacing was a stored guess,
+    // this is what the link is doing now. Tier E Phase 3 step 4.
+    val deviceInFlightMs: Map<String, Double> = emptyMap()
 )
 
 // DB/prefs-backed reference data — category (b), each its own StateFlow,
@@ -423,7 +426,6 @@ sealed interface RgbIntent {
     data class SaveCctCorrectionProfile(val profile: CctCorrectionProfile) : RgbIntent
     data class DeleteCctCorrectionProfile(val address: String) : RgbIntent
     data class ToggleTestPattern(val address: String) : RgbIntent
-    data class SetDevicePacing(val address: String, val ms: Int) : RgbIntent
 
     // --- Utility ---
     object PlayClick : RgbIntent // verified: fun playClick() (line 5284)

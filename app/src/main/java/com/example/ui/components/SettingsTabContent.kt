@@ -249,7 +249,7 @@ fun LazyListScope.SettingsTabContent(
             initiallyExpanded = false
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                BLEPacingCard(state, telemetry, viewModel)
+                LinkDiagnosticsCard(state, telemetry, viewModel)
                 
                 val calibrateSliderInteractionSource = remember { MutableInteractionSource() }
                 ExpandableCategoryCard(

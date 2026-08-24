@@ -299,11 +299,16 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         frame: AudioCaptureFrame,
         settings: AudioSettingsState,
         nowMs: Long,
-        // The slowest currentPacingMs among the devices this frame will be broadcast to, or 0 if
-        // unknown/no connected devices yet. Used only to floor the effective flash-decay window
-        // (visualizer-review-2026-07-21.md P2) — a percussive preset's decay envelope must span at
-        // least a couple of wire writes, or the whole flash can land in the gap between two paced
-        // writes and never be visible at all. 0 means "don't floor," not "floor to zero."
+        // Basis for the flash-decay floor, or 0 if there is nothing connected to floor against.
+        // Used only to floor the effective flash-decay window (visualizer-review-2026-07-21.md P2)
+        // — a percussive preset's decay envelope must span at least a couple of wire writes, or the
+        // whole flash can land in the gap between two writes and never be visible at all. 0 means
+        // "don't floor," not "floor to zero."
+        //
+        // This was the slowest configured pacing across the target devices until Tier E Phase 3
+        // step 4 removed the configuration; callers now pass [FLASH_DECAY_FLOOR_BASIS_MS], which
+        // is the value that read effectively resolved to. Still a parameter rather than a constant
+        // read in here because the feel harness and the GTZAN tests set it per run.
         effectivePacingMs: Int = 0
     ): AudioDspResult? {
         val numBins = frame.numBins
@@ -1188,3 +1193,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         hueNudgeOffset = (hueNudgeOffset - degrees).coerceIn(-2f * degrees, 2f * degrees)
     }
 }
+
+/**
+ * What [AudioDspProcessor.process]'s `effectivePacingMs` is fed in the app (the feel harness and
+ * the GTZAN tests pass their own). 50 because that is what the removed pacing pref actually held:
+ * the moto stores 50 and 50 was the provider default, so this keeps the flash-decay floor exactly
+ * where it was rather than re-tuning flash feel as a side effect of Tier E Phase 3 step 4.
+ *
+ * Deliberately *not* the measured wire interval (~4.6ms per strip, 8.7ms with two). Using the real
+ * number would cut the floor from 125ms to ~12ms, which is a visible change to how flashes look —
+ * worth trying, but on hardware and behind Joe's eyes, not inside a removal.
+ */
+internal const val FLASH_DECAY_FLOOR_BASIS_MS = 50

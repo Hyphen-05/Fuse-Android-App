@@ -302,8 +302,7 @@ class RgbControllerViewModel(
         val (newState, calibrationEffects) = com.example.presentation.calibrationFlowReducer(
             state = audioState,
             intent = intent,
-            savedCalibrationDelayMs = savedCalibrationDelayMs,
-            connectedManagerAddresses = bleGattTransport.deviceWriteManagerAddresses()
+            savedCalibrationDelayMs = savedCalibrationDelayMs
         )
         _uiState.value = newState
         coreEffects.forEach { executeCoreSideEffect(it) }
@@ -317,8 +316,6 @@ class RgbControllerViewModel(
             is com.example.presentation.CalibrationSideEffect.SaveCalibrationDelayPrefInt -> prefsRepo.putCalibrationDelayPrefInt(effect.deviceKey, effect.value)
             com.example.presentation.CalibrationSideEffect.ClearCalibrationDelayPrefs -> prefsRepo.clearCalibrationDelayPrefs()
             is com.example.presentation.CalibrationSideEffect.SaveCalibrationPrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
-            is com.example.presentation.CalibrationSideEffect.SavePacingPrefInt -> prefsRepo.putPacingPrefInt(effect.address, effect.value)
-            com.example.presentation.CalibrationSideEffect.ClearPacingPrefs -> prefsRepo.clearPacingPrefs()
             is com.example.presentation.CalibrationSideEffect.SaveCctCorrectionProfile -> {
                 prefsRepo.putCctCalibrationString(effect.profile.macAddress, effect.profile.toJson())
                 loadCctCalibrations()
@@ -342,12 +339,6 @@ class RgbControllerViewModel(
                     repository.deleteColorCalibration(effect.macAddress)
                     addLog("Deleted Color Calibration Profile for ${effect.macAddress}")
                 }
-            }
-            is com.example.presentation.CalibrationSideEffect.SetDeviceManagerPacing -> {
-                bleGattTransport.setPacing(effect.address, effect.ms)
-            }
-            com.example.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
-                bleGattTransport.resetAllPacing(100)
             }
             // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
             // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
@@ -572,10 +563,6 @@ class RgbControllerViewModel(
 
     fun toggleTestPattern(address: String) {
         dispatch(RgbIntent.ToggleTestPattern(address))
-    }
-
-    fun setDevicePacing(address: String, ms: Int) {
-        dispatch(RgbIntent.SetDevicePacing(address, ms))
     }
 
     private val _byteOverrides = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -865,10 +852,14 @@ class RgbControllerViewModel(
             onLog = { message -> addLog(message) }
         )
         bleGattTransport.registerWriteHooks(
-            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, 50) },
             calibrate = { address, command -> processCommandWithCalibration(address, command) },
-            onFpsUpdate = { address, fps ->
-                _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
+            onFpsUpdate = { address, fps, inFlightMs ->
+                _telemetry.update { s ->
+                    s.copy(
+                        deviceAchievedFps = s.deviceAchievedFps + (address to fps),
+                        deviceInFlightMs = s.deviceInFlightMs + (address to inFlightMs)
+                    )
+                }
             },
             diagAttribution = { address -> getDiagAttribution(address) },
             // Read off _uiState rather than prefs: this runs on every single write, and a
@@ -1823,8 +1814,7 @@ class RgbControllerViewModel(
                     deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
                     connectionState = BleConnectionState.CONNECTED,
                     connectedDeviceAddress = address,
-                    connectedDeviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias ?: state.connectivity.scannedDevices.find { it.address == address }?.name ?: "Unknown Device",
-                    devicePacingMs = state.connectivity.devicePacingMs + (address to reg.pacingMs)
+                    connectedDeviceName = state.connectivity.scannedDevices.find { it.address == address }?.alias ?: state.connectivity.scannedDevices.find { it.address == address }?.name ?: "Unknown Device"
                 )
             )
         }
@@ -1982,11 +1972,11 @@ class RgbControllerViewModel(
                     addLog("[Simulated Broadcast] Sent to $address: $hexStr")
                 }
             } else {
-                // visualizer-review-2026-07-22.md A1: bypassPacing used to key on result.isBeat,
-                // which fires after the flash-peak frame under P1's predictive scheduling -- the
-                // pacing-skip landed on an already-decayed frame instead of the one carrying the
-                // peak, defeating P2's wire-priority fix for exactly the flashes P1 made primary.
-                bleGattTransport.writeCommand(address, cmd, priority = result.value, bypassPacing = result.flashFiredThisFrame)
+                // The `bypassPacing = result.flashFiredThisFrame` argument that used to ride here
+                // went with the pacing configuration in Tier E Phase 3 step 4. It had been inert
+                // since step 2 removed the wait it skipped, and the peak it was protecting is
+                // carried by `priority` regardless (P2's wire-priority rule).
+                bleGattTransport.writeCommand(address, cmd, priority = result.value)
             }
         }
     }
@@ -1995,10 +1985,24 @@ class RgbControllerViewModel(
         return savedDevices.value.find { it.macAddress == address }?.deviceRole ?: "Mirror"
     }
 
+    /**
+     * The basis for `AudioDspProcessor`'s flash-decay floor. Was the slowest configured pacing
+     * across the controlled devices; pacing stopped being configurable in Tier E Phase 3 step 4,
+     * so it is now the constant that read effectively resolved to.
+     *
+     * `FLASH_DECAY_FLOOR_BASIS_MS` is 50 because that is what the pref actually held — the moto
+     * stores `slowest_connected_pacing = 50` and 50 was the provider default, so this preserves
+     * the previous behaviour exactly rather than re-tuning flash feel as a side effect of a
+     * removal. It is deliberately *not* the measured wire interval (~4.6ms per strip): using the
+     * real number would shorten the floor by an order of magnitude, which is a change to how
+     * flashes look and therefore Joe's call on hardware, not a refactor's.
+     *
+     * Still 0 — "no floor" — when nothing is connected, exactly as before.
+     */
     private fun currentEffectivePacingMs(): Int {
         val addresses = getCurrentlyControlledDeviceAddresses()
         if (addresses.isEmpty()) return 0
-        return addresses.maxOf { bleGattTransport.getPacingMs(it) }
+        return com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS
     }
 
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
@@ -2091,13 +2095,6 @@ class RgbControllerViewModel(
     fun clearErrorMessage() {
         dispatch(RgbIntent.ClearErrorMessage)
     }
-
-    /**
-     * Last saved pacing for a device, for UI that needs a value before the live one appears in
-     * `connectivity.devicePacingMs`. Exists so the Settings screen doesn't have to build its own
-     * AppPreferencesRepositoryImpl inside a composable and bypass AppContainer's DI.
-     */
-    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, 100)
 
     override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
@@ -2755,7 +2752,7 @@ class RgbControllerViewModel(
                     sustainedMinutes = minutes
                 ) { command ->
                     targets.forEach { address ->
-                        bleGattTransport.writeCommand(address, command, bypassPacing = true)
+                        bleGattTransport.writeCommand(address, command)
                     }
                 }
                 addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")

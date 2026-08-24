@@ -28,7 +28,6 @@ sealed interface CharacteristicRegistration {
     data class Registered(
         val address: String,
         val charUuid: UUID,
-        val pacingMs: Int,
         val ackSupported: Boolean
     ) : CharacteristicRegistration
 
@@ -69,9 +68,8 @@ interface BleGattTransport {
      * holding the preference and the Dimming slider's value.
      */
     fun registerWriteHooks(
-        pacingProvider: (address: String) -> Int,
         calibrate: (address: String, command: ByteArray) -> ByteArray,
-        onFpsUpdate: (address: String, fps: Int) -> Unit,
+        onFpsUpdate: (address: String, fps: Int, inFlightMs: Double) -> Unit,
         diagAttribution: (address: String) -> String,
         splitEnabled: () -> Boolean = { false },
         userDimming: (address: String) -> Int = { 100 }
@@ -94,11 +92,11 @@ interface BleGattTransport {
 
     /**
      * Enqueue a command onto the device's write manager (`deviceWriteManagers[address].updateCommand`).
-     * [priority] and [bypassPacing] implement the peak-hold/peak-priority write rule
+     * [priority] implements the peak-hold/peak-priority write rule
      * (visualizer-review-2026-07-21.md P2): a higher-priority queued command of the same type
-     * survives a lower-priority one trying to replace it until it's actually been written, and
-     * [bypassPacing] skips the pacing wait for this one write (used on the exact frame a beat
-     * flash fires).
+     * survives a lower-priority one trying to replace it until it's actually been written.
+     * The `bypassPacing` flag that used to ride alongside it went with the pacing configuration
+     * in Tier E Phase 3 step 4 — it had been inert since step 2 removed the wait it skipped.
      *
      * Bug fix (2026-07-23): the default used to be 0f, on the assumption that left every
      * non-audio command path's behavior unchanged relative to the old unconditional
@@ -117,13 +115,10 @@ interface BleGattTransport {
      * passes `priority = result.value`); every other path just wants "always wins, always
      * enqueues" -- Float.MAX_VALUE guarantees that regardless of what's currently queued.
      */
-    fun writeCommand(address: String, command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false)
+    fun writeCommand(address: String, command: ByteArray, priority: Float = Float.MAX_VALUE)
 
     /** Forward a GATT write-complete ack to the device's write manager. */
     fun notifyWriteCompleted(address: String)
-
-    /** Current pacing (ms) for a device's write manager, or [default] if none exists yet. */
-    fun getPacingMs(address: String, default: Int = 50): Int
 
     /** Remove all three per-device maps and return the removed [BluetoothGatt] (for disconnect/close). */
     fun removeConnection(address: String): BluetoothGatt?
@@ -137,9 +132,6 @@ interface BleGattTransport {
 
     fun getRetryAttempt(address: String): Int
     fun setRetryAttempt(address: String, attempt: Int)
-
-    fun setPacing(address: String, ms: Int)
-    fun resetAllPacing(ms: Int)
 
     /** Reconstruct write managers for surviving active connections; [onRestored] per address (for logging). */
     fun restoreWriteManagers(onRestored: (address: String) -> Unit)
@@ -174,9 +166,8 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     @Volatile private var onCharacteristicWrite: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var onLog: (String) -> Unit = {}
 
-    @Volatile private var pacingProvider: (String) -> Int = { 50 }
     @Volatile private var calibrate: (String, ByteArray) -> ByteArray = { _, cmd -> cmd }
-    @Volatile private var onFpsUpdate: (String, Int) -> Unit = { _, _ -> }
+    @Volatile private var onFpsUpdate: (String, Int, Double) -> Unit = { _, _, _ -> }
     @Volatile private var diagAttribution: (String) -> String = { "" }
     @Volatile private var splitEnabled: () -> Boolean = { false }
     @Volatile private var userDimming: (String) -> Int = { 100 }
@@ -234,14 +225,12 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun registerWriteHooks(
-        pacingProvider: (String) -> Int,
         calibrate: (String, ByteArray) -> ByteArray,
-        onFpsUpdate: (String, Int) -> Unit,
+        onFpsUpdate: (String, Int, Double) -> Unit,
         diagAttribution: (String) -> String,
         splitEnabled: () -> Boolean,
         userDimming: (String) -> Int
     ) {
-        this.pacingProvider = pacingProvider
         this.calibrate = calibrate
         this.onFpsUpdate = onFpsUpdate
         this.diagAttribution = diagAttribution
@@ -263,9 +252,8 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
             gatt = gatt,
             charac = charac,
             connectionScope = connectionScope,
-            pacingMsProvider = { pacingProvider(address) },
             calibrate = { addr, cmd -> calibrate(addr, cmd) },
-            onFpsUpdate = { addr, fps -> onFpsUpdate(addr, fps) },
+            onFpsUpdate = { addr, fps, inFlightMs -> onFpsUpdate(addr, fps, inFlightMs) },
             diagAttribution = { addr -> diagAttribution(addr) }
         )
     }
@@ -387,7 +375,6 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         return CharacteristicRegistration.Registered(
             address = address,
             charUuid = charac.uuid,
-            pacingMs = manager.currentPacingMs,
             ackSupported = manager.writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         )
     }
@@ -396,30 +383,26 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
      * The one choke point every colour the app sends passes through, which is why [ColourSplitStage]
      * lives here rather than at the dozen call sites that build colour commands.
      *
-     * A split emits the brightness and the colour with the *same* [priority] and [bypassPacing] as
-     * the frame they came from. They queue under different type bytes, so each is compared only
+     * A split emits the brightness and the colour with the *same* [priority] as the frame they
+     * came from. They queue under different type bytes, so each is compared only
      * against its own axis, and giving them equal priority keeps the two axes' peak-hold decisions
      * in agreement: a held peak that survives on colour survives on brightness too.
      */
-    override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
+    override fun writeCommand(address: String, command: ByteArray, priority: Float) {
         val manager = deviceWriteManagers[address] ?: return
         if (!splitEnabled()) {
             // Dropping the stage is what makes the toggle reversible: re-enabling starts from a
             // clean slate rather than composing against a colour from before it was turned off.
             if (splitStages.isNotEmpty()) splitStages.remove(address)
-            manager.updateCommand(command, priority, bypassPacing)
+            manager.updateCommand(command, priority)
             return
         }
         val stage = splitStages.getOrPut(address) { ColourSplitStage { userDimming(address) } }
-        stage.process(command).forEach { manager.updateCommand(it, priority, bypassPacing) }
+        stage.process(command).forEach { manager.updateCommand(it, priority) }
     }
 
     override fun notifyWriteCompleted(address: String) {
         deviceWriteManagers[address]?.onWriteCompleted()
-    }
-
-    override fun getPacingMs(address: String, default: Int): Int {
-        return deviceWriteManagers[address]?.currentPacingMs ?: default
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {
@@ -446,14 +429,6 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun setRetryAttempt(address: String, attempt: Int) {
         retryAttempts[address] = attempt
-    }
-
-    override fun setPacing(address: String, ms: Int) {
-        deviceWriteManagers[address]?.currentPacingMs = ms
-    }
-
-    override fun resetAllPacing(ms: Int) {
-        deviceWriteManagers.forEach { (_, manager) -> manager.currentPacingMs = ms }
     }
 
     override fun restoreWriteManagers(onRestored: (String) -> Unit) {

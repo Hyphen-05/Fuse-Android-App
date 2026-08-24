@@ -17,10 +17,9 @@ class CalibrationFlowReducerTest {
     private fun reduce(
         state: RgbUiState = RgbUiState(),
         intent: RgbIntent,
-        savedCalibrationDelayMs: Int = 0,
-        connectedManagerAddresses: Set<String> = emptySet()
+        savedCalibrationDelayMs: Int = 0
     ): Pair<RgbUiState, List<CalibrationSideEffect>> =
-        calibrationFlowReducer(state, intent, savedCalibrationDelayMs, connectedManagerAddresses)
+        calibrationFlowReducer(state, intent, savedCalibrationDelayMs)
 
     // ========================================================================
     // DismissCalibrationPrompt
@@ -208,9 +207,9 @@ class CalibrationFlowReducerTest {
     }
 
     // ========================================================================
-    // ResetCalibrationSettings — quirks: (a) bluetooth_delay_ms pref write is
-    // separate from the three clear() calls, (b) two independent pacing-reset
-    // paths (live manager mutation + devicePacingMs map) both preserved.
+    // ResetCalibrationSettings — quirk: the bluetooth_delay_ms pref write is
+    // separate from the clear() calls. The two pacing-reset paths this used to
+    // guard went with the pacing configuration in Tier E Phase 3 step 4.
     // ========================================================================
 
     @Test
@@ -218,8 +217,7 @@ class CalibrationFlowReducerTest {
         val initial = RgbUiState().let {
             it.copy(
                 audioSettings = it.audioSettings.copy(bluetoothDelayMs = 99, totalVisualDelayMs = 500, flashTimingOffsetMs = 99),
-                calibrationFlow = it.calibrationFlow.copy(calibrationDelayOffsetMs = 77),
-                connectivity = it.connectivity.copy(devicePacingMs = mapOf("A1" to 20, "A2" to 30))
+                calibrationFlow = it.calibrationFlow.copy(calibrationDelayOffsetMs = 77)
             )
         }
         val (newState, _) = reduce(state = initial, intent = RgbIntent.ResetCalibrationSettings)
@@ -229,41 +227,25 @@ class CalibrationFlowReducerTest {
         // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs.
         assertEquals(0, newState.audioSettings.flashTimingOffsetMs)
         assertEquals(0, newState.calibrationFlow.calibrationDelayOffsetMs)
-        assertEquals(mapOf("A1" to 100, "A2" to 100), newState.connectivity.devicePacingMs)
     }
 
     @Test
-    fun resetCalibrationSettings_emitsClearsManagerResetPrefWriteAndLogInSourceOrder() {
+    fun resetCalibrationSettings_emitsClearsPrefWritesAndLogInSourceOrder() {
         val (_, effects) = reduce(intent = RgbIntent.ResetCalibrationSettings)
 
         assertEquals(
             listOf(
                 CalibrationSideEffect.ClearCalibrationDelayPrefs,
                 CalibrationSideEffect.ClearCctCalibrationPrefs,
-                CalibrationSideEffect.ClearPacingPrefs,
-                CalibrationSideEffect.ResetAllDeviceManagerPacing,
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 0),
                 CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 0),
                 CalibrationSideEffect.Log(
                     "Reset Calibration Defaults: bluetooth audio delay compensation set to 0, " +
-                        "per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared."
+                        "and custom CCT/audio calibration profiles cleared."
                 )
             ),
             effects
         )
-    }
-
-    @Test
-    fun resetCalibrationSettings_emitsBothIndependentPacingResetPaths() {
-        val initial = RgbUiState().let {
-            it.copy(connectivity = it.connectivity.copy(devicePacingMs = mapOf("A1" to 20)))
-        }
-        val (newState, effects) = reduce(state = initial, intent = RgbIntent.ResetCalibrationSettings)
-
-        // Path 1: live DeviceWriteManager mutation, fired as a side effect.
-        assertTrue(effects.contains(CalibrationSideEffect.ResetAllDeviceManagerPacing))
-        // Path 2: the UI-facing devicePacingMs map, updated independently in state.
-        assertEquals(mapOf("A1" to 100), newState.connectivity.devicePacingMs)
     }
 
     // ========================================================================
@@ -366,44 +348,6 @@ class CalibrationFlowReducerTest {
 
         assertEquals(true, newState.connectivity.isTestPatternRunning["OTHER"])
         assertEquals(true, newState.connectivity.isTestPatternRunning["AA:BB"])
-    }
-
-    // ========================================================================
-    // SetDevicePacing — quirk: entire block (state + pref write + manager
-    // mutation) is guarded by the live DeviceWriteManager existing; silently
-    // no-ops, including the state update, when it doesn't.
-    // ========================================================================
-
-    @Test
-    fun setDevicePacing_withLiveManager_updatesStateAndEmitsEffects() {
-        val initial = RgbUiState()
-        val (newState, effects) = reduce(
-            state = initial,
-            intent = RgbIntent.SetDevicePacing("AA:BB", 45),
-            connectedManagerAddresses = setOf("AA:BB")
-        )
-
-        assertEquals(45, newState.connectivity.devicePacingMs["AA:BB"])
-        assertEquals(
-            listOf(
-                CalibrationSideEffect.SetDeviceManagerPacing("AA:BB", 45),
-                CalibrationSideEffect.SavePacingPrefInt("AA:BB", 45)
-            ),
-            effects
-        )
-    }
-
-    @Test
-    fun setDevicePacing_withoutLiveManager_isANoOp() {
-        val initial = RgbUiState()
-        val (newState, effects) = reduce(
-            state = initial,
-            intent = RgbIntent.SetDevicePacing("AA:BB", 45),
-            connectedManagerAddresses = emptySet()
-        )
-
-        assertEquals(initial, newState)
-        assertTrue(effects.isEmpty())
     }
 
     // ========================================================================

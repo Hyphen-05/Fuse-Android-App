@@ -47,8 +47,6 @@ class BleTransportTest {
         assertEquals(3, transport.getRetryAttempt("AA:BB:CC:DD:EE:FF"))
 
         // No managers registered yet — these must be safe no-ops.
-        transport.setPacing("AA:BB:CC:DD:EE:FF", 100)
-        transport.resetAllPacing(100)
         transport.writeCommand("AA:BB:CC:DD:EE:FF", byteArrayOf(1, 2, 3))
         transport.notifyWriteCompleted("AA:BB:CC:DD:EE:FF")
 
@@ -135,7 +133,6 @@ class BleTransportTest {
         val registered = CharacteristicRegistration.Registered(
             address = "AA:BB",
             charUuid = UUID.fromString("0000ffd9-0000-1000-8000-00805f9b34fb"),
-            pacingMs = 50,
             ackSupported = false
         )
         val fake = FakeBleGattTransport(registrationResult = registered)

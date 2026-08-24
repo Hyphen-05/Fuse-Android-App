@@ -8,7 +8,7 @@ import java.util.UUID
  * Deterministic, fully synchronous fake of [BleGattTransport] for JUnit tests — no real GATT stack
  * or threading. Registered callbacks/hooks are stored; call the `emit*` methods to synchronously
  * invoke them, as if the platform GATT callback had fired. Assertion hooks: [isConnected],
- * [connectCalls], [writtenCommands], [disconnectedAddresses], [pacingSet], [resetAllPacingCalls].
+ * [connectCalls], [writtenCommands], [disconnectedAddresses].
  *
  * [registrationResult] controls what [registerDuoCoCharacteristic] returns so tests can drive both
  * the write-ready and characteristic-not-found paths.
@@ -18,7 +18,6 @@ class FakeBleGattTransport(
         CharacteristicRegistration.Registered(
             address = "AA:BB:CC:DD:EE:FF",
             charUuid = UUID.fromString("0000ffd9-0000-1000-8000-00805f9b34fb"),
-            pacingMs = 50,
             ackSupported = false
         )
 ) : BleGattTransport {
@@ -32,11 +31,9 @@ class FakeBleGattTransport(
         private set
     var onLog: ((String) -> Unit)? = null
         private set
-    var pacingProvider: ((String) -> Int)? = null
-        private set
     var calibrate: ((String, ByteArray) -> ByteArray)? = null
         private set
-    var onFpsUpdate: ((String, Int) -> Unit)? = null
+    var onFpsUpdate: ((String, Int, Double) -> Unit)? = null
         private set
     var diagAttribution: ((String) -> String)? = null
         private set
@@ -45,14 +42,11 @@ class FakeBleGattTransport(
     val connectCalls = mutableListOf<String>()
     val disconnectedAddresses = mutableListOf<String>()
     val writtenCommands = mutableListOf<Pair<String, ByteArray>>()
-    val writtenCommandPriorities = mutableListOf<Triple<String, Float, Boolean>>()
+    val writtenCommandPriorities = mutableListOf<Pair<String, Float>>()
     val writeCompletedAddresses = mutableListOf<String>()
     val requestPriorityCalls = mutableListOf<String>()
     val discoverServicesCalls = mutableListOf<String>()
     val onConnectedCalls = mutableListOf<String>()
-    val pacingSet = mutableListOf<Pair<String, Int>>()
-    var resetAllPacingCalls = 0
-        private set
     var restoreWriteManagersCalls = 0
         private set
 
@@ -81,14 +75,12 @@ class FakeBleGattTransport(
      * this fake stays a faithful record of what each caller *asked* to send.
      */
     override fun registerWriteHooks(
-        pacingProvider: (String) -> Int,
         calibrate: (String, ByteArray) -> ByteArray,
-        onFpsUpdate: (String, Int) -> Unit,
+        onFpsUpdate: (String, Int, Double) -> Unit,
         diagAttribution: (String) -> String,
         splitEnabled: () -> Boolean,
         userDimming: (String) -> Int
     ) {
-        this.pacingProvider = pacingProvider
         this.calibrate = calibrate
         this.onFpsUpdate = onFpsUpdate
         this.diagAttribution = diagAttribution
@@ -122,17 +114,13 @@ class FakeBleGattTransport(
         return registrationResult
     }
 
-    override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
+    override fun writeCommand(address: String, command: ByteArray, priority: Float) {
         writtenCommands.add(address to command)
-        writtenCommandPriorities.add(Triple(address, priority, bypassPacing))
+        writtenCommandPriorities.add(address to priority)
     }
 
     override fun notifyWriteCompleted(address: String) {
         writeCompletedAddresses.add(address)
-    }
-
-    override fun getPacingMs(address: String, default: Int): Int {
-        return pacingSet.lastOrNull { it.first == address }?.second ?: default
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {
@@ -156,14 +144,6 @@ class FakeBleGattTransport(
 
     override fun setRetryAttempt(address: String, attempt: Int) {
         retryAttempts[address] = attempt
-    }
-
-    override fun setPacing(address: String, ms: Int) {
-        pacingSet.add(address to ms)
-    }
-
-    override fun resetAllPacing(ms: Int) {
-        resetAllPacingCalls++
     }
 
     override fun restoreWriteManagers(onRestored: (String) -> Unit) {

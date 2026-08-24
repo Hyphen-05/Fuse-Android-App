@@ -22,11 +22,6 @@ sealed interface CalibrationSideEffect {
     // same underlying method the other reducers' SavePrefInt/SaveAudioPrefInt use.
     data class SaveCalibrationPrefInt(val key: String, val value: Int) : CalibrationSideEffect
 
-    // Mirrors prefsRepo.putPacingPrefInt(address, value) — distinct from the
-    // generic app-state prefs above, keyed per device address.
-    data class SavePacingPrefInt(val address: String, val value: Int) : CalibrationSideEffect
-    object ClearPacingPrefs : CalibrationSideEffect
-
     // CCT correction profiles: prefsRepo write + reload of the separate
     // `cctCalibrations` StateFlow (not part of RgbUiState).
     data class SaveCctCorrectionProfile(val profile: CctCorrectionProfile) : CalibrationSideEffect
@@ -42,10 +37,6 @@ sealed interface CalibrationSideEffect {
     // whatever executes this effect, not as a separate reducer-emitted Log.
     data class SaveColorCalibration(val calibration: ColorCalibration) : CalibrationSideEffect
     data class DeleteColorCalibration(val macAddress: String) : CalibrationSideEffect
-
-    // Live DeviceWriteManager mutation — not part of RgbUiState.
-    data class SetDeviceManagerPacing(val address: String, val ms: Int) : CalibrationSideEffect
-    object ResetAllDeviceManagerPacing : CalibrationSideEffect
 
     // Metronome coroutine (StartCalibrationMode / StopCalibrationMode).
     // CONTRACT: on each tick (after delaying calibrationDelayOffsetMs, mirroring
@@ -77,10 +68,7 @@ fun calibrationFlowReducer(
     intent: RgbIntent,
     // Pre-fetched by the ViewModel via prefsRepo.getCalibrationDelayPrefInt(deviceKey, 0)
     // before the reducer runs, since a pure reducer can't perform the pref read itself.
-    savedCalibrationDelayMs: Int,
-    // Addresses with a live DeviceWriteManager. Mirrors the `deviceWriteManagers[address] != null`
-    // guard in the source setDevicePacing() — the entire state+pref update is skipped when absent.
-    connectedManagerAddresses: Set<String>
+    savedCalibrationDelayMs: Int
 ): Pair<RgbUiState, List<CalibrationSideEffect>> {
     return when (intent) {
 
@@ -189,24 +177,16 @@ fun calibrationFlowReducer(
                     // visualizer-review-2026-07-22.md C4/B3: unified with bluetoothDelayMs.
                     flashTimingOffsetMs = 0
                 ),
-                calibrationFlow = state.calibrationFlow.copy(calibrationDelayOffsetMs = 0),
-                connectivity = state.connectivity.copy(
-                    devicePacingMs = state.connectivity.devicePacingMs.mapValues { 100 }
-                )
+                calibrationFlow = state.calibrationFlow.copy(calibrationDelayOffsetMs = 0)
             )
             val effects = listOf(
                 CalibrationSideEffect.ClearCalibrationDelayPrefs,
                 CalibrationSideEffect.ClearCctCalibrationPrefs,
-                CalibrationSideEffect.ClearPacingPrefs,
-                // Live DeviceWriteManager pacing reset and the devicePacingMs state map above
-                // are two independent paths kept in sync manually in source — preserve both,
-                // do not unify into one.
-                CalibrationSideEffect.ResetAllDeviceManagerPacing,
                 CalibrationSideEffect.SaveCalibrationPrefInt("bluetooth_delay_ms", 0),
                 CalibrationSideEffect.SaveCalibrationPrefInt("flash_timing_offset_ms", 0),
                 CalibrationSideEffect.Log(
                     "Reset Calibration Defaults: bluetooth audio delay compensation set to 0, " +
-                        "per-device pacing reset to 100ms, and custom CCT/audio calibration profiles cleared."
+                        "and custom CCT/audio calibration profiles cleared."
                 )
             )
             newState to effects
@@ -241,26 +221,6 @@ fun calibrationFlowReducer(
                 listOf(CalibrationSideEffect.StartTestPatternLoop(intent.address))
             }
             newState to effects
-        }
-
-        is RgbIntent.SetDevicePacing -> {
-            // Source guards the ENTIRE block (state update included) on the live
-            // DeviceWriteManager existing — preserved exactly, including the
-            // silent no-op when it doesn't.
-            if (intent.address in connectedManagerAddresses) {
-                val newState = state.copy(
-                    connectivity = state.connectivity.copy(
-                        devicePacingMs = state.connectivity.devicePacingMs + (intent.address to intent.ms)
-                    )
-                )
-                val effects = listOf(
-                    CalibrationSideEffect.SetDeviceManagerPacing(intent.address, intent.ms),
-                    CalibrationSideEffect.SavePacingPrefInt(intent.address, intent.ms)
-                )
-                newState to effects
-            } else {
-                state to emptyList()
-            }
         }
 
         else -> state to emptyList()
