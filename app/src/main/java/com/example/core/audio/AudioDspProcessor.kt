@@ -77,7 +77,15 @@ data class AudioDspResult(
  * These are NOT bugs to unify — CLAUDE.md documents backend bin-range/timing differences as a
  * deliberately deferred issue; the same preserve-as-is rule applies here.
  */
-class AudioDspProcessor(private val backend: AudioBackend) {
+class AudioDspProcessor(
+    private val backend: AudioBackend,
+    /**
+     * Shape of the continuous mapping. Defaulted for the app; overridden only by the tuning sweep
+     * in `GtzanBeatAccuracyTest`, which needs to run the *real* pipeline under each candidate
+     * rather than a reimplementation of it.
+     */
+    continuousTuning: ContinuousDrive.Tuning = ContinuousDrive.Tuning()
+) {
 
     private companion object {
         /** The shipped flat cooldown between fast-causal triggers. */
@@ -232,6 +240,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
      * which is the opposite of the ask.
      */
     private var smoothedAmbientLevel = 0f
+
+    private val continuousDrive = ContinuousDrive(continuousTuning)
+
+    /** Set once per frame from the preset, and read by [triggerFlash] to stand the flashing down. */
+    private var continuousDriveActive = false
 
     // --- P1 predictive flash scheduling (mapping-proposal-audio-to-led-2026-07-21.md §4,
     // "Predictive flash scheduling") ---
@@ -591,6 +604,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         )
         // Recomputed per frame, ahead of every flash mechanism, so all four are capped by the same
         // number and it follows a tempo that drifts.
+        continuousDriveActive = state.continuousDriveEnabled
         minFlashIntervalMs = if (state.oneFlashPerBeatEnabled && result.bpm > 0f) {
             (60_000f / result.bpm) * GLOBAL_FLASH_BEAT_FRACTION
         } else {
@@ -1151,6 +1165,37 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             ambientValue = (ambientValue + 0.10f * sustainIntensity).coerceIn(0.0f, 1.0f)
         }
 
+        // --- Continuous drive (no beat detection) -------------------------------------------
+        // Replaces value and hue outright rather than blending with the flash path: the point is a
+        // mapping with no discrete events in it, and leaving the beat-driven terms partly in would
+        // reintroduce exactly the thing being removed. Saturation is left alone — it is driven by
+        // spectral crest, which is already continuous.
+        if (state.continuousDriveEnabled) {
+            val drive = continuousDrive.process(bassVal, midVal, highVal, dtMs)
+
+            // Body plus emergent transient. `audioFlashStrength` scales the transient, so the one
+            // knob that used to mean "how hard does it flash" still means that without any flash
+            // existing — which keeps the preset table's vocabulary intact. The mapping itself lives
+            // in ContinuousDrive so the tuning sweep measures what the app actually renders.
+            value = continuousDrive.brightness(
+                drive,
+                minBrightness = effectiveMinBrightness,
+                gamma = state.audioGammaExponent,
+                flashStrength = state.audioFlashStrength
+            )
+            ambientValue = continuousDrive.brightness(
+                drive.copy(punch = 0f),
+                minBrightness = effectiveMinBrightness,
+                gamma = state.audioGammaExponent,
+                flashStrength = state.audioFlashStrength
+            )
+
+            // Hue rides the anchor the preset already established, tilted by spectral balance, so a
+            // preset keeps its colour identity while the texture moves it. Bounded so it leans
+            // rather than sweeping the wheel.
+            smoothedHue = (smoothedHue + drive.tilt * state.hueBreathRangeDeg + 360f) % 360f
+        }
+
         val (r, g, b) = ColorConverter.hsvToRgb(smoothedHue, sat, value)
 
         val isBelow = totalEnergy < effectiveNoiseGate
@@ -1242,6 +1287,10 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // so nothing bounded how *often* the strip could flash. Measured consequence: 1.68 flashes
         // per annotated beat, and the double grid fitting better than the true one on 80 clips
         // in 100.
+        // Continuous presets have no discrete flashes at all — the pulse is an emergent property
+        // of the envelope instead (see [ContinuousDrive]). Refusing here rather than at the four
+        // call sites keeps the guarantee in one place.
+        if (continuousDriveActive) return false
         if (minFlashIntervalMs > 0f && (atMs - lastBeatFlashTime).toFloat() < minFlashIntervalMs) return false
         val elapsed = (atMs - lastBeatFlashTime).toFloat()
         val t = if (activeFlashDecayMs > 0f) elapsed / activeFlashDecayMs else 1f

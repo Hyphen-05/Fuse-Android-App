@@ -4,6 +4,7 @@ import com.example.AudioSettingsState
 import com.example.RgbIntent
 import com.example.RgbUiState
 import com.example.core.audio.AudioDspProcessor
+import com.example.core.audio.ContinuousDrive
 import com.example.hardware.audio.AudioBackend
 import com.example.presentation.audioSettingsReducer
 import org.junit.Assume.assumeTrue
@@ -102,6 +103,133 @@ class GtzanBeatAccuracyTest {
             if (result.flashFiredThisFrame) out.add(atMs)
         }
         return out
+    }
+
+    /** Per-frame brightness for a preset, as (timeMs, value). */
+    private fun brightness(
+        clip: Clip,
+        preset: String,
+        tuning: ContinuousDrive.Tuning = ContinuousDrive.Tuning()
+    ): List<Pair<Long, Float>> {
+        val settings = settingsFor(preset, beatClock = false)
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD, tuning)
+        val pcm = OfflineAudio.readWav(clip.wav)
+        val out = ArrayList<Pair<Long, Float>>()
+        for ((frame, atMs) in OfflineAudio.frames(pcm)) {
+            val result = processor.process(frame, settings, atMs, effectivePacingMs = 50) ?: continue
+            out.add(atMs to result.value)
+        }
+        return out
+    }
+
+    /**
+     * Two numbers for a mapping that has no discrete events to score.
+     *
+     * `lift` is mean brightness within +-80ms of an annotated beat divided by mean brightness
+     * everywhere else. Above 1.0 means the light is genuinely brighter on beats — the continuous
+     * equivalent of "it flashes on the beat", and the thing that should make it feel locked to the
+     * song. It cannot be gamed by flashing more, which is the point.
+     *
+     * `movement` is mean |change in brightness| per second: how busy the light is. It is the
+     * continuous counterpart of flashes/beat, and the number to watch when the complaint is
+     * "too flashy".
+     *
+     * Diagnostic. There is no pass mark — these exist to tune against.
+     */
+    /**
+     * lift, movement and mean brightness for one series against a clip's annotated beats.
+     *
+     * Mean is here because lift is a *ratio*: a preset that sits almost dark and pulses dimly scores
+     * beautifully on it while looking feeble on a wall. Any tuning decision needs all three.
+     */
+    private fun trackingOf(series: List<Pair<Long, Float>>, beats: List<Long>): Triple<Double, Double, Double>? {
+        if (series.size < 2 || beats.isEmpty()) return null
+        val sorted = beats.sorted()
+        var onSum = 0.0; var onN = 0
+        var offSum = 0.0; var offN = 0
+        for ((atMs, v) in series) {
+            val near = sorted.minOf { kotlin.math.abs(it - atMs) }
+            if (near <= 80L) { onSum += v; onN++ } else { offSum += v; offN++ }
+        }
+        if (onN == 0 || offN == 0 || offSum <= 0.0) return null
+        var delta = 0.0
+        for (i in 1 until series.size) delta += kotlin.math.abs(series[i].second - series[i - 1].second)
+        val spanSec = (series.last().first - series.first().first).coerceAtLeast(1L) / 1000.0
+        val mean = (onSum + offSum) / (onN + offN)
+        return Triple((onSum / onN) / (offSum / offN), delta / spanSec, mean)
+    }
+
+    /**
+     * Sweeps [ContinuousDrive.Tuning] against measured lift and movement.
+     *
+     * Runs the real pipeline under each candidate rather than a model of it, so what is tuned is
+     * what ships. A subset of clips, because this is the slow one — the winner gets re-measured on
+     * the whole set by the test above.
+     *
+     * What to look for: the highest `lift` whose `movement` still sits well under Punchy's 2.96,
+     * which is the "too flashy" end of the scale Joe rejected.
+     */
+    @Test
+    fun `sweep continuous tuning`() {
+        val all = clips().filterIndexed { i, _ -> i % 3 == 0 }
+        assumeTrue("GTZAN not present at $root — see the class comment", all.isNotEmpty())
+
+        // Refinement round. The first sweep established the shape: lift rises as bodyShare falls,
+        // and punchGain *costs* lift while adding movement, because punch fires on every transient
+        // rather than on beats. So this explores the low-body, low-punch, short-release corner where
+        // the frontier actually is.
+        val candidates = buildList {
+            for (body in listOf(0.35f, 0.25f, 0.15f)) {
+                for (punch in listOf(0.5f, 1.0f, 1.5f)) {
+                    add(ContinuousDrive.Tuning(bodyShare = body, punchGain = punch, fastReleaseTauMs = 100f))
+                }
+            }
+            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, fastReleaseTauMs = 80f))
+            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, fastReleaseTauMs = 160f))
+            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, slowAttackTauMs = 140f))
+            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, slowAttackTauMs = 320f))
+        }
+
+        println("")
+        println("=== Continuous tuning sweep (${all.size} clips) ===")
+        println("%6s %6s %7s %7s %8s %11s %7s".format(
+            "body", "punch", "fastRel", "slowAtt", "lift", "movement/s", "mean"))
+        for (t in candidates) {
+            var liftSum = 0.0; var moveSum = 0.0; var meanSum = 0.0; var n = 0
+            for (clip in all) {
+                val (lift, move, mean) = trackingOf(brightness(clip, "Live Wire", t), clip.beatsMs) ?: continue
+                liftSum += lift; moveSum += move; meanSum += mean; n++
+            }
+            if (n == 0) continue
+            println("%6.2f %6.2f %7.0f %7.0f %8.3f %11.2f %7.3f".format(
+                t.bodyShare, t.punchGain, t.fastReleaseTauMs, t.slowAttackTauMs,
+                liftSum / n, moveSum / n, meanSum / n))
+        }
+    }
+
+    @Test
+    fun `continuous drive tracks beats without flashing`() {
+        val all = clips()
+        assumeTrue("GTZAN not present at $root — see the class comment", all.isNotEmpty())
+
+        val presets = listOf("Live Wire", "Punchy", "Smooth Flow", "Ambient Chill")
+        println("")
+        println("=== Continuous tracking (${all.size} clips) ===")
+        println("%14s %8s %11s %7s".format("preset", "lift", "movement/s", "mean"))
+
+        for (preset in presets) {
+            var liftSum = 0.0
+            var moveSum = 0.0
+            var counted = 0
+            var meanSum = 0.0
+            for (clip in all) {
+                val (lift, move, mean) = trackingOf(brightness(clip, preset), clip.beatsMs) ?: continue
+                liftSum += lift; moveSum += move; meanSum += mean; counted++
+            }
+            if (counted == 0) continue
+            println("%14s %8.3f %11.2f %7.3f".format(
+                preset, liftSum / counted, moveSum / counted, meanSum / counted))
+        }
     }
 
     /**

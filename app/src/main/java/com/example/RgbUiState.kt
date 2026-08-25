@@ -225,6 +225,12 @@ data class AudioSettingsState(
      */
     val steadyAmbientEnabled: Boolean = false,
     /**
+     * Drives brightness and hue from [com.example.core.audio.ContinuousDrive] and fires no discrete
+     * flashes at all. Set by the preset, not by a settings switch — it is an architecture, not a
+     * tweak, so presets either are continuous or are not.
+     */
+    val continuousDriveEnabled: Boolean = false,
+    /**
      * Floors the beat-flash decay window against the *measured* in-flight time per write rather
      * than [com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS].
      *

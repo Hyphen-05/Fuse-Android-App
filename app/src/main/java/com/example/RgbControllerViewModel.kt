@@ -173,6 +173,10 @@ class RgbControllerViewModel(
     enum class AutomationType { AUDIO, AMBIANCE }
     
         
+    /** Read once so `visualizerPreset` and the derived `continuousDriveEnabled` cannot disagree. */
+    private val restoredVisualizerPreset: String =
+        prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default"
+
     private val _uiState = MutableStateFlow(
         RgbUiState(
             coreControl = CoreControlState(
@@ -220,7 +224,14 @@ class RgbControllerViewModel(
                 // the same number. The old pref key is no longer written to, so this also
                 // silently migrates any device that previously had the two independently tuned.
                 flashTimingOffsetMs = prefsRepo.getAppStatePrefInt("bluetooth_delay_ms", 0),
-                visualizerPreset = prefsRepo.getAppStatePrefString("visualizer_preset", "Default") ?: "Default",
+                visualizerPreset = restoredVisualizerPreset,
+                // Derived from the preset table rather than persisted alongside the other preset
+                // fields. Those are all saved individually, so a value only the preset can set
+                // would come back false after a restart while the preset itself came back "Live
+                // Wire" — a continuous preset silently running the flash path. Deriving it also
+                // means changing which presets are continuous takes effect on existing installs
+                // instead of being frozen into whatever was saved.
+                continuousDriveEnabled = com.example.presentation.isContinuousPreset(restoredVisualizerPreset),
                 audioGammaExponent = prefsRepo.getAppStatePrefFloat("audio_gamma_exponent", 0.45f),
                 audioFlashStrength = prefsRepo.getAppStatePrefFloat("audio_flash_strength", 0.3f),
                 visualizerMinBrightness = prefsRepo.getAppStatePrefFloat("visualizer_min_brightness", 0.15f),

@@ -51,6 +51,8 @@ internal data class VisualizerConfig(
     // Mapping-layer stage 1 (see mapping-proposal-audio-to-led-2026-07-21.md §6): flashFloor/
     // flashRange replace AudioDspProcessor's previously hard-coded 0.6f/0.4f.
     val flashFloor: Float = 0.6f, val flashRange: Float = 0.4f,
+    /** See [com.example.RgbUiState]'s `continuousDriveEnabled`. Only "Live Wire" sets it today. */
+    val continuousDrive: Boolean = false,
     // Mapping-layer stage 2 — anchor+breath hue model (§4/§5). See the per-field doc comments on
     // the matching AudioSettingsState properties for what each one means; values below implement
     // the §5 per-preset table.
@@ -114,6 +116,12 @@ internal fun isHueConfined(jumpDeg: Float, driftDegPerSec: Float): Boolean =
  * `PresetHueCoverageTest` pins that rather than trusting the arithmetic here.
  */
 internal fun unlockedHueJump(jumpDeg: Float): Float = jumpDeg + 3.5f
+
+/**
+ * Whether [preset] drives the light continuously (no discrete flashes). The single source of truth
+ * is the preset table below; nothing persists this separately.
+ */
+fun isContinuousPreset(preset: String): Boolean = visualizerConfigFor(preset).continuousDrive
 
 /** [visualizerConfigFor], with D.1's hue unlock applied when the user has it switched on. */
 internal fun visualizerConfigFor(preset: String, unlockHues: Boolean): VisualizerConfig {
@@ -193,6 +201,28 @@ internal fun visualizerConfigFor(preset: String): VisualizerConfig = when (prese
         hueBreathRangeDeg = 0f, hueDriftDegPerSec = 0f,
         sustainResponse = "NONE", sustainRampMs = 0f, whiteFlashRecoveryMs = 120f
     )
+    // The first continuous preset: no beat detection, no flash trigger. Brightness is the band
+    // energy itself and the pulse is emergent, the way MilkDrop/projectM work. `flash = 0.7f` here
+    // does not arm any flash mechanism — on a continuous preset it scales how much of the range a
+    // transient may claim. See ContinuousDrive's class comment for why this exists.
+    "Live Wire" -> VisualizerConfig(
+        // attack/decay/beatMult/beatFlashDecayMs are inert here: nothing on this preset reads them,
+        // because the flash machinery is stood down. Left at sane values rather than zero so that
+        // switching away from this preset does not leave the next one with a broken table.
+        attack = 0.5f, decay = 0.2f, flash = 0.7f, gamma = 0.75f, idleDelay = 2500L,
+        noiseGate = 5.0f, bassGain = 1.3f, midGain = 1.0f, highGain = 0.8f, paletteCycling = true,
+        beatMult = 1.3f, minBrightness = 0.10f, colorSpeed = 1.0f, beatFlashDecayMs = 150f,
+        // ambientCapFraction is unused on this path — the continuous term owns the whole range
+        // rather than the bottom 40%, which is the entire point of the change.
+        ambientCapFraction = 1.0f, midFluxWeight = 0.20f,
+        flashFloor = 0f, flashRange = 0f,
+        // Colour drifts slowly and leans with the spectral tilt; it never jumps on a beat, because
+        // there are no beats here to jump on.
+        anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
+        hueBreathRangeDeg = 8f, hueDriftDegPerSec = 3f,
+        sustainResponse = "NONE", sustainRampMs = 0f,
+        continuousDrive = true
+    )
     "Beat Only" -> VisualizerConfig(
         attack = 1.0f, decay = 0.9f, flash = 1.0f, gamma = 0.3f, idleDelay = 1500L,
         noiseGate = 10.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = false,
@@ -256,6 +286,7 @@ private fun visualizerPresetDisplayName(id: String): String = when (id) {
     "Ambient Chill" -> "Ambient Chill"
     "Bass Thump" -> "Bass Thump"
     "Laser Sharp" -> "Laser Sharp"
+    "Live Wire" -> "Live Wire"
     else -> id
 }
 
@@ -369,6 +400,7 @@ fun audioSettingsReducer(
                     midFluxWeight = config.midFluxWeight,
                     flashFloor = config.flashFloor,
                     flashRange = config.flashRange,
+                    continuousDriveEnabled = config.continuousDrive,
                     anchorBeatsPerAdvance = config.anchorBeatsPerAdvance,
                     anchorTimerMs = config.anchorTimerMs,
                     hueAnchorJumpDeg = config.hueAnchorJumpDeg,

@@ -502,6 +502,7 @@ fun MusicScreen(
         val smoothPresets = remember {
             listOf(
                 ExternalMicPreset("Ebb & Flow", "Ebb & Flow", "Drifting colours, beats pull them back", Color(0xFF26A69A)),
+                ExternalMicPreset("Live Wire", "Live Wire", "Follows the music, never flashes", Color(0xFF00BFA5)),
                 ExternalMicPreset("Smooth Flow", "Smooth Flow", "Gliding fluid transitions", Color(0xFF00ACC1)),
                 ExternalMicPreset("Ambient Chill", "Ambient Chill", "Slow lingering fades", Color(0xFF3949AB)),
                 ExternalMicPreset("Default", "Balanced", "Standard rhythmic response", Color(0xFF9E9E9E))

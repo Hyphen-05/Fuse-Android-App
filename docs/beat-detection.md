@@ -152,6 +152,57 @@ Above 0.7 steadiness: 44% of clips at F=75%. Above 0.8: 26% of clips at F=84%. S
 the flashing only while it is steady and hands straight back when it is not, which is what the wiring
 does (`PULSE_STEADY_ENOUGH`).
 
+## The continuous path — "Live Wire" (2026-08-25)
+
+Joe, comparing against the projectM Android app: "pretty much perfect and genuinely feels like it's
+going to the song". That app does not beat-detect for its visuals. MilkDrop and projectM expose
+`bass`/`mid`/`treb` as continuously normalised band energies, auto-gained to average ~0.65 whatever
+the track's loudness, read every frame; discrete detection is reserved for coarse things like
+switching presets. **A continuous mapping cannot flash on the wrong beat, because it never claims a
+beat exists.** Everything above is an attempt to win a bet that a continuous mapping never places.
+
+`ContinuousDrive` copies that. No detection, no threshold, no flash trigger — `triggerFlash` refuses
+outright on a continuous preset, which stands all four mechanisms down at one choke point.
+A transient is *emergent*: two envelopes over the same signal, one quick and one slow, and the gap
+between them is the pulse. A kick makes the fast one leap while the slow one lags; a sustained note
+moves both together and the gap stays at zero.
+
+Scored on the same 100 clips, with metrics that suit a mapping having no events to score —
+`lift` is mean brightness within ±80ms of an annotated beat over mean brightness elsewhere, and
+`movement/s` is mean |Δbrightness| per second:
+
+| preset | lift | movement/s | mean |
+|---|---|---|---|
+| **Live Wire** | **1.278** | **1.81** | 0.362 |
+| Punchy | 1.307 | 2.96 | 0.372 |
+| Smooth Flow | 1.001 | 0.49 | 0.455 |
+| Ambient Chill | 0.997 | 0.55 | 0.570 |
+
+**Live Wire tracks as well as Punchy at 61% of the movement, at the same brightness, with zero
+flashes.** Note also that Smooth Flow and Ambient Chill sit at a lift of ~1.0 — they do not track the
+beat at all, which no previous measurement had shown.
+
+### Tuning, and the traps in it
+
+`ContinuousDrive.Tuning` is injectable and `GtzanBeatAccuracyTest.sweep continuous tuning` runs the
+real pipeline under each candidate. Three findings worth not rediscovering:
+
+- **`bodyShare` at 1.0 gives a lift of 1.035** — nearly flat. With the body claiming the whole range
+  the light parks near the top and a transient has nowhere to go. The first attempt did this.
+- **`punchGain` peaks near 1.5 and falls above it.** Punch fires on every transient, not on beats, so
+  past the optimum extra gain adds off-beat brightness as fast as on-beat: the ratio drops while
+  movement keeps climbing. A sweep sampling only 1.5-5.0 reads as "punch does not help", which is an
+  artefact of starting on the downslope.
+- **`lift` alone cannot pick a winner.** It is a ratio, so a preset sitting nearly dark and pulsing
+  dimly scores beautifully and looks feeble. `mean` was added for exactly this — the best-scoring row
+  in the second sweep was a `bodyShare` of 0.15 at a mean of 0.327, dimmer than Punchy.
+
+Shipped at `bodyShare 0.25, punchGain 1.0, fastRelease 100ms`. `punchGain` is deliberately below its
+measured optimum: 1.5 buys 4% more tracking for 30% more movement, and movement is the complaint.
+It is deliberately *above* zero for a reason the metric cannot see — `lift` averages over a ±80ms
+window, so it rewards a broad swell exactly as much as a sharp hit and is blind to whether a hit
+reads as a hit. If Live Wire feels limp on hardware, `punchGain` is the first knob.
+
 ## Why 90% is not reachable this way
 
 **And why it may be the wrong target.** 90% was always about *catching beats* — recall. The cap above

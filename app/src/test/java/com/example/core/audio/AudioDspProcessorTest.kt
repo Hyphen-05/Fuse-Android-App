@@ -437,4 +437,34 @@ class AudioDspProcessorTest {
 
         assertEquals(baseline, withReturnMsSet)
     }
+
+    /**
+     * A continuous preset must never fire a discrete flash, however loud or transient the audio.
+     *
+     * The guarantee is one `return false` in `triggerFlash`, which every mechanism passes through —
+     * but there are four of them and nothing stops a fifth being added at a new call site. This is
+     * the regression guard for that: it drives hard alternating transients, exactly the input the
+     * causal trigger exists to catch, and asserts nothing fires.
+     */
+    @Test
+    fun `a continuous preset fires no discrete flashes`() {
+        val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
+        val settings = defaultSettings.copy(
+            visualizerPreset = "Live Wire",
+            continuousDriveEnabled = true
+        )
+        var now = warmUpQuiet(processor, AudioBackend.AUDIO_RECORD, 0L)
+
+        var fired = 0
+        repeat(200) { i ->
+            // Alternating quiet/loud: a transient every other frame, far more onset-dense than real
+            // music, so anything with a threshold in it would trigger repeatedly.
+            val frame = uniformFrame(if (i % 2 == 0) 200f else 5f)
+            now += 16L
+            val result = processor.process(frame, settings, now, effectivePacingMs = 50)
+            if (result?.flashFiredThisFrame == true) fired++
+        }
+
+        assertEquals("a continuous preset must fire no flashes, fired $fired", 0, fired)
+    }
 }
