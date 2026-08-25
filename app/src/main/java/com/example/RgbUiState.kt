@@ -199,6 +199,32 @@ data class AudioSettingsState(
      */
     val pulseTrackerEnabled: Boolean = false,
     /**
+     * Caps every flash mechanism to one flash per beat period.
+     *
+     * **On by default**, unlike the other flash settings, because it fixes a measured defect rather
+     * than offering a taste: the shipped path fires 1.68 flashes per annotated beat and its flashes
+     * fit the double grid better than the true one on 80 clips in 100. Joe's report on 2026-08-25
+     * was that the visualisers are "way too flashy... it all becomes a mess", which is that number
+     * seen from the sofa. The toggle exists so the old behaviour can still be put back side by side,
+     * not because one-per-beat is the experimental option.
+     *
+     * Expect F-measure to *fall* with this on. It trades recall for a lower flash rate on purpose,
+     * and F weighs a missed beat as heavily as a spurious flash, which is the weighting this whole
+     * change rejects. Judge it on `flashes/beat` and precision.
+     */
+    val oneFlashPerBeatEnabled: Boolean = true,
+    /**
+     * Slews the ambient brightness instead of letting it follow the audio every frame.
+     *
+     * The second half of the 2026-08-25 "too flashy" report, and deliberately separate from
+     * [oneFlashPerBeatEnabled]: the discrete flashes and the continuous movement are two different
+     * mechanisms, Joe could not say which was making the mess, and one toggle covering both would
+     * not have told us. Off by default so it is judged on its own.
+     *
+     * The flash is not smoothed — only the background under it.
+     */
+    val steadyAmbientEnabled: Boolean = false,
+    /**
      * Floors the beat-flash decay window against the *measured* in-flight time per write rather
      * than [com.example.core.audio.FLASH_DECAY_FLOOR_BASIS_MS].
      *
@@ -330,6 +356,8 @@ sealed interface RgbIntent {
     data class SetUnlockPresetHues(val enabled: Boolean) : RgbIntent
     data class SetMusicalDynamicsEnabled(val enabled: Boolean) : RgbIntent
     data class SetPulseTrackerEnabled(val enabled: Boolean) : RgbIntent
+    data class SetOneFlashPerBeatEnabled(val enabled: Boolean) : RgbIntent
+    data class SetSteadyAmbientEnabled(val enabled: Boolean) : RgbIntent
     data class SetFlashFloorUsesMeasuredInFlight(val enabled: Boolean) : RgbIntent
     data class SetPerceptualSplitEnabled(val enabled: Boolean) : RgbIntent
     // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.

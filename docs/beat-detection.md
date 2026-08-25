@@ -71,6 +71,51 @@ of the time on eight of ten synthetic tracks. The information was there and noth
 precision at break-even or worse, because each suppressed flash costs about as many true beats as
 false ones. That result is what pointed at the front end rather than the policy.
 
+> **Superseded 2026-08-25 — read the section below before trusting the paragraph above.** The
+> conclusion held for every candidate *tested*, and every candidate tested suppressed the causal
+> trigger only. A cap applied to all four mechanisms at once behaves differently, and the reason the
+> earlier result looked decisive is that F-measure cannot see the thing being fixed.
+
+## Flash density, and why F-measure hid this (2026-08-25)
+
+Joe, on hardware: the visualisers are "way too flashy ... if you have 10 flashes or stuff that looks
+like flashes per beat then it all becomes a mess not a satisfying visualiser". That is a complaint
+about **rate**, and F-measure cannot express it — F weighs a missed beat exactly as heavily as a
+spurious flash, so halving the flashing scores as a loss even when it is the entire goal.
+`flashes/beat` measures it directly. `GtzanBeatAccuracyTest.flash density per beat, by configuration`
+reports it.
+
+| config | flashes/beat | precision | recall |
+|---|---|---|---|
+| shipped | 1.68 | 44% | 69% |
+| pulse | 1.42 | 52% | 66% |
+| refractory | 1.26 | 47% | 56% |
+| veto | 1.50 | 45% | 63% |
+| pulse + refractory | 1.21 | 54% | 60% |
+| clock | 1.55 | 44% | 62% |
+| **cap** | **0.98** | 54% | 50% |
+| **cap + pulse** | **0.99** | **56%** | 52% |
+| cap + pulse + refractory | 0.99 | 56% | 52% |
+
+**The cap is `GLOBAL_FLASH_BEAT_FRACTION`, enforced inside `triggerFlash`** so no mechanism can skip
+it and none added later can either. Until this change that method gated on *amplitude alone* — a
+flash was refused only for being dimmer than the one still decaying — so nothing in the DSP bounded
+how often the strip could flash. That is the actual bug behind the double-rate finding, and it was
+never a detection problem.
+
+**It costs nothing on F.** Shipped is F=53.7%, cap+pulse F=53.9%. Density falls 41% and precision
+rises 12 points for no measurable F change, which is why the earlier "break-even or worse" result
+should not be read as ruling this out — those candidates suppressed one mechanism out of four while
+the others carried on flashing.
+
+**The refractory is now redundant.** `cap + pulse` and `cap + pulse + refractory` are identical: a
+0.9-beat cap subsumes a 0.55-beat one. Do not ship `beatRefractoryEnabled`; it is dead weight beside
+the cap.
+
+**What the cap does not fix is phase.** Precision 56% means about half the remaining flashes are
+still not on a true beat — they are simply no longer doubled up. If one-per-beat still reads wrong on
+hardware, phase is the next problem, and it is the harder one. Rate was cheap; phase is not.
+
 ## What is in the tree now
 
 `PulseTracker` — SuperFlux onset strength (log magnitudes differenced against a frequency-maximum-
@@ -108,6 +153,12 @@ the flashing only while it is steady and hands straight back when it is not, whi
 does (`PULSE_STEADY_ENOUGH`).
 
 ## Why 90% is not reachable this way
+
+**And why it may be the wrong target.** 90% was always about *catching beats* — recall. The cap above
+deliberately gives recall away (69% → 52%) to buy a flash rate Joe can stand, and measured better on
+his stated complaint while scoring identically on F. Those are opposing goals: a system that catches
+every beat flashes on everything that might be one. Decide which is wanted before chasing the number.
+
 
 90% F-measure on GTZAN is at or above published state of the art. madmom's DBN — the standard
 reference — sits at 86-88%, and only recent neural trackers clear 90%, all of them **offline and

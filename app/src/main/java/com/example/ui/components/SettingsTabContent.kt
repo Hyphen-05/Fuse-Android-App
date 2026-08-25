@@ -1040,6 +1040,62 @@ fun LazyListScope.SettingsTabContent(
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(
+                modifier = Modifier.fillMaxWidth().testTag("one_flash_per_beat_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "One Flash Per Beat",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Stops the strip flashing more than once a beat, whichever part of " +
+                            "the beat machinery wants to. Measured at 1.68 flashes per beat without " +
+                            "it. On by default — turn it off to compare against the old behaviour.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.oneFlashPerBeatEnabled,
+                    onCheckedChange = { viewModel.setOneFlashPerBeatEnabled(it) },
+                    modifier = Modifier.testTag("one_flash_per_beat_switch")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("steady_ambient_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Steady Background",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Between flashes the brightness currently follows the audio every " +
+                            "frame, so the light is never still. This slows that down and leaves " +
+                            "the beat flashes sharp. Judge it separately from One Flash Per Beat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.audioSettings.steadyAmbientEnabled,
+                    onCheckedChange = { viewModel.setSteadyAmbientEnabled(it) },
+                    modifier = Modifier.testTag("steady_ambient_switch")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
                 modifier = Modifier.fillMaxWidth().testTag("pulse_tracker_row"),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically

@@ -233,6 +233,8 @@ class RgbControllerViewModel(
                 unlockPresetHues = prefsRepo.getAppStatePrefBoolean("unlock_preset_hues", false),
                 musicalDynamicsEnabled = prefsRepo.getAppStatePrefBoolean("musical_dynamics_enabled", false),
                 pulseTrackerEnabled = prefsRepo.getAppStatePrefBoolean("pulse_tracker_enabled", false),
+                oneFlashPerBeatEnabled = prefsRepo.getAppStatePrefBoolean("one_flash_per_beat", true),
+                steadyAmbientEnabled = prefsRepo.getAppStatePrefBoolean("steady_ambient", false),
                 flashFloorUsesMeasuredInFlight = prefsRepo.getAppStatePrefBoolean("flash_floor_measured_in_flight", false),
                 hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
                 hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
@@ -2107,6 +2109,14 @@ class RgbControllerViewModel(
 
     fun setPulseTrackerEnabled(enabled: Boolean) {
         dispatch(RgbIntent.SetPulseTrackerEnabled(enabled))
+    }
+
+    fun setOneFlashPerBeatEnabled(enabled: Boolean) {
+        dispatch(RgbIntent.SetOneFlashPerBeatEnabled(enabled))
+    }
+
+    fun setSteadyAmbientEnabled(enabled: Boolean) {
+        dispatch(RgbIntent.SetSteadyAmbientEnabled(enabled))
     }
 
     fun setFlashFloorUsesMeasuredInFlight(enabled: Boolean) {

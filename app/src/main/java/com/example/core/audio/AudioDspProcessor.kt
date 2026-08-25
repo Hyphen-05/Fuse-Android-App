@@ -99,6 +99,24 @@ class AudioDspProcessor(private val backend: AudioBackend) {
          */
         const val PULSE_STEADY_ENOUGH = 0.7f
 
+        /**
+         * Share of a beat period that must pass before *any* mechanism may flash again, when
+         * `oneFlashPerBeatEnabled` is on. 0.9 rather than 1.0 so a beat arriving early because the
+         * tempo drifted is still allowed through; anything under about 0.6 lets the eighth back in.
+         *
+         * This is deliberately a cap on the *rate*, not on correctness. The tempo estimate is the
+         * reliable part of the beat machinery — 127.7 measured against a true 128, confident on
+         * eight of ten tracks — while the phase is what is unreliable. So the strip can be stopped
+         * from flashing twice in a beat even on the clips where nothing knows where the beat is.
+         */
+        const val GLOBAL_FLASH_BEAT_FRACTION = 0.9f
+
+        /**
+         * Time constant for the ambient-brightness smoothing, when `steadyAmbientEnabled` is on.
+         * 250ms is about a half-beat at 120bpm: slow enough that the background stops chasing every
+         * frame of audio, fast enough to still follow a section change within a bar.
+         */
+        const val AMBIENT_SMOOTHING_TAU_MS = 250f
     }
 
     // visualizer-review-2026-07-22.md C8/B4: tau constants for the auto-gain/UI-amplitude decay
@@ -197,6 +215,23 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private val beatDetector = BeatDetector()
     private var beatPulsePeak = 0.0f
     private var lastBeatFlashTime = 0L
+
+    /**
+     * Minimum gap between flashes from *any* mechanism, recomputed each frame from the tempo.
+     * 0 disables the cap, which is what `oneFlashPerBeatEnabled = false` and an unknown tempo both
+     * produce — with no tempo there is no beat period to be one-per-beat of, and refusing to flash
+     * would be worse than flashing freely.
+     */
+    private var minFlashIntervalMs = 0f
+
+    /**
+     * One-pole smoothed [ambientLevel], used only when `steadyAmbientEnabled` is on.
+     *
+     * The flash is deliberately *not* routed through this: the point is to stop the background
+     * jittering while leaving the beat punchy. Smoothing both would just make the whole thing mushy,
+     * which is the opposite of the ask.
+     */
+    private var smoothedAmbientLevel = 0f
 
     // --- P1 predictive flash scheduling (mapping-proposal-audio-to-led-2026-07-21.md §4,
     // "Predictive flash scheduling") ---
@@ -366,6 +401,10 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // Same reason as MusicPresence: the gate below zeroes quiet bins, and the whole point of
         // the tracker's log compression is to hear the quiet detail a percussion track lives in.
         val pulseBeat = pulseTracker.process(magnitude, numBins, nowMs)
+        // Hoisted above the flash mechanisms (it used to be computed down beside the pulse
+        // trigger) so the predictive scheduler can stand down for it. See the scheduler's guard.
+        // `settings`, not the `state` alias — that is declared further down, after the noise gate.
+        val pulseSteady = settings.pulseTrackerEnabled && pulseTracker.stability >= PULSE_STEADY_ENOUGH
 
         // Apply Noise Gate: any bin below noiseFloor * 1.5 should be zeroed out
         val threshold = noiseFloor * 1.5f
@@ -550,6 +589,14 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             maxCooldownMs = state.beatCooldownMs,
             now = nowMs
         )
+        // Recomputed per frame, ahead of every flash mechanism, so all four are capped by the same
+        // number and it follows a tempo that drifts.
+        minFlashIntervalMs = if (state.oneFlashPerBeatEnabled && result.bpm > 0f) {
+            (60_000f / result.bpm) * GLOBAL_FLASH_BEAT_FRACTION
+        } else {
+            0f
+        }
+
         val isBeat = result.isBeat && totalEnergy >= effectiveNoiseGate && musicPresent
         if (isBeat || nowMs - lastDiagnosticSampleMs >= 1500L) {
             if (!isBeat) lastDiagnosticSampleMs = nowMs
@@ -716,8 +763,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // two paths this one had no energy check of any kind, because a prediction is by design not
         // evidence of anything in this frame.
         // The beat clock, when it is running, owns the flashing outright — see the block below.
+        // `!pulseSteady` added 2026-08-25. This guard listed the beat clock and nothing else, so a
+        // steady PulseTracker stood the *causal* trigger down but not this one, and the two flashed
+        // together — turning Beat Tracking on added a mechanism instead of replacing one. Invisible
+        // in the corpus at the default `flashTimingOffsetMs` of 0, where this scheduler fires 0% of
+        // the time, and very much not invisible at the non-zero offset any calibrated phone has.
         if (scheduledFlashAtMs != 0L && !scheduledFlashFired && nowMs >= scheduledFlashAtMs && !flashIsStale && predictiveWeight > 0.15f && musicPresent &&
-            !(state.beatClockEnabled && beatClock.isTrusted)) {
+            !pulseSteady && !(state.beatClockEnabled && beatClock.isTrusted)) {
             // Peak uses the *carried* strength/confidence from the most recent detection, not
             // this frame's `result` -- detection for this exact beat hasn't arrived yet (that's
             // the whole point of scheduling ahead of it). visualizer-review-2026-07-22.md A3: only
@@ -756,7 +808,6 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // the shipped path's 53%, but the average is not the point — steadiness sorts the corpus
         // hard. Clips where it holds still score 84%, clips where it does not score 38%, and it is
         // the same tracker in both. So it is worth listening to exactly when it is sure.
-        val pulseSteady = state.pulseTrackerEnabled && pulseTracker.stability >= PULSE_STEADY_ENOUGH
         if (pulseBeat && pulseSteady && musicPresent) {
             val peak = state.flashFloor +
                 dropBoostedFlashRange * carriedFlashStrength * carriedFlashConfidence
@@ -1073,7 +1124,19 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             } else {
                 0f
             }
-            val ambientLevel = baseValVal * state.ambientCapFraction * (1f - preDip) * macroBoost
+            val rawAmbientLevel = baseValVal * state.ambientCapFraction * (1f - preDip) * macroBoost
+            // The other half of "too flashy": even between flashes the background is never still,
+            // because it follows the audio every single frame. This slews it instead. Off by
+            // default and independent of the flash cap, so the two can be judged one at a time —
+            // Joe could not say which of them was making the mess, and this is how we find out.
+            val ambientLevel = if (state.steadyAmbientEnabled) {
+                val alpha = if (dtMs <= 0L) 1f else (dtMs.toFloat() / AMBIENT_SMOOTHING_TAU_MS).coerceIn(0f, 1f)
+                smoothedAmbientLevel += (rawAmbientLevel - smoothedAmbientLevel) * alpha
+                smoothedAmbientLevel
+            } else {
+                smoothedAmbientLevel = rawAmbientLevel
+                rawAmbientLevel
+            }
             val elapsedMs = nowMs - lastBeatFlashTime
             val t = elapsedMs.toFloat() / activeFlashDecayMs
             val beatEnvelope = maxOf(1f - t * t, 0f) * beatPulsePeak
@@ -1173,6 +1236,13 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     // it actually fired, so callers can gate their own bookkeeping (cooldowns, confirm deadlines)
     // on a real trigger rather than a suppressed one.
     private fun triggerFlash(atMs: Long, peak: Float, decayMs: Float): Boolean {
+        // The rate cap lives here rather than at the four call sites because here it cannot be
+        // skipped by whichever mechanism is added next. Until 2026-08-25 this method gated on
+        // amplitude alone — a flash was refused only for being dimmer than the one still decaying —
+        // so nothing bounded how *often* the strip could flash. Measured consequence: 1.68 flashes
+        // per annotated beat, and the double grid fitting better than the true one on 80 clips
+        // in 100.
+        if (minFlashIntervalMs > 0f && (atMs - lastBeatFlashTime).toFloat() < minFlashIntervalMs) return false
         val elapsed = (atMs - lastBeatFlashTime).toFloat()
         val t = if (activeFlashDecayMs > 0f) elapsed / activeFlashDecayMs else 1f
         val currentEnvelope = kotlin.math.max(1f - t * t, 0f) * beatPulsePeak

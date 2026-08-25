@@ -78,7 +78,7 @@ class GtzanBeatAccuracyTest {
         return out
     }
 
-    private fun settingsFor(preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false): AudioSettingsState =
+    private fun settingsFor(preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): AudioSettingsState =
         audioSettingsReducer(
             RgbUiState(audioSettings = AudioSettingsState()),
             RgbIntent.SetVisualizerPreset(preset),
@@ -88,11 +88,12 @@ class GtzanBeatAccuracyTest {
             beatClockEnabled = beatClock,
             beatRefractoryEnabled = refractory,
             beatVetoEnabled = veto,
-            pulseTrackerEnabled = pulse
+            pulseTrackerEnabled = pulse,
+            oneFlashPerBeatEnabled = cap
         )
 
-    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false): List<Long> {
-        val settings = settingsFor(preset, beatClock, refractory, veto, pulse)
+    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): List<Long> {
+        val settings = settingsFor(preset, beatClock, refractory, veto, pulse, cap)
         val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
         val pcm = OfflineAudio.readWav(clip.wav)
         val out = ArrayList<Long>()
@@ -101,6 +102,55 @@ class GtzanBeatAccuracyTest {
             if (result.flashFiredThisFrame) out.add(atMs)
         }
         return out
+    }
+
+    /**
+     * How many times the strip flashes per beat the music actually has.
+     *
+     * Joe's complaint on 2026-08-25, in his words: "if you have 10 flashes or stuff that looks like
+     * flashes per beat then it all becomes a mess not a satisfying visualiser". F-measure cannot
+     * express that — it weighs a missed beat exactly as heavily as a spurious flash, so a change
+     * that halves the flashing and drops a few real beats scores as a loss while being precisely
+     * what he asked for. This reports the ratio directly. 1.0 is one flash per beat; 2.0 is the
+     * double-rate flashing already documented on 80 of 100 clips.
+     *
+     * Diagnostic, not an assertion — there is no agreed target yet.
+     */
+    @Test
+    fun `flash density per beat, by configuration`() {
+        val all = clips()
+        assumeTrue("GTZAN not present at $root — see the class comment", all.isNotEmpty())
+
+        val configs = listOf<Pair<String, (Clip) -> List<Long>>>(
+            "shipped" to { c -> flashes(c, "Punchy", false) },
+            "pulse" to { c -> flashes(c, "Punchy", false, pulse = true) },
+            "refractory" to { c -> flashes(c, "Punchy", false, refractory = true) },
+            "veto" to { c -> flashes(c, "Punchy", false, veto = true) },
+            "pulse+refractory" to { c -> flashes(c, "Punchy", false, refractory = true, pulse = true) },
+            "clock" to { c -> flashes(c, "Punchy", true) },
+            "CAP" to { c -> flashes(c, "Punchy", false, cap = true) },
+            "CAP+pulse" to { c -> flashes(c, "Punchy", false, pulse = true, cap = true) },
+            "CAP+pulse+refr" to { c -> flashes(c, "Punchy", false, refractory = true, pulse = true, cap = true) }
+        )
+
+        println("")
+        println("=== Flashes per annotated beat (${all.size} clips) ===")
+        println("%18s %14s %10s %10s".format("config", "flashes/beat", "precision", "recall"))
+        for ((name, run) in configs) {
+            var ratioSum = 0.0
+            var pSum = 0.0
+            var rSum = 0.0
+            for (clip in all) {
+                val f = run(clip)
+                ratioSum += if (clip.beatsMs.isEmpty()) 0.0 else f.size.toDouble() / clip.beatsMs.size
+                val s = BeatAccuracy.score(clip.beatsMs, f)
+                pSum += s.precision
+                rSum += s.recall
+            }
+            val n = all.size
+            println("%18s %13.2f %9d%% %9d%%".format(
+                name, ratioSum / n, BeatAccuracy.pct(pSum / n), BeatAccuracy.pct(rSum / n)))
+        }
     }
 
     @Test

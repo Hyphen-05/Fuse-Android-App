@@ -304,6 +304,18 @@ fun audioSettingsReducer(
             ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("pulse_tracker_enabled", intent.enabled))
         }
 
+        is RgbIntent.SetSteadyAmbientEnabled -> {
+            state.copy(
+                audioSettings = state.audioSettings.copy(steadyAmbientEnabled = intent.enabled)
+            ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("steady_ambient", intent.enabled))
+        }
+
+        is RgbIntent.SetOneFlashPerBeatEnabled -> {
+            state.copy(
+                audioSettings = state.audioSettings.copy(oneFlashPerBeatEnabled = intent.enabled)
+            ) to listOf(AudioSideEffect.SaveAudioPrefBoolean("one_flash_per_beat", intent.enabled))
+        }
+
         is RgbIntent.SetFlashFloorUsesMeasuredInFlight -> {
             state.copy(
                 audioSettings = state.audioSettings.copy(flashFloorUsesMeasuredInFlight = intent.enabled)
