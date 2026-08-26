@@ -108,13 +108,83 @@ rises 12 points for no measurable F change, which is why the earlier "break-even
 should not be read as ruling this out — those candidates suppressed one mechanism out of four while
 the others carried on flashing.
 
-**The refractory is now redundant.** `cap + pulse` and `cap + pulse + refractory` are identical: a
-0.9-beat cap subsumes a 0.55-beat one. Do not ship `beatRefractoryEnabled`; it is dead weight beside
-the cap.
+**The refractory is now redundant, and is deleted.** `cap + pulse` and `cap + pulse + refractory`
+are identical: a 0.9-beat cap subsumes a 0.55-beat one. `beatRefractoryEnabled`,
+`REFRACTORY_BEAT_FRACTION` and the candidate rows that used them were removed on 2026-08-26 — the
+rows in the tables above are the record, and are the reason not to rebuild it. The causal trigger is
+back to the flat `FAST_TRIGGER_COOLDOWN_MS` it always shipped with, so nothing about the default
+path changed.
 
 **What the cap does not fix is phase.** Precision 56% means about half the remaining flashes are
 still not on a true beat — they are simply no longer doubled up. If one-per-beat still reads wrong on
 hardware, phase is the next problem, and it is the harder one. Rate was cheap; phase is not.
+
+
+## Comfort and coupling are the same number (2026-08-26)
+
+Joe judged Live Wire on hardware and rejected it — "way too flashy or jumpy... very uncomfortable on
+the eyes" — then, asked about the rest, said **none of the presets are comfortable or satisfying**.
+That second sentence is the important one: it removes the assumption that Smooth Flow and Ambient
+Chill mark a comfortable end of the scale. There is no known-good reference anywhere in the app.
+
+Two metrics were added to `trackingOf` because `movement` is a mean and the complaint is not about
+the mean: `peakSlew` (95th percentile of |dBrightness|/s) and `contrast` (p95 - p5 of brightness). A
+third, `bestLift`, sweeps the +-80ms beat window back over lags 0-200ms, because slowing the attack
+delays the peak and plain `lift` would mark a calm tuning down for *lagging* rather than for failing
+to follow the music.
+
+### The result: three knobs, one line
+
+Sweeping `fastAttackTauMs` x `bodyShare` x `punchGain` (27 combinations, 34 clips) does not describe a
+frontier to pick a point on. It describes a **line**:
+
+    excess coupling (bestLift - 1) ~= k * peakSlew,   pearson r = 0.87 overall
+
+and within a fixed `bodyShare` the constant is near enough exact — `bodyShare` 0.25 holds k between
+0.067 and 0.085 while `peakSlew` varies **8-fold** across the other two knobs.
+
+So `fastAttackTauMs` and `punchGain` are not independent levers. They are the same lever twice: both
+slide the tuning along one line, trading coupling for jarring at a fixed rate. `bodyShare` is the only
+knob that changes the exchange rate at all, and it moves it the **wrong way** — raising it from 0.25
+to 0.65 drops k from ~0.075 to ~0.040, i.e. less felt connection per unit of discomfort.
+
+| preset | lift | bestLift | lag | movement/s | peakSlew | contrast | mean |
+|---|---|---|---|---|---|---|---|
+| Punchy | 1.307 | 1.372 | 38ms | 2.96 | 14.56 | 0.510 | 0.372 |
+| Live Wire | 1.278 | 1.424 | 59ms | 1.81 | 6.89 | 0.465 | 0.362 |
+| Smooth Flow | 1.001 | 1.039 | 96ms | 0.49 | 1.87 | 0.213 | 0.455 |
+| Ambient Chill | 0.997 | 1.014 | 102ms | 0.55 | 1.58 | 0.380 | 0.570 |
+
+Lag compensation does *not* rescue the calm tunings: `bestLift` lifts 45/0.45/0.30 from 1.037 to only
+1.094, against 1.424 for shipped Live Wire. Smoothing genuinely destroys the coupling; it does not
+merely delay it. Both metrics agree, which is the point of having both.
+
+### What this means
+
+**Stop tuning brightness.** Every preset in the app modulates one scalar and only that scalar, and
+this line is the whole space those presets live in. Punchy and Live Wire sit at the jarring end;
+Smooth Flow and Ambient Chill sit at the dead end; Joe has now rejected both ends and everything
+between them is on the same line by construction. Another sweep buys another point on it.
+
+**The strip is single-colour.** `DuoCoProtocol` has one colour command for the whole strip, no
+per-LED addressing. So a visualiser has exactly two dimensions over time: brightness and hue. Hue is
+currently near-frozen on every preset (Live Wire drifts 3 deg/s with an +-8 deg breath), which means
+the entire judged history of this feature has explored one of the two available axes.
+
+**Colour is the untried axis, and the eye's flicker sensitivity is a luminance phenomenon** — chroma
+motion at the same subjective "amount of movement" is markedly less fatiguing. A mapping that holds
+brightness fairly steady and puts the music into hue and saturation is the one quadrant that has
+never been built, and it is the only one that can satisfy both halves of Joe's complaint at once.
+
+**projectM is not a coupling to copy.** He rates it "pretty much perfect", and `ContinuousDrive` was
+written from its audio model — but what makes it satisfying is *spatial*, 2D shapes in motion, and
+that is exactly the part a one-colour strip cannot show. Copying its audio front end copies the part
+that was not doing the work. The open question is whether anything of it survives being averaged to a
+single colour, and the cheap way to settle that is to run projectM on the Pixel and point Fuse's
+existing **ambiance screen capture** at it: the strip then shows projectM averaged down to one colour,
+with no new code at all. If that feels good there is finally a ground truth to characterise and
+reproduce; if it feels dead, this hardware's ceiling has been found and the honest move is to say so.
+Do not read "sluggish" as "dead" in that test — ambiance applies its own EMA and deadband first.
 
 ## What is in the tree now
 
