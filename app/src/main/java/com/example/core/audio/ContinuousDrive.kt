@@ -38,6 +38,15 @@ class ContinuousDrive(private val tuning: Tuning = Tuning()) {
      * Defaults are the tuned values; see that test for the sweep that chose them.
      */
     data class Tuning(
+        /**
+         * Rise time of the fast envelope, and so how sharp the *edge* of a transient is.
+         *
+         * Sweepable because it is the one number that sets how fast the light can climb, and
+         * "uncomfortable on the eyes" is a statement about rate of change, not about how often
+         * something happens. At the original 12ms a kick is fully up inside one frame, which is a
+         * strobe edge by any other name.
+         */
+        val fastAttackTauMs: Float = FAST_ATTACK_TAU_MS,
         val fastReleaseTauMs: Float = FAST_RELEASE_TAU_MS,
         val slowAttackTauMs: Float = SLOW_ATTACK_TAU_MS,
         val slowReleaseTauMs: Float = SLOW_RELEASE_TAU_MS,
@@ -152,7 +161,7 @@ class ContinuousDrive(private val tuning: Tuning = Tuning()) {
         // Asymmetric envelopes: rising and falling use different time constants, which is what makes
         // a transient a shape rather than a symmetrical bump.
         fastEnv += (mix - fastEnv) *
-            alpha(dtMs, if (mix > fastEnv) FAST_ATTACK_TAU_MS else tuning.fastReleaseTauMs)
+            alpha(dtMs, if (mix > fastEnv) tuning.fastAttackTauMs else tuning.fastReleaseTauMs)
         slowEnv += (mix - slowEnv) *
             alpha(dtMs, if (mix > slowEnv) tuning.slowAttackTauMs else tuning.slowReleaseTauMs)
 

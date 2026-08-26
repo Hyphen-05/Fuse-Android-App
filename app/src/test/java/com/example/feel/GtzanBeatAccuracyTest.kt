@@ -79,7 +79,7 @@ class GtzanBeatAccuracyTest {
         return out
     }
 
-    private fun settingsFor(preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): AudioSettingsState =
+    private fun settingsFor(preset: String, beatClock: Boolean, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): AudioSettingsState =
         audioSettingsReducer(
             RgbUiState(audioSettings = AudioSettingsState()),
             RgbIntent.SetVisualizerPreset(preset),
@@ -87,14 +87,13 @@ class GtzanBeatAccuracyTest {
             emptyMap()
         ).first.audioSettings.copy(
             beatClockEnabled = beatClock,
-            beatRefractoryEnabled = refractory,
             beatVetoEnabled = veto,
             pulseTrackerEnabled = pulse,
             oneFlashPerBeatEnabled = cap
         )
 
-    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, refractory: Boolean = false, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): List<Long> {
-        val settings = settingsFor(preset, beatClock, refractory, veto, pulse, cap)
+    private fun flashes(clip: Clip, preset: String, beatClock: Boolean, veto: Boolean = false, pulse: Boolean = false, cap: Boolean = false): List<Long> {
+        val settings = settingsFor(preset, beatClock, veto, pulse, cap)
         val processor = AudioDspProcessor(AudioBackend.AUDIO_RECORD)
         val pcm = OfflineAudio.readWav(clip.wav)
         val out = ArrayList<Long>()
@@ -142,7 +141,60 @@ class GtzanBeatAccuracyTest {
      * Mean is here because lift is a *ratio*: a preset that sits almost dark and pulses dimly scores
      * beautifully on it while looking feeble on a wall. Any tuning decision needs all three.
      */
-    private fun trackingOf(series: List<Pair<Long, Float>>, beats: List<Long>): Triple<Double, Double, Double>? {
+    /**
+     * @param lift how much brighter the light is on beats than off them.
+     * @param movement mean |change in brightness| per second — how busy the light is on average.
+     * @param mean average brightness, so a preset that scores well by sitting nearly dark is visible
+     *   as such.
+     * @param peakSlew the 95th percentile of |change in brightness| per second across frames.
+     * @param contrast p95 minus p5 of brightness: how far the light actually swings.
+     */
+    private data class Tracking(
+        val lift: Double,
+        val movement: Double,
+        val mean: Double,
+        val peakSlew: Double,
+        val contrast: Double,
+        val bestLift: Double,
+        val bestLagMs: Long
+    )
+
+    /** Distance from [atMs] to the nearest beat in [sorted], by binary search. */
+    private fun nearestBeat(sorted: LongArray, atMs: Long): Long {
+        if (sorted.isEmpty()) return Long.MAX_VALUE
+        var lo = 0
+        var hi = sorted.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (sorted[mid] < atMs) lo = mid + 1 else hi = mid
+        }
+        var best = kotlin.math.abs(sorted[lo] - atMs)
+        if (lo > 0) best = minOf(best, kotlin.math.abs(sorted[lo - 1] - atMs))
+        return best
+    }
+
+    /** on-beat mean over off-beat mean, with the series shifted back by [lagMs]. */
+    private fun liftAtLag(series: List<Pair<Long, Float>>, sorted: LongArray, lagMs: Long): Double? {
+        var onSum = 0.0; var onN = 0
+        var offSum = 0.0; var offN = 0
+        for ((atMs, v) in series) {
+            if (nearestBeat(sorted, atMs - lagMs) <= 80L) { onSum += v; onN++ } else { offSum += v; offN++ }
+        }
+        if (onN == 0 || offN == 0 || offSum <= 0.0) return null
+        return (onSum / onN) / (offSum / offN)
+    }
+
+    /**
+     * `peakSlew` and `contrast` exist because `movement` is a *mean* and Joe's complaint is not
+     * about the mean. On 2026-08-26 he called Live Wire "way too flashy or jumpy... very
+     * uncomfortable on the eyes" — and Live Wire fires no flashes at all, so what he is describing
+     * is the brightness itself moving too far, too fast. Discomfort tracks the worst excursions, not
+     * the average busyness: a mapping that is calm for 90% of a track and slams the strip on every
+     * kick has a respectable `movement` and is still unwatchable. Tuning against the mean alone
+     * would repeat the F-measure mistake in a new costume — optimising a number that averages away
+     * exactly the events being complained about.
+     */
+    private fun trackingOf(series: List<Pair<Long, Float>>, beats: List<Long>): Tracking? {
         if (series.size < 2 || beats.isEmpty()) return null
         val sorted = beats.sorted()
         var onSum = 0.0; var onN = 0
@@ -152,11 +204,46 @@ class GtzanBeatAccuracyTest {
             if (near <= 80L) { onSum += v; onN++ } else { offSum += v; offN++ }
         }
         if (onN == 0 || offN == 0 || offSum <= 0.0) return null
+
+        // `lift` measures brightness inside +-80ms of the beat, which silently assumes the light
+        // rises *with* the beat. Slowing the attack deliberately delays the peak, so a calm tuning
+        // is penalised for lag rather than for failing to follow the music — the metric would rule
+        // out the exact change being tested. `bestLift` sweeps the window back over the plausible
+        // lag range and reports the best fit and where it was: a consistent 60ms delay is not
+        // something an eye objects to, whereas no coupling at any lag genuinely is a lava lamp.
+        val beatArray = sorted.toLongArray()
+        var bestLift = 0.0
+        var bestLag = 0L
+        for (lag in 0L..200L step 20L) {
+            val l = liftAtLag(series, beatArray, lag) ?: continue
+            if (l > bestLift) { bestLift = l; bestLag = lag }
+        }
+
         var delta = 0.0
-        for (i in 1 until series.size) delta += kotlin.math.abs(series[i].second - series[i - 1].second)
+        // Per-frame slew in brightness per *second*, so a rate is comparable across frame intervals.
+        val slews = ArrayList<Double>(series.size)
+        for (i in 1 until series.size) {
+            val d = kotlin.math.abs(series[i].second - series[i - 1].second)
+            delta += d
+            val dtSec = (series[i].first - series[i - 1].first).coerceAtLeast(1L) / 1000.0
+            slews.add(d / dtSec)
+        }
+        slews.sort()
+        val values = series.map { it.second.toDouble() }.sorted()
+        fun pct(list: List<Double>, q: Double): Double =
+            if (list.isEmpty()) 0.0
+            else list[((list.size - 1) * q).toInt().coerceIn(0, list.size - 1)]
         val spanSec = (series.last().first - series.first().first).coerceAtLeast(1L) / 1000.0
         val mean = (onSum + offSum) / (onN + offN)
-        return Triple((onSum / onN) / (offSum / offN), delta / spanSec, mean)
+        return Tracking(
+            lift = (onSum / onN) / (offSum / offN),
+            movement = delta / spanSec,
+            mean = mean,
+            peakSlew = pct(slews, 0.95),
+            contrast = pct(values, 0.95) - pct(values, 0.05),
+            bestLift = bestLift,
+            bestLagMs = bestLag
+        )
     }
 
     /**
@@ -174,36 +261,49 @@ class GtzanBeatAccuracyTest {
         val all = clips().filterIndexed { i, _ -> i % 3 == 0 }
         assumeTrue("GTZAN not present at $root — see the class comment", all.isNotEmpty())
 
-        // Refinement round. The first sweep established the shape: lift rises as bodyShare falls,
-        // and punchGain *costs* lift while adding movement, because punch fires on every transient
-        // rather than on beats. So this explores the low-body, low-punch, short-release corner where
-        // the frontier actually is.
+        // Comfort round, 2026-08-26. Joe judged the shipped tuning on hardware and rejected it as
+        // "very uncomfortable on the eyes" — on a preset that fires no flashes, so the brightness
+        // itself is what is jumping. The earlier rounds explored the low-body corner chasing lift;
+        // this one walks the opposite way, because the frontier that matters now is calm at
+        // acceptable lift, not lift at acceptable movement.
+        //
+        // `fastAttack` is the new axis and the one to watch. At the shipped 12ms the fast envelope
+        // is fully up within a single 50ms frame, so every kick is a step change no matter what the
+        // gain is — lowering punchGain shrinks such a step but cannot slow it down.
         val candidates = buildList {
-            for (body in listOf(0.35f, 0.25f, 0.15f)) {
-                for (punch in listOf(0.5f, 1.0f, 1.5f)) {
-                    add(ContinuousDrive.Tuning(bodyShare = body, punchGain = punch, fastReleaseTauMs = 100f))
+            add(ContinuousDrive.Tuning())   // shipped, as the baseline row
+            for (attack in listOf(12f, 45f, 90f)) {
+                for (body in listOf(0.25f, 0.45f, 0.65f)) {
+                    for (punch in listOf(1.0f, 0.6f, 0.3f)) {
+                        add(ContinuousDrive.Tuning(
+                            fastAttackTauMs = attack, bodyShare = body, punchGain = punch))
+                    }
                 }
             }
-            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, fastReleaseTauMs = 80f))
-            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, fastReleaseTauMs = 160f))
-            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, slowAttackTauMs = 140f))
-            add(ContinuousDrive.Tuning(bodyShare = 0.25f, punchGain = 1.0f, slowAttackTauMs = 320f))
+            // Longer tails on the calmest attack: a slower fall is the other half of a soft edge.
+            add(ContinuousDrive.Tuning(fastAttackTauMs = 90f, bodyShare = 0.45f, punchGain = 0.6f, fastReleaseTauMs = 180f))
+            add(ContinuousDrive.Tuning(fastAttackTauMs = 90f, bodyShare = 0.45f, punchGain = 0.6f, fastReleaseTauMs = 260f))
         }
 
         println("")
         println("=== Continuous tuning sweep (${all.size} clips) ===")
-        println("%6s %6s %7s %7s %8s %11s %7s".format(
-            "body", "punch", "fastRel", "slowAtt", "lift", "movement/s", "mean"))
+        println("%7s %6s %6s %7s %8s %9s %6s %11s %10s %9s %7s".format(
+            "fastAtt", "body", "punch", "fastRel", "lift", "bestLift", "lag", "movement/s",
+            "peakSlew", "contrast", "mean"))
         for (t in candidates) {
-            var liftSum = 0.0; var moveSum = 0.0; var meanSum = 0.0; var n = 0
+            var liftSum = 0.0; var moveSum = 0.0; var meanSum = 0.0
+            var slewSum = 0.0; var contrastSum = 0.0; var bestSum = 0.0; var lagSum = 0.0; var n = 0
             for (clip in all) {
-                val (lift, move, mean) = trackingOf(brightness(clip, "Live Wire", t), clip.beatsMs) ?: continue
-                liftSum += lift; moveSum += move; meanSum += mean; n++
+                val m = trackingOf(brightness(clip, "Live Wire", t), clip.beatsMs) ?: continue
+                liftSum += m.lift; moveSum += m.movement; meanSum += m.mean
+                slewSum += m.peakSlew; contrastSum += m.contrast
+                bestSum += m.bestLift; lagSum += m.bestLagMs; n++
             }
             if (n == 0) continue
-            println("%6.2f %6.2f %7.0f %7.0f %8.3f %11.2f %7.3f".format(
-                t.bodyShare, t.punchGain, t.fastReleaseTauMs, t.slowAttackTauMs,
-                liftSum / n, moveSum / n, meanSum / n))
+            println("%7.0f %6.2f %6.2f %7.0f %8.3f %9.3f %6.0f %11.2f %10.2f %9.3f %7.3f".format(
+                t.fastAttackTauMs, t.bodyShare, t.punchGain, t.fastReleaseTauMs,
+                liftSum / n, bestSum / n, lagSum / n, moveSum / n, slewSum / n,
+                contrastSum / n, meanSum / n))
         }
     }
 
@@ -215,20 +315,28 @@ class GtzanBeatAccuracyTest {
         val presets = listOf("Live Wire", "Punchy", "Smooth Flow", "Ambient Chill")
         println("")
         println("=== Continuous tracking (${all.size} clips) ===")
-        println("%14s %8s %11s %7s".format("preset", "lift", "movement/s", "mean"))
+        println("%14s %8s %9s %6s %11s %10s %9s %7s".format(
+            "preset", "lift", "bestLift", "lag", "movement/s", "peakSlew", "contrast", "mean"))
 
         for (preset in presets) {
             var liftSum = 0.0
             var moveSum = 0.0
             var counted = 0
             var meanSum = 0.0
+            var slewSum = 0.0
+            var contrastSum = 0.0
+            var bestSum = 0.0
+            var lagSum = 0.0
             for (clip in all) {
-                val (lift, move, mean) = trackingOf(brightness(clip, preset), clip.beatsMs) ?: continue
-                liftSum += lift; moveSum += move; meanSum += mean; counted++
+                val m = trackingOf(brightness(clip, preset), clip.beatsMs) ?: continue
+                liftSum += m.lift; moveSum += m.movement; meanSum += m.mean
+                slewSum += m.peakSlew; contrastSum += m.contrast
+                bestSum += m.bestLift; lagSum += m.bestLagMs; counted++
             }
             if (counted == 0) continue
-            println("%14s %8.3f %11.2f %7.3f".format(
-                preset, liftSum / counted, moveSum / counted, meanSum / counted))
+            println("%14s %8.3f %9.3f %6.0f %11.2f %10.2f %9.3f %7.3f".format(
+                preset, liftSum / counted, bestSum / counted, lagSum / counted,
+                moveSum / counted, slewSum / counted, contrastSum / counted, meanSum / counted))
         }
     }
 
@@ -252,13 +360,10 @@ class GtzanBeatAccuracyTest {
         val configs = listOf<Pair<String, (Clip) -> List<Long>>>(
             "shipped" to { c -> flashes(c, "Punchy", false) },
             "pulse" to { c -> flashes(c, "Punchy", false, pulse = true) },
-            "refractory" to { c -> flashes(c, "Punchy", false, refractory = true) },
             "veto" to { c -> flashes(c, "Punchy", false, veto = true) },
-            "pulse+refractory" to { c -> flashes(c, "Punchy", false, refractory = true, pulse = true) },
             "clock" to { c -> flashes(c, "Punchy", true) },
             "CAP" to { c -> flashes(c, "Punchy", false, cap = true) },
-            "CAP+pulse" to { c -> flashes(c, "Punchy", false, pulse = true, cap = true) },
-            "CAP+pulse+refr" to { c -> flashes(c, "Punchy", false, refractory = true, pulse = true, cap = true) }
+            "CAP+pulse" to { c -> flashes(c, "Punchy", false, pulse = true, cap = true) }
         )
 
         println("")
@@ -327,9 +432,7 @@ class GtzanBeatAccuracyTest {
         val candidates = linkedMapOf<String, (Clip) -> List<Long>>(
             "shipped" to { c -> flashes(c, "Punchy", false) },
             "beat clock" to { c -> flashes(c, "Punchy", true) },
-            "refractory" to { c -> flashes(c, "Punchy", false, refractory = true) },
             "offbeat veto" to { c -> flashes(c, "Punchy", false, veto = true) },
-            "veto+refractory" to { c -> flashes(c, "Punchy", false, refractory = true, veto = true) },
             "pulse tracker" to { c -> flashes(c, "Punchy", false, pulse = true) }
         )
         println("\n=== Every candidate, ${all.size} real clips, Punchy ===")
@@ -345,39 +448,6 @@ class GtzanBeatAccuracyTest {
                 name, BeatAccuracy.pct(f / n), BeatAccuracy.pct(p / n),
                 BeatAccuracy.pct(r / n), BeatAccuracy.pct(cont / n)))
         }
-    }
-
-    /** The one change the double-grid finding points straight at. */
-    @Test
-    fun `does a tempo-scaled refractory stop the double flashing`() {
-        val all = clips()
-        assumeTrue("GTZAN not present at $root — see the class comment", all.isNotEmpty())
-        println("\n=== GTZAN, tempo-scaled causal refractory (${all.size} clips) ===")
-        println("%12s %16s %16s %16s".format("genre", "F off -> on", "P off -> on", "R off -> on"))
-        var offF = 0.0; var onF = 0.0; var offP = 0.0; var onP = 0.0; var offR = 0.0; var onR = 0.0
-        for ((genre, group) in all.groupBy { it.genre }.toSortedMap()) {
-            var gOffF = 0.0; var gOnF = 0.0; var gOffP = 0.0; var gOnP = 0.0; var gOffR = 0.0; var gOnR = 0.0
-            for (clip in group) {
-                val off = BeatAccuracy.score(clip.beatsMs, flashes(clip, "Punchy", false, false))
-                val on = BeatAccuracy.score(clip.beatsMs, flashes(clip, "Punchy", false, true))
-                gOffF += off.fMeasure; gOnF += on.fMeasure
-                gOffP += off.precision; gOnP += on.precision
-                gOffR += off.recall; gOnR += on.recall
-            }
-            val n = group.size
-            println("%12s %7d%% ->%5d%% %7d%% ->%5d%% %7d%% ->%5d%%".format(
-                genre,
-                BeatAccuracy.pct(gOffF / n), BeatAccuracy.pct(gOnF / n),
-                BeatAccuracy.pct(gOffP / n), BeatAccuracy.pct(gOnP / n),
-                BeatAccuracy.pct(gOffR / n), BeatAccuracy.pct(gOnR / n)))
-            offF += gOffF; onF += gOnF; offP += gOffP; onP += gOnP; offR += gOffR; onR += gOnR
-        }
-        val n = all.size
-        println("%12s %7d%% ->%5d%% %7d%% ->%5d%% %7d%% ->%5d%%".format(
-            "ALL",
-            BeatAccuracy.pct(offF / n), BeatAccuracy.pct(onF / n),
-            BeatAccuracy.pct(offP / n), BeatAccuracy.pct(onP / n),
-            BeatAccuracy.pct(offR / n), BeatAccuracy.pct(onR / n)))
     }
 
     @Test
