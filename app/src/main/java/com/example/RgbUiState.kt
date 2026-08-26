@@ -177,15 +177,6 @@ data class AudioSettingsState(
      */
     val beatClockEnabled: Boolean = false,
     /**
-     * Stops the causal trigger firing twice inside one beat, by scaling its refractory period to
-     * the detected tempo instead of a flat 150ms.
-     *
-     * **Measured and rejected as a default**: precision 44% to 47%, recall 69% to 56%, F 53% to
-     * 50%. A refractory started by an offbeat swallows the beat after it, so it costs about as many
-     * true flashes as false ones. See `GtzanBeatAccuracyTest`.
-     */
-    val beatRefractoryEnabled: Boolean = false,
-    /**
      * Keeps the causal trigger as the thing that fires, but drops the flashes that land between
      * beats, using the beat clock's phase as a referee.
      *

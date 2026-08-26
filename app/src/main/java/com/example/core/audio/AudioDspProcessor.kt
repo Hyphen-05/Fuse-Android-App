@@ -91,12 +91,6 @@ class AudioDspProcessor(
         /** The shipped flat cooldown between fast-causal triggers. */
         const val FAST_TRIGGER_COOLDOWN_MS = 150L
 
-        /**
-         * With the tempo-scaled refractory on, the share of a beat that must pass before the causal
-         * trigger may fire again. Just over half, so it cannot fire on the eighth between beats but
-         * still allows a beat that arrives early because the tempo drifted.
-         */
-        const val REFRACTORY_BEAT_FRACTION = 0.55f
 
         /** How far from a tick a causal flash may land before it is treated as an offbeat. */
         const val VETO_TOLERANCE = 0.2f
@@ -871,15 +865,12 @@ class AudioDspProcessor(
         // measured worse on its own — mean F 61% to 50% — because with the scheduler dead it was
         // the only thing flashing at all. What stands it down now is a *trusted* clock, and
         // nothing else.
-        // A flat 150ms refractory is a third of a beat at 128bpm, so the trigger is free to fire on
-        // the eighth as well as the beat — which is exactly what it does: on 80 of 100 real GTZAN
-        // clips the flashes fit the *double* grid better than the true one. Scaling the refractory
-        // to the tempo the detector already knows is the smallest thing that can stop it.
-        val causalRefractoryMs = if (state.beatRefractoryEnabled && result.bpm > 0f) {
-            maxOf(FAST_TRIGGER_COOLDOWN_MS.toFloat(), (60_000f / result.bpm) * REFRACTORY_BEAT_FRACTION).toLong()
-        } else {
-            FAST_TRIGGER_COOLDOWN_MS
-        }
+        // A flat 150ms cooldown is a third of a beat at 128bpm, so this trigger is free to fire on
+        // the eighth as well as the beat — which is exactly what it did: on 80 of 100 real GTZAN
+        // clips the flashes fit the *double* grid better than the true one. A tempo-scaled
+        // refractory (0.55 of a beat) was built to stop that and is deleted: the global flash cap
+        // in `triggerFlash` bounds the rate at 0.9 of a beat, which subsumes it — `cap + pulse` and
+        // `cap + pulse + refractory` measure identically. See docs/beat-detection.md.
         // The clock as referee rather than driver. Suppressing by time alone cannot tell an offbeat
         // from a beat — the tempo-scaled refractory above buys 3 points of precision and gives back
         // 13 of recall, because a refractory started by an offbeat swallows the beat after it. The
@@ -888,7 +879,7 @@ class AudioDspProcessor(
         val vetoedAsOffbeat = state.beatVetoEnabled && beatClock.isTrusted &&
             (beatClock.distanceFromTick(nowMs) ?: 0f) > VETO_TOLERANCE
 
-        if (!clockRunning && !pulseSteady && !vetoedAsOffbeat && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > causalRefractoryMs) {
+        if (!clockRunning && !pulseSteady && !vetoedAsOffbeat && result.causalIsCandidate && totalEnergy >= effectiveNoiseGate && musicPresent && nowMs - lastFastTriggerFlashAtMs > FAST_TRIGGER_COOLDOWN_MS) {
             val fastWeight = 1f - predictiveWeight
             if (fastWeight > 0.05f) {
                 // Reduced strength, per the plan -- a fixed mid-range peak (not tied to a
