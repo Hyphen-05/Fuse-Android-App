@@ -38,6 +38,8 @@ class DeviceStateStore(private val context: Context) {
     companion object {
         // Singleton delegate extension to guarantee a single instance of DataStore per app context
         private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "device_manual_states")
+
+        private const val AUTOMATION_SUFFIX = "_automation"
     }
 
     // Dynamic Keys based on device MAC Address
@@ -47,6 +49,19 @@ class DeviceStateStore(private val context: Context) {
     private fun blueKey(mac: String) = intPreferencesKey("${mac}_blue")
     private fun warmthKey(mac: String) = intPreferencesKey("${mac}_warmth")
     private fun brightnessKey(mac: String) = intPreferencesKey("${mac}_brightness")
+
+    /**
+     * Which automation (if any) currently owns this device, and therefore owes it a restore.
+     *
+     * This lives beside the colours on purpose. The colours were always persisted, but the "is this
+     * device under automation" flag used to exist only in a `ConcurrentHashMap` in the ViewModel —
+     * and ambiance runs as a foreground service while the user is in another app, exactly when
+     * Android is most likely to destroy the Activity and the ViewModel with it. The map came back
+     * empty, the restore loop iterated nothing, and the strip silently kept its automation colour.
+     * Persisting the flag is what makes the restore survive that.
+     */
+    private fun automationKey(mac: String) = stringPreferencesKey("${mac}_automation")
+
 
     /**
      * Saves the deliberate manual state of a device.
@@ -111,6 +126,39 @@ class DeviceStateStore(private val context: Context) {
     }
 
     /**
+     * Marks a device as owned by an automation, so a restore is still owed after a process or
+     * ViewModel death. Does not touch the saved colours.
+     */
+    suspend fun setAutomation(macAddress: String, mode: String) {
+        context.dataStore.edit { preferences -> preferences[automationKey(macAddress)] = mode }
+    }
+
+    /** Clears the automation marker once the restore has actually been performed. */
+    suspend fun clearAutomation(macAddress: String) {
+        context.dataStore.edit { preferences -> preferences.remove(automationKey(macAddress)) }
+    }
+
+    suspend fun getAutomation(macAddress: String): String? {
+        val preferences = context.dataStore.data.firstOrNull() ?: return null
+        return preferences[automationKey(macAddress)]
+    }
+
+    /**
+     * Every device still marked as under automation, as MAC to mode name. Used at startup to
+     * rebuild the in-memory ownership map so a restore survives ViewModel recreation.
+     */
+    suspend fun allAutomations(): Map<String, String> {
+        val preferences = context.dataStore.data.firstOrNull() ?: return emptyMap()
+        return preferences.asMap().mapNotNull { (key, value) ->
+            if (key.name.endsWith(AUTOMATION_SUFFIX) && value is String) {
+                key.name.removeSuffix(AUTOMATION_SUFFIX) to value
+            } else {
+                null
+            }
+        }.toMap()
+    }
+
+    /**
      * Clears all saved manual state for a device when forgotten or removed.
      */
     suspend fun clearState(macAddress: String) {
@@ -121,6 +169,7 @@ class DeviceStateStore(private val context: Context) {
             preferences.remove(blueKey(macAddress))
             preferences.remove(warmthKey(macAddress))
             preferences.remove(brightnessKey(macAddress))
+            preferences.remove(automationKey(macAddress))
         }
     }
 

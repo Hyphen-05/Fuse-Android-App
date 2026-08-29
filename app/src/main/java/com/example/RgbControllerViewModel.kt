@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
 import com.example.domain.model.AppScene
 import com.example.domain.model.DeviceSceneState
@@ -166,6 +167,21 @@ class RgbControllerViewModel(
         private val deviceStateStore = DeviceStateStore(application)
     private val deviceAutomationMode = java.util.concurrent.ConcurrentHashMap<String, AutomationType>()
     private val deviceRestoredFeatureName = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Devices that already have a manual-state snapshot saved and are owed a restore.
+     *
+     * Deliberately *not* the same thing as [deviceAutomationMode], which records which automation
+     * currently owns the device and is cleared on a handoff. When ambiance takes over from music,
+     * `StopMusicSync(restoreState = false)` clears the owner, and `saveDeviceState` used to see a
+     * null owner and overwrite the snapshot with whatever colour the visualiser was showing at that
+     * instant — so "revert" faithfully restored a random visualiser colour. This set is what keeps
+     * the *original* pre-automation snapshot through a handoff. Mirrored into `DeviceStateStore` so
+     * it survives ViewModel death too.
+     */
+    private val deviceSnapshotTaken = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    )
     enum class AutomationType { AUDIO, AMBIANCE }
     
         
@@ -726,7 +742,12 @@ class RgbControllerViewModel(
     private val scanTimeoutRunnable = Runnable { dispatch(RgbIntent.StopScanning) }
 
     private fun saveDeviceState(macAddress: String, mode: AutomationType) {
-        if (deviceAutomationMode[macAddress] == null) {
+        // The owner is always updated; the *snapshot* is taken only once and then defended, so a
+        // music -> ambiance handoff cannot overwrite the user's real colour with a visualiser frame.
+        deviceAutomationMode[macAddress] = mode
+        viewModelScope.launch(Dispatchers.IO) { deviceStateStore.setAutomation(macAddress, mode.name) }
+
+        if (deviceSnapshotTaken.add(macAddress)) {
             val s = _uiState.value
             val devState = s.connectivity.deviceStatesMap[macAddress]
             val red = devState?.red ?: s.coreControl.red
@@ -738,9 +759,7 @@ class RgbControllerViewModel(
 
             val featureName = devState?.activeFeatureName ?: s.coreControl.activeFeatureName
             deviceRestoredFeatureName[macAddress] = if (featureName == "Colour" || featureName == "CCT") featureName else "Colour"
-            
-            deviceAutomationMode[macAddress] = mode
-            
+
             viewModelScope.launch(Dispatchers.IO) {
                 deviceStateStore.saveState(
                     macAddress = macAddress,
@@ -756,8 +775,15 @@ class RgbControllerViewModel(
     }
 
     private fun restoreDeviceState(macAddress: String, mode: AutomationType) {
-        if (deviceAutomationMode[macAddress] == mode) {
+        // Restore when this automation owns the device, and also when nobody does but a snapshot is
+        // still outstanding — that second case is a ViewModel that was recreated mid-run, where the
+        // owner map came back empty and the strip would otherwise keep its automation colour
+        // forever. Requiring an exact owner match was the reason those never reverted.
+        val owner = deviceAutomationMode[macAddress]
+        val owed = deviceSnapshotTaken.contains(macAddress)
+        if (owner == mode || (owner == null && owed)) {
             deviceAutomationMode.remove(macAddress)
+            deviceSnapshotTaken.remove(macAddress)
             viewModelScope.launch(Dispatchers.IO) {
                 val state = deviceStateStore.getState(macAddress)
                 if (state != null) {
@@ -794,6 +820,9 @@ class RgbControllerViewModel(
                         current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
                     }
                 }
+                // Only once the restore has actually been sent, so a crash between the two leaves
+                // the marker in place and the next launch tries again.
+                deviceStateStore.clearAutomation(macAddress)
             }
         }
     }
@@ -1154,6 +1183,37 @@ class RgbControllerViewModel(
         // Restore/re-register DeviceWriteManagers for existing active connections to survive Activity/ViewModel recreation
         bleGattTransport.restoreWriteManagers { address ->
             addLog("Restored DeviceWriteManager for existing active connection: $address")
+        }
+
+        // Rebuild who owes a restore. Without this, a ViewModel recreated while ambiance was running
+        // in its foreground service came back with an empty ownership map, and stopping ambiance
+        // restored nothing at all.
+        viewModelScope.launch {
+            val owed = withContext(Dispatchers.IO) { deviceStateStore.allAutomations() }
+            owed.forEach { (address, modeName) ->
+                val mode = runCatching { AutomationType.valueOf(modeName) }.getOrNull() ?: return@forEach
+                deviceSnapshotTaken.add(address)
+                deviceAutomationMode[address] = mode
+            }
+            if (owed.isNotEmpty()) {
+                addLog("Restore still owed to ${owed.size} device(s) from a previous run")
+                // If nothing is actually running any more, the automation died with the process and
+                // the strip is sitting on its last automation colour. Hand it back now.
+                if (noAutomationRunning()) {
+                    owed.keys.forEach { address ->
+                        // Only for devices that are writable *now*. Restoring a disconnected device
+                        // sends into the void and would then clear the marker, losing the restore
+                        // for good — the ones that are away are paid by the reconnect hook in
+                        // onDuoCoCharacteristicRegistered instead.
+                        val connected = _uiState.value.connectivity
+                            .deviceConnectionStates[address] == BleConnectionState.CONNECTED
+                        if (connected) {
+                            deviceAutomationMode.remove(address)
+                            restoreDeviceState(address, AutomationType.AUDIO)
+                        }
+                    }
+                }
+            }
         }
 
         // Sync initial UI state with existing active BLE connections
@@ -1754,9 +1814,22 @@ class RgbControllerViewModel(
 
     // Mirrors the former registerCharacteristic() _uiState/addLog side of the write-ready path;
     // the map writes + DeviceWriteManager construction now live in AndroidBleGattTransport.
+    /** True when neither music sync nor ambiance capture is driving the strip right now. */
+    private fun noAutomationRunning(): Boolean =
+        _uiState.value.audioSettings.musicMode == null &&
+            !com.example.ambiance.AmbianceCaptureState.isActive.value
+
     private fun onDuoCoCharacteristicRegistered(reg: com.example.hardware.ble.CharacteristicRegistration.Registered) {
         val address = reg.address
         addLog("Found write characteristic for $address: ${reg.charUuid} (Ack Supported: ${reg.ackSupported})")
+
+        // A restore aimed at a disconnected device goes nowhere, so one that was owed while the
+        // device was away is paid here instead — this is the first point the device is writable.
+        if (deviceSnapshotTaken.contains(address) && noAutomationRunning()) {
+            addLog("Paying an outstanding state restore to $address on reconnect")
+            deviceAutomationMode.remove(address)
+            restoreDeviceState(address, AutomationType.AUDIO)
+        }
 
         _uiState.update { state ->
             state.copy(
