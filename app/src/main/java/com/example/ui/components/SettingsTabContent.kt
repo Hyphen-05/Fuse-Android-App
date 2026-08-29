@@ -891,7 +891,7 @@ fun LazyListScope.SettingsTabContent(
 
     item {
         ExpandableCategoryCard(
-            title = "Top Bar",
+            title = "Misc",
             icon = Icons.Default.Tune,
             iconTint = MaterialTheme.colorScheme.primary,
             initiallyExpanded = false
@@ -919,16 +919,9 @@ fun LazyListScope.SettingsTabContent(
                     modifier = Modifier.testTag("fps_tracker_switch")
                 )
             }
-        }
-    }
 
-    item {
-        ExpandableCategoryCard(
-            title = "Demo Mode",
-            icon = Icons.Default.DeveloperMode,
-            iconTint = MaterialTheme.colorScheme.primary,
-            initiallyExpanded = false
-        ) {
+            Spacer(modifier = Modifier.height(16.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth().testTag("demo_mode_row"),
                 horizontalArrangement = Arrangement.SpaceBetween,
