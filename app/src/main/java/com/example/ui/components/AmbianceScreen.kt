@@ -49,8 +49,6 @@ import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 import com.example.ambiance.AmbianceCaptureService
 import com.example.ambiance.AmbianceCaptureState
-import com.example.ambiance.AmbiancePreset
-import com.example.ambiance.AmbiancePresetStore
 import com.example.ambiance.ZoneColor
 import androidx.core.graphics.ColorUtils as AndroidColorUtils
 
@@ -63,6 +61,19 @@ import androidx.core.graphics.ColorUtils as AndroidColorUtils
  */
 const val AMBIANCE_SMOOTHNESS_MAX_MS = 400f
 const val AMBIANCE_SMOOTHNESS_MIN_MS = 10f
+
+data class AmbiancePreset(
+    val id: String,
+    val name: String,
+    val description: String,
+    val isCustom: Boolean = false,
+    val responseSpeed: Float,
+    val smoothnessMs: Int,
+    val saturationBoost: Float,
+    val brightnessCompensation: Float,
+    val sceneCutSensitivity: Float,
+    val noiseDeadband: Float
+)
 
 fun derivePaletteFromParameters(
     smoothnessMs: Int,
@@ -144,10 +155,8 @@ fun AmbianceScreen(
     val isActive = AmbianceCaptureState.isActive.collectAsState()
     val zoneColors = AmbianceCaptureState.zoneColors.collectAsState()
 
-    // Observed, not read once: the fine-tune panel saves presets too, and this list has to show
-    // them without waiting for a recomposition that reloads prefs. See AmbiancePresetStore.
-    LaunchedEffect(Unit) { AmbiancePresetStore.load(context) }
-    val customPresets by AmbiancePresetStore.presets.collectAsState()
+    // Load custom presets
+    var customPresets by remember { mutableStateOf(loadCustomPresetsFromPrefs(context)) }
 
     var showRenameDialog by remember { mutableStateOf<AmbiancePreset?>(null) }
     var presetToDelete by remember { mutableStateOf<AmbiancePreset?>(null) }
@@ -582,7 +591,8 @@ fun AmbianceScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        AmbiancePresetStore.delete(context, targetPreset.id)
+                        customPresets = customPresets.filter { it.id != targetPreset.id }
+                        saveCustomPresetsToPrefs(context, customPresets)
                         Toast.makeText(context, "Preset deleted", Toast.LENGTH_SHORT).show()
                         presetToDelete = null
                     },
@@ -626,7 +636,14 @@ fun AmbianceScreen(
                     onClick = {
                         val trimmedName = newPresetName.trim()
                         if (trimmedName.isNotEmpty()) {
-                            AmbiancePresetStore.rename(context, targetPreset.id, trimmedName)
+                            customPresets = customPresets.map {
+                                if (it.id == targetPreset.id) {
+                                    it.copy(name = trimmedName)
+                                } else {
+                                    it
+                                }
+                            }
+                            saveCustomPresetsToPrefs(context, customPresets)
                             showRenameDialog = null
                             Toast.makeText(context, "Preset renamed successfully!", Toast.LENGTH_SHORT).show()
                         } else {
@@ -646,6 +663,55 @@ fun AmbianceScreen(
             }
         )
     }
+}
+
+// Helpers for Saving / Loading custom presets using org.json
+internal fun saveCustomPresetsToPrefs(context: Context, presets: List<AmbiancePreset>) {
+    val prefs = context.getSharedPreferences("ambiance_presets_prefs", Context.MODE_PRIVATE)
+    val jsonArray = org.json.JSONArray()
+    for (p in presets) {
+        val obj = org.json.JSONObject()
+        obj.put("id", p.id)
+        obj.put("name", p.name)
+        obj.put("description", p.description)
+        obj.put("responseSpeed", p.responseSpeed.toDouble())
+        obj.put("smoothnessMs", p.smoothnessMs)
+        obj.put("saturationBoost", p.saturationBoost.toDouble())
+        obj.put("brightnessCompensation", p.brightnessCompensation.toDouble())
+        obj.put("sceneCutSensitivity", p.sceneCutSensitivity.toDouble())
+        obj.put("noiseDeadband", p.noiseDeadband.toDouble())
+        jsonArray.put(obj)
+    }
+    prefs.edit().putString("custom_presets_json", jsonArray.toString()).apply()
+}
+
+internal fun loadCustomPresetsFromPrefs(context: Context): List<AmbiancePreset> {
+    val prefs = context.getSharedPreferences("ambiance_presets_prefs", Context.MODE_PRIVATE)
+    val jsonStr = prefs.getString("custom_presets_json", null) ?: return emptyList()
+    val list = mutableListOf<AmbiancePreset>()
+    try {
+        val jsonArray = org.json.JSONArray(jsonStr)
+        for (i in 0 until jsonArray.length()) {
+            val obj = jsonArray.getJSONObject(i)
+            list.add(
+                AmbiancePreset(
+                    id = obj.getString("id"),
+                    name = obj.getString("name"),
+                    description = obj.optString("description", "Custom sliders config preset"),
+                    isCustom = true,
+                    responseSpeed = obj.getDouble("responseSpeed").toFloat(),
+                    smoothnessMs = obj.getInt("smoothnessMs"),
+                    saturationBoost = obj.getDouble("saturationBoost").toFloat(),
+                    brightnessCompensation = obj.getDouble("brightnessCompensation").toFloat(),
+                    sceneCutSensitivity = obj.optDouble("sceneCutSensitivity", 110.0).toFloat(),
+                    noiseDeadband = obj.optDouble("noiseDeadband", 0.10).toFloat()
+                )
+            )
+        }
+    } catch (e: Exception) {
+        Log.e("AmbianceScreen", "Error loading custom presets from SharedPreferences", e)
+    }
+    return list
 }
 
 @Composable

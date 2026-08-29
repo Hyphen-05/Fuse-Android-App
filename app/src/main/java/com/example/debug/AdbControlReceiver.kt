@@ -159,25 +159,6 @@ class AdbControlReceiver : BroadcastReceiver() {
                 Log.i(TAG, "stop_backend")
             }
 
-            "run_calibration" -> {
-                val sequence = intent.getStringExtra("sequence")
-                if (sequence == null || sequence !in CalibrationSequences.ALL) {
-                    Log.w(TAG, "run_calibration: 'sequence' must be one of ${CalibrationSequences.ALL}")
-                    return
-                }
-                val listener = appContainer.adbControlSink.listener
-                if (listener == null) {
-                    Log.w(TAG, "run_calibration: no active RgbControllerViewModel listener registered")
-                    return
-                }
-                // Optional --ei minutes N, currently only sustained_load reads it. Lets the
-                // duration change without a rebuild, which matters for the one sequence whose
-                // whole point is how long it runs.
-                val minutes = intent.getIntExtra("minutes", 0)
-                listener.onAdbRunCalibration(sequence, minutes)
-                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes started")
-            }
-
             "status" -> {
                 Log.i(
                     TAG,

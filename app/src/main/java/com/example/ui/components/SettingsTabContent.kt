@@ -924,7 +924,7 @@ fun LazyListScope.SettingsTabContent(
 
     item {
         ExpandableCategoryCard(
-            title = "Misc",
+            title = "Demo Mode",
             icon = Icons.Default.DeveloperMode,
             iconTint = MaterialTheme.colorScheme.primary,
             initiallyExpanded = false
@@ -951,89 +951,6 @@ fun LazyListScope.SettingsTabContent(
                     checked = state.coreControl.isDemoMode,
                     onCheckedChange = { viewModel.setDemoMode(it) },
                     modifier = Modifier.testTag("demo_mode_switch")
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth().testTag("colour_split_row"),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Split Colour and Level",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Send hue on the colour bytes and level on the strip's own dimmer. " +
-                            "Finer steps in dim scenes; costs an extra write when the level changes.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.coreControl.perceptualSplitEnabled,
-                    onCheckedChange = { viewModel.setPerceptualSplitEnabled(it) },
-                    modifier = Modifier.testTag("colour_split_switch")
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth().testTag("unlock_hues_row"),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Unlock Preset Colours",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Strobe Blast, Punchy and Laser Sharp step by an angle that divides " +
-                            "the colour wheel, so they only ever reach 2-4 colours. This nudges the " +
-                            "step off the lattice — same size leap, no repeats.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.audioSettings.unlockPresetHues,
-                    onCheckedChange = { viewModel.setUnlockPresetHues(it) },
-                    modifier = Modifier.testTag("unlock_hues_switch")
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth().testTag("musical_dynamics_row"),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Musical Dynamics",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Judge loudness against the song rather than fixed levels, so an " +
-                            "intro, a build and a chorus look different. Quiet passages hold back " +
-                            "so the loud ones land.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = state.audioSettings.musicalDynamicsEnabled,
-                    onCheckedChange = { viewModel.setMusicalDynamicsEnabled(it) },
-                    modifier = Modifier.testTag("musical_dynamics_switch")
                 )
             }
         }

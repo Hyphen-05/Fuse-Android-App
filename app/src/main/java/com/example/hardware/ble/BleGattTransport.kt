@@ -7,14 +7,12 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.content.Context
-import com.example.core.color.ColourSplitStage
 import com.example.core.protocol.DuoCoProtocol
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 /**
  * Result of [BleGattTransport.registerDuoCoCharacteristic]. Mirrors the two outcomes of the former
@@ -61,20 +59,12 @@ interface BleGattTransport {
         onLog: (String) -> Unit
     )
 
-    /**
-     * Points the [DeviceWriteManager] dependency hooks at the current ViewModel. Called once from init.
-     *
-     * [splitEnabled] and [userDimming] drive [ColourSplitStage] in [writeCommand]; they are hooks
-     * for the same reason the rest are, the transport being a singleton that outlives the ViewModel
-     * holding the preference and the Dimming slider's value.
-     */
+    /** Points the [DeviceWriteManager] dependency hooks at the current ViewModel. Called once from init. */
     fun registerWriteHooks(
         pacingProvider: (address: String) -> Int,
         calibrate: (address: String, command: ByteArray) -> ByteArray,
         onFpsUpdate: (address: String, fps: Int) -> Unit,
-        diagAttribution: (address: String) -> String,
-        splitEnabled: () -> Boolean = { false },
-        userDimming: (address: String) -> Int = { 100 }
+        diagAttribution: (address: String) -> String
     )
 
     /** Raw `getRemoteDevice(...).connectGatt(...)` + store into activeConnections. May throw. */
@@ -157,12 +147,6 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     private val writeCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
     private val deviceWriteManagers = ConcurrentHashMap<String, DeviceWriteManager>()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
-
-    /**
-     * Orders the MTU exchange ahead of service discovery. See [GattDiscoveryGate] for the race this
-     * exists to prevent and how it presented.
-     */
-    private val discoveryGate = GattDiscoveryGate()
     private val connectionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Most-recent gatt seen per address at a callback entry, so address-keyed ops can find it.
@@ -178,11 +162,6 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     @Volatile private var calibrate: (String, ByteArray) -> ByteArray = { _, cmd -> cmd }
     @Volatile private var onFpsUpdate: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var diagAttribution: (String) -> String = { "" }
-    @Volatile private var splitEnabled: () -> Boolean = { false }
-    @Volatile private var userDimming: (String) -> Int = { 100 }
-
-    /** Per-device colour/level split state. Absent when the feature is off. See [ColourSplitStage]. */
-    private val splitStages = ConcurrentHashMap<String, ColourSplitStage>()
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
@@ -195,19 +174,6 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
             val address = gatt?.device?.address ?: return
             callbackGatt[address] = gatt
             onServicesDiscovered(address, status)
-        }
-
-        /**
-         * The MTU exchange finishing is what releases service discovery — see [GattDiscoveryGate].
-         * Status is deliberately ignored: a refused MTU is fine (the default 23 works), what
-         * matters is that the GATT client is free again.
-         */
-        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
-            val address = gatt?.device?.address ?: return
-            callbackGatt[address] = gatt
-            discoveryGate.onMtuSettled(address)
-            onLog("MTU settled for $address (mtu=$mtu, status=$status); starting service discovery.")
-            issueDiscoveryIfWanted(address)
         }
 
         override fun onCharacteristicWrite(
@@ -237,38 +203,28 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         pacingProvider: (String) -> Int,
         calibrate: (String, ByteArray) -> ByteArray,
         onFpsUpdate: (String, Int) -> Unit,
-        diagAttribution: (String) -> String,
-        splitEnabled: () -> Boolean,
-        userDimming: (String) -> Int
+        diagAttribution: (String) -> String
     ) {
         this.pacingProvider = pacingProvider
         this.calibrate = calibrate
         this.onFpsUpdate = onFpsUpdate
         this.diagAttribution = diagAttribution
-        this.splitEnabled = splitEnabled
-        this.userDimming = userDimming
     }
 
     private fun buildWriteManager(
         address: String,
         gatt: BluetoothGatt,
         charac: BluetoothGattCharacteristic
-    ): DeviceWriteManager {
-        // A rebuilt manager starts with no `lastIssuedColour`, so nothing is known about what the
-        // strip is showing; the split stage's cached level and dim have to go the same way, or a
-        // brightness write the new connection needs could be skipped as "already there".
-        splitStages.remove(address)
-        return DeviceWriteManager(
-            address = address,
-            gatt = gatt,
-            charac = charac,
-            connectionScope = connectionScope,
-            pacingMsProvider = { pacingProvider(address) },
-            calibrate = { addr, cmd -> calibrate(addr, cmd) },
-            onFpsUpdate = { addr, fps -> onFpsUpdate(addr, fps) },
-            diagAttribution = { addr -> diagAttribution(addr) }
-        )
-    }
+    ) = DeviceWriteManager(
+        address = address,
+        gatt = gatt,
+        charac = charac,
+        connectionScope = connectionScope,
+        pacingMsProvider = { pacingProvider(address) },
+        calibrate = { addr, cmd -> calibrate(addr, cmd) },
+        onFpsUpdate = { addr, fps -> onFpsUpdate(addr, fps) },
+        diagAttribution = { addr -> diagAttribution(addr) }
+    )
 
     override fun connect(context: Context, address: String) {
         val adapter = bluetoothAdapter ?: return
@@ -286,18 +242,8 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         val gatt = activeConnections[address] ?: return
         try {
             gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-            discoveryGate.onMtuRequested(address)
-            if (!gatt.requestMtu(512)) {
-                // Refused outright: nothing is in flight, so discovery must not wait for a
-                // callback that will never come.
-                discoveryGate.onMtuSettled(address)
-                issueDiscoveryIfWanted(address)
-            } else {
-                armMtuFallback(address)
-            }
+            gatt.requestMtu(512)
         } catch (e: SecurityException) {
-            discoveryGate.onMtuSettled(address)
-            issueDiscoveryIfWanted(address)
             onLog("SecurityException requesting priority or MTU for $address: ${e.message}")
         } catch (e: Exception) {
             onLog("Error requesting priority or MTU for $address: ${e.message}")
@@ -306,49 +252,10 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun discoverServices(address: String) {
         val gatt = activeConnections[address] ?: return
-        discoveryGate.onDiscoveryWanted(address)
-        issueDiscoveryIfWanted(address)
-    }
-
-    /**
-     * Issues discovery once per connection, and only when the GATT client is free.
-     *
-     * Idempotent on purpose: it is called from the connect path, from [onMtuChanged] and from the
-     * fallback timer, and exactly one of those should win. Whichever arrives first while no MTU
-     * exchange is outstanding does the work.
-     */
-    private fun issueDiscoveryIfWanted(address: String) {
-        if (!discoveryGate.shouldIssueDiscovery(address)) return
-        val gatt = callbackGatt[address] ?: activeConnections[address]
-        if (gatt == null) {
-            discoveryGate.onDiscoveryFailed(address)
-            return
-        }
         try {
-            if (!gatt.discoverServices()) {
-                // Let a later trigger retry rather than stranding the connection at CONNECTING.
-                discoveryGate.onDiscoveryFailed(address)
-                onLog("discoverServices() refused for $address.")
-            }
+            gatt.discoverServices()
         } catch (e: SecurityException) {
-            discoveryGate.onDiscoveryFailed(address)
             onLog("SecurityException: Service discovery denied for $address.")
-        }
-    }
-
-    /**
-     * Starts discovery anyway if the MTU callback never arrives.
-     *
-     * Some peripherals simply do not answer an MTU request. Without this the connection would hang
-     * at CONNECTING forever waiting on a callback — trading the old bug for a quieter one.
-     */
-    private fun armMtuFallback(address: String) {
-        connectionScope.launch {
-            kotlinx.coroutines.delay(MTU_FALLBACK_MS)
-            if (discoveryGate.onMtuSettled(address)) {
-                onLog("MTU callback never arrived for $address; starting service discovery anyway.")
-                issueDiscoveryIfWanted(address)
-            }
         }
     }
 
@@ -392,26 +299,8 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         )
     }
 
-    /**
-     * The one choke point every colour the app sends passes through, which is why [ColourSplitStage]
-     * lives here rather than at the dozen call sites that build colour commands.
-     *
-     * A split emits the brightness and the colour with the *same* [priority] and [bypassPacing] as
-     * the frame they came from. They queue under different type bytes, so each is compared only
-     * against its own axis, and giving them equal priority keeps the two axes' peak-hold decisions
-     * in agreement: a held peak that survives on colour survives on brightness too.
-     */
     override fun writeCommand(address: String, command: ByteArray, priority: Float, bypassPacing: Boolean) {
-        val manager = deviceWriteManagers[address] ?: return
-        if (!splitEnabled()) {
-            // Dropping the stage is what makes the toggle reversible: re-enabling starts from a
-            // clean slate rather than composing against a colour from before it was turned off.
-            if (splitStages.isNotEmpty()) splitStages.remove(address)
-            manager.updateCommand(command, priority, bypassPacing)
-            return
-        }
-        val stage = splitStages.getOrPut(address) { ColourSplitStage { userDimming(address) } }
-        stage.process(command).forEach { manager.updateCommand(it, priority, bypassPacing) }
+        deviceWriteManagers[address]?.updateCommand(command, priority, bypassPacing)
     }
 
     override fun notifyWriteCompleted(address: String) {
@@ -423,10 +312,8 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {
-        discoveryGate.forget(address)
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
-        splitStages.remove(address)
         deviceWriteManagers.remove(address)?.release()
         return gatt
     }
@@ -464,14 +351,5 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
                 onRestored(address)
             }
         }
-    }
-
-    private companion object {
-        /**
-         * How long to wait for `onMtuChanged` before starting service discovery regardless.
-         * Generous: the observed exchange took ~700ms on the moto, and being late here costs a
-         * slower connect, while being early costs the dropped-discovery bug this fixes.
-         */
-        const val MTU_FALLBACK_MS = 2000L
     }
 }

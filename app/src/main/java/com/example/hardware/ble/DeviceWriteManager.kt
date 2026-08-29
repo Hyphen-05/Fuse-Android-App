@@ -39,10 +39,6 @@ class DeviceWriteManager(
     // Queued command plus the peak-hold/pacing-bypass metadata it was enqueued with
     // (visualizer-review-2026-07-21.md P2). [priority] compares only against other queued
     // commands of the *same type byte* (index 2) — see [updateCommand].
-    // [bypassPacing] is inert since the pacing wait was removed — there is no wait left to skip.
-    // It stays plumbed through because the audio path passes it and step 4 of Tier E Phase 3 takes
-    // the whole pacing configuration out in one piece; deleting the parameter alone would churn the
-    // transport interface twice. [priority] is unaffected and still live: it is the peak-hold rule.
     private data class QueuedCommand(val bytes: ByteArray, val priority: Float, val bypassPacing: Boolean)
 
     private val commandQueue = java.util.concurrent.ConcurrentLinkedQueue<QueuedCommand>()
@@ -53,22 +49,10 @@ class DeviceWriteManager(
 
     // Incremented from the GATT callback thread, drained from the sampler coroutine below.
     private val framesSent = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var pendingJob: Job? = null
 
     private var consecutiveWatchdogTriggers = 0
     private var lastQueueLogTime = 0L
-
-    /**
-     * The last RGB colour actually handed to the radio, for [WriteDedupe].
-     *
-     * Issued rather than enqueued, because the queue drops what it replaces. Cleared whenever a
-     * write fails, so a failure can always be retried by resending the same colour — and note that a
-     * reconnect builds a whole new manager, which starts this at null, so nothing survives a
-     * disconnect to suppress the first colour of a new connection.
-     */
-    @Volatile private var lastIssuedColour: ByteArray? = null
-
-    /** Redundant colours suppressed since the last 1Hz telemetry tick. */
-    private val identicalSkipped = java.util.concurrent.atomic.AtomicInteger(0)
 
     /**
      * Samples the achieved write rate on a fixed 1Hz tick. This used to be computed inside
@@ -89,18 +73,13 @@ class DeviceWriteManager(
         while (true) {
             delay(1000L)
             val fps = framesSent.getAndSet(0)
-            val skipped = identicalSkipped.getAndSet(0)
             onFpsUpdate(address, fps)
-            if (fps > 0 || skipped > 0) {
+            if (fps > 0) {
                 // P0 (visualizer-review-2026-07-21.md): what pacing actually settles at per
-                // device during a real session. `identicalSkipped` rides along because the ratio of
-                // skipped to sent is the direct read on how much of a preset's computed output the
-                // byte grid cannot express — 97% on a slow fade, in simulation.
+                // device during a real session.
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
-                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps, " +
-                        "inFlightMs=${"%.1f".format(inFlightMsEstimate)}, identicalSkipped=$skipped. " +
-                        "(${diagAttribution(address)})"
+                    "Pacing settled: address=$address, currentPacingMs=$currentPacingMs, fps=$fps. (${diagAttribution(address)})"
                 )
             }
         }
@@ -113,6 +92,8 @@ class DeviceWriteManager(
      */
     fun release() {
         fpsSamplerJob.cancel()
+        pendingJob?.cancel()
+        pendingJob = null
     }
 
     /**
@@ -127,14 +108,6 @@ class DeviceWriteManager(
      */
     fun updateCommand(command: ByteArray, priority: Float = Float.MAX_VALUE, bypassPacing: Boolean = false) {
         val processed = calibrate(address, command)
-
-        // A colour identical to the one already on the strip changes nothing, and enqueuing it would
-        // evict whatever real colour is still waiting (see [WriteDedupe]). Checked before the
-        // peak-hold logic below, so a redundant frame cannot displace a held peak either.
-        if (WriteDedupe.isRedundantColour(processed, lastIssuedColour)) {
-            identicalSkipped.incrementAndGet()
-            return
-        }
 
         val type = if (processed.size >= 3) processed[2] else null
         // A held peak of the same type takes priority over this frame if it hasn't written yet —
@@ -186,36 +159,10 @@ class DeviceWriteManager(
             "onWriteCompleted callback received for $address. (${diagAttribution(address)})"
         )
         consecutiveWatchdogTriggers = 0
-        val completedAt = System.currentTimeMillis()
-        recordInFlight(completedAt - lastWriteTime)
-        lastWriteTime = completedAt
+        lastWriteTime = System.currentTimeMillis()
         isWriting = false
         framesSent.incrementAndGet()
         tryWrite()
-    }
-
-    /**
-     * Rolling estimate of how long a write occupies the radio: issued → `onCharacteristicWrite`.
-     *
-     * This is the number every pacing decision actually depends on, and until now nothing measured
-     * it — pacing was a stored guess, tuned once against conditions that were gone by the time the
-     * value was saved. Hardware calibration put it at ~4.6ms per strip on a warm link and ~68ms for
-     * the first write after a quiet spell (`tools/calibration/README.md`), but it varies by phone,
-     * by distance and by what else is on the radio, which is exactly why it wants measuring here
-     * rather than assuming.
-     *
-     * An EMA rather than a mean: the useful question is "what is the link doing now", not "what has
-     * it averaged since connecting".
-     */
-    @Volatile var inFlightMsEstimate: Double = 0.0
-        private set
-
-    private fun recordInFlight(sample: Long) {
-        // Guard the first callback after a connect, where lastWriteTime is still 0 and the
-        // "elapsed" is really the epoch.
-        if (sample <= 0 || sample > 5_000) return
-        inFlightMsEstimate =
-            if (inFlightMsEstimate <= 0.0) sample.toDouble() else inFlightMsEstimate * 0.8 + sample * 0.2
     }
 
     @Synchronized
@@ -223,19 +170,25 @@ class DeviceWriteManager(
         if (isWriting) return
         val cmd = commandQueue.peek() ?: return
 
-        // The artificial pacing wait used to sit here (Tier E Phase 3 step 2, removed 2026-08-19).
-        //
-        // The radio is already the pacer: this method refuses to send while [isWriting], and
-        // [onWriteCompleted] immediately tries again, so writes are completion-gated whatever
-        // `currentPacingMs` says. The extra delay did not slow the link down — it decided how many
-        // computed frames were thrown away *before* the radio was even busy. Measurement (2026-08-16)
-        // put a write at ~4.6ms per strip, so any pacing below that was configuring nothing, and the
-        // 15-minute sustained run on 2026-08-19 came back clean with full coverage, which is what
-        // unblocked removing it.
-        //
-        // `currentPacingMs` survives because it still throttles *upstream capture*:
-        // AmbianceProcessor caps its capture interval with it. That job becomes an explicit frame
-        // cap in step 3; until then the pref is still read, just no longer stacked on the radio.
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastWriteTime
+
+        // Peak-priority bypass (visualizer-review-2026-07-21.md P2): the frame a flash fires
+        // skips the pacing wait entirely rather than risking the flash landing in the gap between
+        // two paced writes.
+        if (currentPacingMs > 0 && !cmd.bypassPacing) {
+            if (elapsed < currentPacingMs) {
+                if (pendingJob == null || pendingJob?.isActive != true) {
+                    pendingJob = connectionScope.launch(Dispatchers.IO) {
+                        delay(currentPacingMs - elapsed)
+                        pendingJob = null
+                        tryWrite()
+                    }
+                }
+                return
+            }
+        }
+
         isWriting = true
         val cmdToWrite = commandQueue.poll()
         if (cmdToWrite == null) {
@@ -258,16 +211,12 @@ class DeviceWriteManager(
             }
 
             if (!success) {
-                // Forget the dedupe baseline: this colour did not reach the radio, so an identical
-                // resend is a genuine retry rather than a redundant frame.
-                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
                 Log.w("BleWriteQueue", "writeCharacteristic() returned false for $address")
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() returned false (write failure) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
                 )
             } else {
-                if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = cmdToWrite.bytes
                 com.example.DiagnosticLogger.log(
                     "DeviceWriteManager",
                     "writeCharacteristic() initiated (write success) for $address, cmdHex=$cmdHex. (${diagAttribution(address)})"
@@ -275,7 +224,6 @@ class DeviceWriteManager(
             }
         } catch (e: Exception) {
             isWriting = false
-            if (WriteDedupe.isRgbColour(cmdToWrite.bytes)) lastIssuedColour = null
             com.example.DiagnosticLogger.log(
                 "DeviceWriteManager",
                 "writeCharacteristic() Exception for $address: ${android.util.Log.getStackTraceString(e)}. (${diagAttribution(address)})"

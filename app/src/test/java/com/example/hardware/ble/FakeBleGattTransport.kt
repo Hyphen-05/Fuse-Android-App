@@ -72,28 +72,16 @@ class FakeBleGattTransport(
         this.onLog = onLog
     }
 
-    var splitEnabled: () -> Boolean = { false }
-    var userDimming: (String) -> Int = { 100 }
-
-    /**
-     * Records the hooks without applying them: the real split runs in
-     * [AndroidBleGattTransport.writeCommand], and [ColourSplitStage] is unit-tested directly, so
-     * this fake stays a faithful record of what each caller *asked* to send.
-     */
     override fun registerWriteHooks(
         pacingProvider: (String) -> Int,
         calibrate: (String, ByteArray) -> ByteArray,
         onFpsUpdate: (String, Int) -> Unit,
-        diagAttribution: (String) -> String,
-        splitEnabled: () -> Boolean,
-        userDimming: (String) -> Int
+        diagAttribution: (String) -> String
     ) {
         this.pacingProvider = pacingProvider
         this.calibrate = calibrate
         this.onFpsUpdate = onFpsUpdate
         this.diagAttribution = diagAttribution
-        this.splitEnabled = splitEnabled
-        this.userDimming = userDimming
     }
 
     override fun connect(context: Context, address: String) {

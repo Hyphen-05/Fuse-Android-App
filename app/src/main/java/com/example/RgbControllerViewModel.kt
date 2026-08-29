@@ -175,7 +175,6 @@ class RgbControllerViewModel(
                 isPowerOn = prefsRepo.getAppStatePrefBoolean("power_on", true),
                 activeFeatureName = prefsRepo.getAppStatePrefString("active_feature_name", "Colour") ?: "Colour",
                 showFpsTracker = prefsRepo.getAppStatePrefBoolean("show_fps_tracker", false),
-                perceptualSplitEnabled = prefsRepo.getAppStatePrefBoolean("perceptual_split_enabled", false),
                 red = prefsRepo.getAppStatePrefInt("red", 255),
                 green = prefsRepo.getAppStatePrefInt("green", 0),
                 blue = prefsRepo.getAppStatePrefInt("blue", 128),
@@ -226,8 +225,6 @@ class RgbControllerViewModel(
                 anchorBeatsPerAdvance = prefsRepo.getAppStatePrefInt("anchor_beats_per_advance", 2),
                 anchorTimerMs = prefsRepo.getAppStatePrefLong("anchor_timer_ms", 0L),
                 hueAnchorJumpDeg = prefsRepo.getAppStatePrefFloat("hue_anchor_jump_deg", 60f),
-                unlockPresetHues = prefsRepo.getAppStatePrefBoolean("unlock_preset_hues", false),
-                musicalDynamicsEnabled = prefsRepo.getAppStatePrefBoolean("musical_dynamics_enabled", false),
                 hueJumpConfidenceGate = prefsRepo.getAppStatePrefFloat("hue_jump_confidence_gate", 0.35f),
                 hueBreathRangeDeg = prefsRepo.getAppStatePrefFloat("hue_breath_range_deg", 25f),
                 breathUsesBassRatio = prefsRepo.getAppStatePrefBoolean("breath_uses_bass_ratio", false),
@@ -827,17 +824,7 @@ class RgbControllerViewModel(
             onFpsUpdate = { address, fps ->
                 _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
             },
-            diagAttribution = { address -> getDiagAttribution(address) },
-            // Read off _uiState rather than prefs: this runs on every single write, and a
-            // SharedPreferences lookup per write is not something the hot path should carry.
-            splitEnabled = { _uiState.value.coreControl.perceptualSplitEnabled },
-            // The per-device Dimming value if the device has one, else the global slider. Only used
-            // to seed the stage; once the user moves the slider the brightness command itself
-            // carries the intent through the same boundary.
-            userDimming = { address ->
-                val state = _uiState.value
-                state.connectivity.deviceStatesMap[address]?.brightness ?: state.coreControl.brightness
-            }
+            diagAttribution = { address -> getDiagAttribution(address) }
         )
 
         ambianceCommandSink.listener = this
@@ -1197,11 +1184,20 @@ class RgbControllerViewModel(
                 }
         }
 
-        // The `slowest_connected_pacing` mirror that used to live here is gone (2026-08-19). It
-        // existed so the ambiance capture service could floor its capture interval by BLE pacing;
-        // ambiance uses its own AMBIANCE_MIN_INTERVAL_MS constant now, and nothing else ever read
-        // the pref. It was writing to SharedPreferences on every single _uiState emission to feed
-        // a reader that no longer exists.
+        // Reactively sync slowest connected device's pacing to shared preferences for Ambiance capture service
+        viewModelScope.launch {
+            _uiState.collect { state ->
+                val connected = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+                val slowest = if (connected.isEmpty()) {
+                    0
+                } else {
+                    connected.keys.mapNotNull { addr ->
+                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
+                    }.maxOrNull() ?: 0
+                }
+                prefsRepo.putPacingPrefInt("slowest_connected_pacing", slowest)
+            }
+        }
 
         viewModelScope.launch {
             var lastActive = false
@@ -1696,19 +1692,7 @@ class RgbControllerViewModel(
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             addLog("Disconnected from GATT ($address).")
             val wasActive = bleGattTransport.isConnected(address)
-            // Close it, don't just drop it. Every BluetoothGatt holds a client interface
-            // registration, Android allows an app only a limited number of them, and this path —
-            // unlike the manual disconnect below, which has always closed properly — used to
-            // discard the handle. A device that drops and retries repeatedly would exhaust the
-            // table and then fail every subsequent connect until the process was killed.
-            val droppedGatt = bleGattTransport.removeConnection(address)
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    bleGattTransport.rawDisconnectAndClose(droppedGatt)
-                } catch (e: SecurityException) {
-                    addLog("SecurityException closing dropped GATT for $address.")
-                }
-            }
+            bleGattTransport.removeConnection(address)
 
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 
@@ -2027,18 +2011,6 @@ class RgbControllerViewModel(
 
     fun setShowFpsTracker(enabled: Boolean) {
         dispatch(RgbIntent.SetShowFpsTracker(enabled))
-    }
-
-    fun setPerceptualSplitEnabled(enabled: Boolean) {
-        dispatch(RgbIntent.SetPerceptualSplitEnabled(enabled))
-    }
-
-    fun setUnlockPresetHues(enabled: Boolean) {
-        dispatch(RgbIntent.SetUnlockPresetHues(enabled))
-    }
-
-    fun setMusicalDynamicsEnabled(enabled: Boolean) {
-        dispatch(RgbIntent.SetMusicalDynamicsEnabled(enabled))
     }
 
     fun clearErrorMessage() {
@@ -2671,54 +2643,6 @@ class RgbControllerViewModel(
 
     override fun onAdbStopMusicSync() {
         stopMusicSync()
-    }
-
-    /**
-     * Drives a calibration sequence straight at the wire, bypassing pacing so the sequence controls
-     * its own timing exactly — the whole point is to find out what the hardware does with writes the
-     * app would normally hold back.
-     *
-     * Any running music sync or scene is stopped first: a second source writing colours mid-run
-     * would corrupt every measurement taken from it.
-     *
-     * The run is wrapped in [com.example.debug.CalibrationForegroundService] because the phone
-     * driving a run cannot also film it, so the app spends the whole run backgrounded — where
-     * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
-     * start, the sequence still runs, it is just freezable again.
-     */
-    override fun onAdbRunCalibration(sequence: String, minutes: Int) {
-        viewModelScope.launch {
-            stopMusicSync()
-            val targets = getCurrentlyControlledDeviceAddresses()
-            if (targets.isEmpty()) {
-                addLog("Calibration '$sequence' aborted: no connected devices.")
-                return@launch
-            }
-            addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
-            val unfrozen = com.example.debug.CalibrationForegroundService.start(
-                getApplication(), sequence
-            )
-            if (!unfrozen) {
-                addLog("Calibration '$sequence': foreground service unavailable — run may be frozen if backgrounded.")
-            }
-            try {
-                val file = com.example.debug.CalibrationSequences.run(
-                    sequence = sequence,
-                    outputDir = getApplication().getExternalFilesDir(null),
-                    sustainedMinutes = minutes
-                ) { command ->
-                    targets.forEach { address ->
-                        bleGattTransport.writeCommand(address, command, bypassPacing = true)
-                    }
-                }
-                addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
-                android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
-            } finally {
-                // finally, not a trailing call: a cancelled scope or a throwing sequence would
-                // otherwise leave an ongoing notification up and the process pinned indefinitely.
-                com.example.debug.CalibrationForegroundService.stop(getApplication())
-            }
-        }
     }
 
     override fun onCleared() {

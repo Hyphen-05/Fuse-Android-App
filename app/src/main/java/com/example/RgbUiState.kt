@@ -39,12 +39,6 @@ data class CoreControlState(
     val isDemoMode: Boolean = true,
     val errorMessage: String? = null,
     val showFpsTracker: Boolean = false,
-    /**
-     * Splits colour from level at the write boundary — see [com.example.core.color.ColourSplitStage].
-     * Off by default: it changes what goes on the wire for every colour the app sends, and Joe
-     * wanted it reversible.
-     */
-    val perceptualSplitEnabled: Boolean = false,
     // In-memory only (updateProtocolByte never touches prefs/DB) — category (a)
     val protocolBytes: ByteArray = byteArrayOf(
         0x7E.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
@@ -68,7 +62,6 @@ data class CoreControlState(
         if (isDemoMode != other.isDemoMode) return false
         if (errorMessage != other.errorMessage) return false
         if (showFpsTracker != other.showFpsTracker) return false
-        if (perceptualSplitEnabled != other.perceptualSplitEnabled) return false
         if (!protocolBytes.contentEquals(other.protocolBytes)) return false
         return true
     }
@@ -86,7 +79,6 @@ data class CoreControlState(
         result = 31 * result + isDemoMode.hashCode()
         result = 31 * result + (errorMessage?.hashCode() ?: 0)
         result = 31 * result + showFpsTracker.hashCode()
-        result = 31 * result + perceptualSplitEnabled.hashCode()
         result = 31 * result + protocolBytes.contentHashCode()
         return result
     }
@@ -156,17 +148,6 @@ data class AudioSettingsState(
     // implement that one preset's documented fallback behavior.
     val anchorTimerMs: Long = 0L,
     val hueAnchorJumpDeg: Float = 60f,
-    /**
-     * Frees the confined presets from their handful of colours (IMPROVEMENT_PLAN D.1). Off by
-     * default: it changes presets Joe has tuned, so it is his to switch on and judge.
-     */
-    val unlockPresetHues: Boolean = false,
-    /**
-     * Tier D.2/D.3/D.4: judge loudness against the song rather than fixed thresholds, and let an
-     * intro look different from a chorus. Off by default — it changes every tuned preset's
-     * dynamics, so it is Joe's to switch on and judge. See [com.example.core.audio.MusicalContext].
-     */
-    val musicalDynamicsEnabled: Boolean = false,
     val hueJumpConfidenceGate: Float = 0.35f,
     val hueBreathRangeDeg: Float = 25f,
     // Bass Thump's breath is keyed to bassRatio instead of the default (midRatio - highRatio)
@@ -277,9 +258,6 @@ sealed interface RgbIntent {
     data class SetModeSpeed(val speed: Int) : RgbIntent
     data class SetWarmth(val percent: Int) : RgbIntent
     data class SetShowFpsTracker(val enabled: Boolean) : RgbIntent
-    data class SetUnlockPresetHues(val enabled: Boolean) : RgbIntent
-    data class SetMusicalDynamicsEnabled(val enabled: Boolean) : RgbIntent
-    data class SetPerceptualSplitEnabled(val enabled: Boolean) : RgbIntent
     // Fired once the UI has shown coreControl.errorMessage, so it isn't re-shown on recomposition.
     object ClearErrorMessage : RgbIntent
 

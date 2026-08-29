@@ -25,6 +25,7 @@ class AmbianceProcessor(
     // The reads themselves stay per-frame: once the file is loaded they're in-memory map lookups,
     // and they're what makes a slider move show up on the strip straight away.
     private val prefs = context.getSharedPreferences("ambiance_settings_prefs", Context.MODE_PRIVATE)
+    private val preferencesRepository = com.example.data.repository.AppPreferencesRepositoryImpl(context)
 
     private data class EmaState(
         val emaLinR: Double, val emaLinG: Double, val emaLinB: Double
@@ -36,9 +37,11 @@ class AmbianceProcessor(
             val nowMs = System.currentTimeMillis()
             
             val updateRateCapFps = prefs.getInt("update_rate_cap_fps", 20).coerceAtLeast(1)
-
+            val slowestDevicePacing = preferencesRepository
+                .getPacingPrefInt(SLOWEST_PACING_PREF_KEY, DEFAULT_SLOWEST_PACING_MS)
+            
             val fpsIntervalMs = 1000 / updateRateCapFps
-            val effectiveIntervalMs = max(fpsIntervalMs, AMBIANCE_MIN_INTERVAL_MS)
+            val effectiveIntervalMs = max(fpsIntervalMs, slowestDevicePacing)
             if (nowMs - lastCaptureTimeMs < effectiveIntervalMs) return
             val deltaMs = (nowMs - lastCaptureTimeMs).coerceAtLeast(1L).coerceAtMost(500L)
             lastCaptureTimeMs = nowMs
@@ -173,9 +176,9 @@ class AmbianceProcessor(
                 newEmaLinG = ColorConverter.srgbToLinear(aggRawG)
                 newEmaLinB = ColorConverter.srgbToLinear(aggRawB)
             } else {
-                val lum = AmbianceDeadband.luminance(emaSrgbR, emaSrgbG, emaSrgbB)
-                val dynamicThreshold = AmbianceDeadband.lightStepThreshold(lum, deadbandMultiplier.toDouble())
-                val diff = AmbianceDeadband.diff(aggRawR, aggRawG, aggRawB, emaSrgbR, emaSrgbG, emaSrgbB)
+                val lum = ColorConverter.luminance(emaSrgbR.toDouble(), emaSrgbG.toDouble(), emaSrgbB.toDouble()) / 255.0
+                val dynamicThreshold = (5.0 + 10.0 * lum + 15.0 * (1.0 - lum).pow(2)) * deadbandMultiplier
+                val diff = abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)
                 if (diff <= dynamicThreshold) {
                     newEmaLinR = emaState.emaLinR
                     newEmaLinG = emaState.emaLinG
@@ -227,12 +230,6 @@ class AmbianceProcessor(
             // Lowered from 25 — previous floor read as too bright for content 
             // meant to be very dim.
             val floorTarget = 14
-            // This floor is tuned, and the colour/level split does not get to change it. An earlier
-            // version of the split skipped it, on the theory that moving level to the dimmer made
-            // the floor unnecessary; what that actually did was re-tune ambiance behind Joe's back,
-            // and it was one of the reasons ambiance looked worse with the split on (2026-08-19).
-            // The split's knee now sits at this same value, so ambiance output is byte-identical
-            // whether the split is on or off. Leave both alone together.
             if (maxC in (trueBlackCutoff + 1) until floorTarget) {
                 val boost = floorTarget.toFloat() / maxC
                 fR = (fR * boost).roundToInt().coerceIn(0, 255)
@@ -313,21 +310,5 @@ class AmbianceProcessor(
  * assumed 100. It only shows before anything has connected — when ambiance has nothing to write to
  * anyway — so both now take the conservative value rather than the fast one.
  */
-/**
- * Floor on how often ambiance captures the screen, in ms.
- *
- * Capture used to be floored by the *BLE pacing* pref instead — `max(fpsInterval, slowestConnected
- * Pacing)` — which was pacing's second, real job and the reason Tier E Phase 3 could not simply
- * delete the pacing configuration. It is a constant now so that configuration can go (step 4), and
- * so what governs ambiance's rate is the user's own `update_rate_cap_fps` and nothing else.
- *
- * **50 because that is what the setup actually runs at today**, verified on the moto 2026-08-19:
- * `slowest_connected_pacing` reads 50 and `update_rate_cap_fps` is unset, so the effective interval
- * is `max(1000/20, 50)` = 50ms either way. Joe's ambiance tuning therefore sees no change at all.
- * The plan doc's assumption of 10fps was wrong — it was reading defaults, not the device.
- *
- * A setup whose stored pacing was slower than 50 would previously have captured slower than this;
- * it now captures at the user's cap instead. That is faster, never slower, and no such setup exists
- * on either of Joe's phones.
- */
-internal const val AMBIANCE_MIN_INTERVAL_MS = 50
+internal const val SLOWEST_PACING_PREF_KEY = "slowest_connected_pacing"
+internal const val DEFAULT_SLOWEST_PACING_MS = 100

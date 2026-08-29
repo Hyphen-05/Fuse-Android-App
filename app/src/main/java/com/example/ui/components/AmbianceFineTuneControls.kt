@@ -21,9 +21,6 @@ import androidx.compose.ui.unit.dp
 import com.example.BleConnectionState
 import com.example.RgbControllerViewModel
 import com.example.RgbUiState
-import com.example.ambiance.AmbiancePreset
-import com.example.ambiance.AmbiancePresetStore
-import com.example.ambiance.AMBIANCE_MIN_INTERVAL_MS
 
 /**
  * The seven ambiance tuning sliders, the reset button and the save-as-preset flow.
@@ -204,10 +201,15 @@ fun AmbianceFineTuneControls(
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
             // 5. Update Rate Cap
-            // Capture no longer keys off BLE pacing, so neither does its ceiling: the cap is now
-            // ambiance's own capture floor. On Joe's setup this is the same 20 fps it always
-            // showed — stored pacing was 50ms, and 1000/50 is 20 — so the slider does not move.
-            val maxFps = (1000 / AMBIANCE_MIN_INTERVAL_MS).coerceIn(1, 60)
+            val connectedDevices = state.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }
+            val slowestDevicePacing = if (connectedDevices.isEmpty()) {
+                0
+            } else {
+                connectedDevices.keys.mapNotNull { address ->
+                    state.connectivity.devicePacingMs[address] ?: viewModel.savedPacingMs(address)
+                }.maxOrNull() ?: 0
+            }
+            val maxFps = if (slowestDevicePacing <= 0) 20 else (1000 / slowestDevicePacing).coerceIn(1, 60)
             val totalStepsVal = (maxFps - 1).coerceAtLeast(1)
 
             Column {
@@ -226,7 +228,11 @@ fun AmbianceFineTuneControls(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                val capExplanation = " (Max $maxFps fps — beyond that the strip coalesces frames anyway)"
+                val capExplanation = if (slowestDevicePacing > 0) {
+                    " (Max rate capped at ${maxFps} fps based on slowest connected device's pacing of ${slowestDevicePacing}ms)"
+                } else {
+                    " (No devices connected, fallback max is 20 fps)"
+                }
                 Text(
                     text = "Maximum frame processing rate. Higher rate is more responsive but uses more CPU.$capExplanation",
                     style = MaterialTheme.typography.bodySmall,
@@ -423,9 +429,9 @@ fun AmbianceFineTuneControls(
                                         sceneCutSensitivity = sceneCutSensitivity,
                                         noiseDeadband = noiseDeadband
                                     )
-                                    // Same-name replacement is the store's rule now, so the
-                                    // Ambiance tab's list updates the moment this lands.
-                                    AmbiancePresetStore.save(context, newPreset)
+                                    val customPresets = loadCustomPresetsFromPrefs(context)
+                                    val updatedPresets = customPresets.filter { it.name.lowercase() != trimmedName.lowercase() } + newPreset
+                                    saveCustomPresetsToPrefs(context, updatedPresets)
 
                                     viewModel.applyAmbiancePreset(
                                         presetId = trimmedName,
