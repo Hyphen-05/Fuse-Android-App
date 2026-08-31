@@ -42,6 +42,9 @@ Thumbs.db
 CLAUDE.md
 HISTORY.md
 IMPROVEMENT_PLAN.md
+# Session handoffs: internal notes, deliberately not published (restored 2026-08-29,
+# the 2026-08-15 rollback had reverted this line and re-tracked HANDOFF-2026-08-13.md)
+HANDOFF-*.md
 audit-findings-*.md
 mapping-proposal-*.md
 visualizer-review-*.md
