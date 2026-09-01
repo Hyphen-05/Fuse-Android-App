@@ -185,7 +185,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                MainScreen()
+                Box(Modifier.fillMaxSize()) {
+                    MainScreen()
+                    // Debug tooling, inert unless a calibration run sets its flags: nothing in the
+                    // app can reach com.example.debug. Drawn last so it covers everything — the
+                    // point is a clean white rectangle in a video frame, not a tinted one.
+                    com.example.debug.CalibrationFlashOverlay()
+                }
             }
         }
     }

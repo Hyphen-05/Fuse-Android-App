@@ -13,10 +13,11 @@ import java.io.File
  * and every constant in `StripLimits` becomes a measurement:
  *  - [BRIGHTNESS_RAMP] answers whether the cubic curve in `ColorConverter.hsvToRgb` matches what the
  *    LEDs actually do — the open question behind every "too dim" report.
- *  - [LATENCY_PULSE] was meant to answer `visibleLatencyMs`. It cannot: video time can only be
- *    aligned to log time using the strips themselves, which arrive already delayed by the latency
- *    being measured, so the alignment subtracts it out. What it does measure is delivery *jitter*
- *    (sd 36ms, 2026-08-16). The constant needs the phone's own screen in frame — see the README.
+ *  - [LATENCY_PULSE] answers `visibleLatencyMs`, but only with the driving phone's screen in
+ *    frame. Aligning video to log time using the strips cannot work — they arrive already delayed
+ *    by the latency being measured, so the alignment subtracts it out, and what the run measured
+ *    instead was delivery *jitter* (sd 36ms, 2026-08-16). The screen flash is a second event in the
+ *    same frame that BLE does not delay. See [CalibrationScreenFlash].
  *  - [RATE_RAMP] answers `sustainedWritesPerSecond`, from its CSV alone with no video at all.
  *  - [SPACING_STAIRCASE] answers `minWriteSpacingMs`, which [RATE_RAMP] on video could not.
  *  - [DARK_RAMP] covers the bottom of the range that [BRIGHTNESS_RAMP] skipped, where the fitted
@@ -117,6 +118,16 @@ object CalibrationSequences {
             return writeCsv(sequence, outputDir, startedAt)
         }
 
+        // Rows marked -2 are screen events, not colours — the same trick the brightness rows use
+        // with -1. Recorded from a frame callback so the compositor's share of screen latency is
+        // measured rather than assumed; see [CalibrationScreenFlash] for what is left over.
+        if (sequence == LATENCY_PULSE) {
+            CalibrationScreenFlash.presentedListener = { atMs ->
+                record(atMs - startedAt, "screen_presented", -2, -2, -2)
+            }
+        }
+        CalibrationScreenFlash.runActive.value = true
+
         syncMarker(::emit)
 
         when (sequence) {
@@ -130,6 +141,9 @@ object CalibrationSequences {
         }
 
         emit("end_black", 0, 0, 0)
+        CalibrationScreenFlash.on.value = false
+        CalibrationScreenFlash.runActive.value = false
+        CalibrationScreenFlash.presentedListener = null
         return writeCsv(sequence, outputDir, startedAt)
     }
 
@@ -230,8 +244,12 @@ object CalibrationSequences {
      */
     private suspend fun latencyPulse(emit: (String, Int, Int, Int) -> Unit) {
         repeat(12) { index ->
+            // Screen first, then the wire, in that order and with nothing between them. The screen
+            // is the reference event: it must not be made late by the BLE write it is timing.
+            CalibrationScreenFlash.on.value = true
             emit("pulse_${index}_on", 255, 255, 255)
             delay(400)
+            CalibrationScreenFlash.on.value = false
             emit("pulse_${index}_off", 0, 0, 0)
             delay(1600)
         }

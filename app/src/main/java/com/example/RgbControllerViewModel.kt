@@ -2802,8 +2802,12 @@ class RgbControllerViewModel(
                 }
             } finally {
                 // finally, not a trailing call: a cancelled scope or a throwing sequence would
-                // otherwise leave an ongoing notification up and the process pinned indefinitely.
+                // otherwise leave an ongoing notification up, the process pinned indefinitely, and
+                // the screen held awake and possibly white.
                 com.example.debug.CalibrationForegroundService.stop(getApplication())
+                com.example.debug.CalibrationScreenFlash.on.value = false
+                com.example.debug.CalibrationScreenFlash.runActive.value = false
+                com.example.debug.CalibrationScreenFlash.presentedListener = null
             }
         }
     }
