@@ -157,6 +157,10 @@ class RgbControllerViewModel(
 
     private fun getApplication(): android.app.Application = application as android.app.Application
 
+    // Held so the next sequence, or an adb ack, can cancel a run — and so the attention fade, which
+    // never returns on its own, has something that can stop it.
+    private var calibrationJob: kotlinx.coroutines.Job? = null
+
     companion object {
         // Scene-orchestration exclusion set — NOT BLE transport, stays here. The raw BLE connection
         // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
@@ -2719,6 +2723,25 @@ class RgbControllerViewModel(
     }
 
     /**
+     * Acknowledges the attention signal, or aborts a run in progress. Also the way a sequence that
+     * is misbehaving gets stopped without killing the app, which would take the CSV with it.
+     */
+    override fun onAdbStopCalibration() {
+        calibrationJob?.cancel()
+        calibrationJob = null
+        com.example.debug.CalibrationForegroundService.stop(getApplication())
+        viewModelScope.launch {
+            getCurrentlyControlledDeviceAddresses().forEach { address ->
+                bleGattTransport.writeCommand(
+                    address,
+                    com.example.core.protocol.DuoCoProtocol.createColorCommand(0, 0, 0)
+                )
+            }
+            addLog("Calibration stopped and strips blacked out.")
+        }
+    }
+
+    /**
      * Drives a calibration sequence straight at the wire, bypassing pacing so the sequence controls
      * its own timing exactly — the whole point is to find out what the hardware does with writes the
      * app would normally hold back.
@@ -2731,8 +2754,12 @@ class RgbControllerViewModel(
      * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
      * start, the sequence still runs, it is just freezable again.
      */
-    override fun onAdbRunCalibration(sequence: String, minutes: Int) {
-        viewModelScope.launch {
+    override fun onAdbRunCalibration(sequence: String, minutes: Int, attention: Boolean) {
+        // The next sequence starting is one of the two ways the attention fade is acknowledged, and
+        // it is also how a run that is going wrong gets stopped. Cancel before launching, so the two
+        // never overlap and write colours at each other.
+        calibrationJob?.cancel()
+        calibrationJob = viewModelScope.launch {
             stopMusicSync()
             val targets = getCurrentlyControlledDeviceAddresses()
             if (targets.isEmpty()) {
@@ -2758,6 +2785,21 @@ class RgbControllerViewModel(
                 }
                 addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
                 android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
+                if (attention && sequence != com.example.debug.CalibrationSequences.ATTENTION) {
+                    // The monitor is off during a capture session, so the strip is the only way to
+                    // say "this one is done". Loops until the next sequence or an explicit ack;
+                    // suppress with --ez attention false when someone is watching the phone anyway.
+                    addLog("Calibration '$sequence': attention signal running until acknowledged.")
+                    com.example.debug.CalibrationSequences.run(
+                        sequence = com.example.debug.CalibrationSequences.ATTENTION,
+                        outputDir = null,
+                        sustainedMinutes = 0
+                    ) { command ->
+                        targets.forEach { address ->
+                            bleGattTransport.writeCommand(address, command)
+                        }
+                    }
+                }
             } finally {
                 // finally, not a trailing call: a cancelled scope or a throwing sequence would
                 // otherwise leave an ongoing notification up and the process pinned indefinitely.

@@ -43,10 +43,11 @@ object CalibrationSequences {
     const val DARK_RAMP = "dark_ramp"
     const val SUSTAINED_LOAD = "sustained_load"
     const val HOLD_WHITE = "hold_white"
+    const val ATTENTION = "attention"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
-        SUSTAINED_LOAD, HOLD_WHITE
+        SUSTAINED_LOAD, HOLD_WHITE, ATTENTION
     )
 
     /**
@@ -100,6 +101,13 @@ object CalibrationSequences {
         record(0, "brightness_pinned_100", -1, -1, -1)
         delay(400)
 
+        // Not a measurement and not logged: it runs only when nothing is being captured, and a
+        // CSV of it would look like data. It never returns on its own — see [attentionFade].
+        if (sequence == ATTENTION) {
+            attentionFade(send)
+            return null
+        }
+
         // Setup aid, not a measurement: parks the strips at the brightest state any run will
         // produce so the camera's exposure can be locked against the worst case. Locking against a
         // dimmer state clips the top of the ramp, which is unrecoverable after the fact.
@@ -123,6 +131,65 @@ object CalibrationSequences {
 
         emit("end_black", 0, 0, 0)
         return writeCsv(sequence, outputDir, startedAt)
+    }
+
+    /**
+     * The strip asking for Joe.
+     *
+     * The monitor is off during a capture session to keep light out of frame, so there is no way to
+     * tell him on screen that a run finished, aborted, or needs him to move the camera. Joe's spec,
+     * 2026-08-29: *smooth but not slow, fiery orange fades.*
+     *
+     * A smooth sinusoidal breath between (255, 70, 0) and (255, 150, 30), one breath in 1.4s. Red is
+     * held at 255 and green never passes 150, so it never travels through yellow or white — those
+     * read as a test pattern, which is the one thing this must not be mistaken for.
+     *
+     * It **loops until the coroutine is cancelled**, because a single pulse is missable from another
+     * room and being missable defeats the point. The ViewModel cancels it when the next sequence
+     * starts or when the run is acknowledged over adb.
+     *
+     * Writes directly rather than through `emit`: nothing here belongs in a measurement CSV.
+     */
+    private suspend fun attentionFade(send: (ByteArray) -> Unit) {
+        // 40ms per step is 35 steps across the breath — smooth to the eye, and an order of
+        // magnitude slower than the write rates the rest of this file is built to stress.
+        while (true) {
+            for (i in 0 until ATTENTION_STEPS) {
+                val (r, g, b) = attentionColourAt(i)
+                send(DuoCoProtocol.createColorCommand(r, g, b))
+                delay(ATTENTION_STEP_MS)
+            }
+        }
+    }
+
+    /**
+     * 40ms per step, 36 steps to the breath (1.44s) — smooth to the eye, and an order of magnitude
+     * slower than the write rates the rest of this file is built to stress.
+     *
+     * Even, deliberately: with an odd step count no step lands on the turnaround, so the breath
+     * peaks one short of its commanded top end and never reaches the colour it is specified as.
+     */
+    const val ATTENTION_STEP_MS = 40L
+    const val ATTENTION_STEPS = 36
+
+    /** Fiery orange endpoints. Green stops well short of red, which is what keeps it out of yellow. */
+    private const val ATTENTION_G_LOW = 70
+    private const val ATTENTION_G_HIGH = 150
+    private const val ATTENTION_B_LOW = 0
+    private const val ATTENTION_B_HIGH = 30
+
+    /**
+     * One step of the breath, as (r, g, b). Split out from [attentionFade] so the colour rule can be
+     * tested: the whole point of the signal is that it cannot be mistaken for a measurement, and it
+     * stops being that the moment it passes through white or yellow.
+     */
+    fun attentionColourAt(step: Int): Triple<Int, Int, Int> {
+        // A raised cosine: 0 at both ends of the breath, 1 in the middle, with no corner at the
+        // turnaround. A triangle wave visibly ticks at the top and bottom.
+        val phase = (1.0 - kotlin.math.cos(2.0 * Math.PI * step / ATTENTION_STEPS)) / 2.0
+        val g = (ATTENTION_G_LOW + (ATTENTION_G_HIGH - ATTENTION_G_LOW) * phase).toInt()
+        val b = (ATTENTION_B_LOW + (ATTENTION_B_HIGH - ATTENTION_B_LOW) * phase).toInt()
+        return Triple(255, g, b)
     }
 
     private suspend fun syncMarker(emit: (String, Int, Int, Int) -> Unit) {

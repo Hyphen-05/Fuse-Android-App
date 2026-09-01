@@ -174,8 +174,21 @@ class AdbControlReceiver : BroadcastReceiver() {
                 // duration change without a rebuild, which matters for the one sequence whose
                 // whole point is how long it runs.
                 val minutes = intent.getIntExtra("minutes", 0)
-                listener.onAdbRunCalibration(sequence, minutes)
-                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes started")
+                // --ez attention false when someone is watching the phone anyway. Default on: the
+                // monitor is off during a capture session, so otherwise a finished run says nothing.
+                val attention = intent.getBooleanExtra("attention", true)
+                listener.onAdbRunCalibration(sequence, minutes, attention)
+                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes attention=$attention started")
+            }
+
+            "stop_calibration" -> {
+                val listener = appContainer.adbControlSink.listener
+                if (listener == null) {
+                    Log.w(TAG, "stop_calibration: no active RgbControllerViewModel listener registered")
+                    return
+                }
+                listener.onAdbStopCalibration()
+                Log.i(TAG, "stop_calibration")
             }
 
             "status" -> {
