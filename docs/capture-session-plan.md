@@ -1,7 +1,12 @@
 # One-off capture session — Pixel 9 Pro XL as a dedicated camera
 
-Written 2026-08-29. The old **Pixel 9 Pro XL** goes for trade-in tomorrow. Until then there are three
-phones instead of two, and one of them can be tied to a tripod for hours without anyone missing it.
+Written 2026-08-29. Prep updated 2026-09-01.
+
+The old **Pixel 9 Pro XL** is going for trade-in. The 2026-08-30 date passed without the session
+running and Joe confirms the phone is still here, unplugged — so the window is open but it is not
+open indefinitely, and nothing below should be planned as if there were another month of it. Until
+it goes there are three phones instead of two, and one of them can be tied to a tripod for hours
+without anyone missing it.
 
 ## What this actually buys
 
@@ -35,18 +40,20 @@ degrades. That is what is actually being lost tomorrow.
 ## Prerequisites — tonight, not tomorrow
 
 1. **Enable developer options + USB debugging on the Pixel 9** and authorise this laptop. Nothing
-   below works without it, and it is the step most likely to be found out too late.
-2. **Recover the calibration rig.** Deleted by the 2026-08-26 rollback; it is on the tag
-   `visualiser-work-2026-08-26` — `CalibrationSequences.kt`, `CalibrationForegroundService.kt`, the
-   `run_calibration` command in `AdbControlReceiver`, and `tools/calibration/` with six analysis
-   scripts. Without it there is no scripted sequence, no CSV and no sync marker, so the videos would
-   be unalignable and largely worthless. **Needs Joe's go-ahead** — it is rolled-back code coming back.
+   below works without it, and it is the step most likely to be found out too late. **Still the one
+   open prerequisite** — as of 2026-09-01 only the Pixel 11 and the moto answer `adb devices`.
+2. ~~**Recover the calibration rig.**~~ **Done 2026-09-01**, on the branch `capture-rig-recovery`.
+   Restored from `visualiser-work-2026-08-26` surgically rather than by taking the tag's versions of
+   the files, so the per-device pacing removal from that era did not come back with it.
+   `tools/calibration/` and its six analysis scripts came back intact.
 3. **Keep the foreground service.** `CalibrationForegroundService` stops Android freezing Fuse mid-run
    behind the camera app. Do **not** disable `cached_apps_freezer` again; that surgery was done once
    and had to be remembered and undone.
-4. **A manual camera app on the Pixel 9** (Open Camera or similar). The stock app cannot lock ISO and
-   shutter to known values, and locked exposure is what makes two frames comparable. Every
-   photometric run below is void without it.
+4. **A manual camera app on the Pixel 9.** **Decided 2026-09-01: Open Camera**, with the stock app
+   as a fallback for what Open Camera cannot do — see `tools/capture/camera-setup.md`.
+   `tools/capture/provision-camera.sh` installs it and grants its permissions. The stock app cannot
+   lock ISO and shutter to known values, and locked exposure is what makes two frames comparable, so
+   every photometric run below is void without Open Camera.
 5. **Storage and power.** 4K and slow-mo eat gigabytes; long runs heat and drain phones. Pull files
    between runs, not at the end.
 6. **Cables and ports** for driver and camera at once.
@@ -120,14 +127,19 @@ SharedPreferences, which cannot be written from adb without root. Manual ISO and
 be set by simulated taps (`adb shell input tap`), which is brittle across versions and silently wrong
 if a tap misses — the worst failure mode here, because the run looks fine and the data is void.
 
-**The honest recommendation is to put the capture in Fuse instead.** The app already has Camera2 code
-(`ModeCaptureCameraSource`) and already runs on the camera phone. A small capture screen driven by the
-existing `AdbControlReceiver` gives locked ISO, locked shutter, a known frame rate and a file written
-where we choose — all set programmatically, with no taps and nothing to misconfigure. It is more work
-up front than installing Open Camera, and it is the only route that actually satisfies "configures
-itself" rather than "installs itself and hopes".
+The alternative was putting the capture in Fuse itself — it already has Camera2 code
+(`ModeCaptureCameraSource`) and already runs on the camera phone — which would have set everything
+programmatically with no taps at all.
 
-Decide which before the rig is set up, not during.
+**Joe's decision, 2026-09-01: Open Camera, with the stock app as a fallback for anything Open Camera
+cannot do**, slow-mo above all. So this is "installs itself" and the configuring is done by hand or
+by taps, which means the brittleness above is real and has to be managed rather than designed out.
+The mitigation is in `tools/capture/camera-setup.md`: every setting is **read back from the view
+hierarchy** before a run, so a missed tap fails loudly instead of silently.
+
+The stock fallback costs less than it looks. P4 measures *timing*, not photometry — it needs the
+flash edge detectable and nothing more — so recording it on the stock camera at 240fps loses nothing
+that run was measuring.
 
 ## The attention signal — the strip asks for Joe
 
@@ -135,7 +147,8 @@ The monitor is off during runs to avoid light leakage, so there is no way to tel
 screen. **The strip itself is the notification.** Joe's spec, 2026-08-29: *smooth but not slow, fiery
 orange fades.*
 
-Concrete reading of that, to be built into the rig:
+**Built 2026-09-01** as the `attention` sequence, and fired automatically when a run finishes
+(`--ez attention false` suppresses it). What was built:
 
 - **Colour:** fiery orange, fading between roughly `(255, 70, 0)` and `(255, 150, 30)` — never through
   white or yellow, which would read as a test pattern.
@@ -146,7 +159,11 @@ Concrete reading of that, to be built into the rig:
 - **When it fires:** the run finished; the run aborted or errored; or a step needs Joe (reposition the
   camera, change brightness, start a recording).
 - **It must not be confusable with a measurement.** It only ever runs when nothing is being captured,
-  and any recording that contains it should be treated as ending there.
+  and any recording that contains it should be treated as ending there. It writes no CSV and emits no
+  sync marker, for the same reason. The colour rule — never through white or yellow — is pinned by
+  `CalibrationAttentionSignalTest` rather than left to a reviewer's eye.
+- **Acknowledged** by `stop_calibration` over adb, or by the next sequence starting. It loops
+  indefinitely by design, so something had to be able to end it.
 
 ## Positions
 
@@ -195,9 +212,14 @@ The 2026-08-17 attempt failed all three conditions. Corrected method:
 
 ### P4 — Driver's screen and the strip both in frame (absolute latency)
 
-**Needs an app change first**: flash the phone's own screen white on the same millisecond as the BLE
-write. Without it the alignment subtracts out the quantity being measured, which is why this has never
-been captured. Cheap to add while the rig is being recovered.
+**Done 2026-09-01.** The driver's screen flashes white on the same pulse as the strip, so the video
+carries a second event that BLE does not delay — without it the alignment subtracts out the quantity
+being measured, which is why this has never been captured. The present time is recorded from a frame
+callback (`screen_presented` rows, marked `-2`), so the compositor's share is in the CSV rather than
+in the error bars. What remains is the panel's own response, about one refresh interval: a systematic
+offset to quote alongside the result, not to fold into it. At 240fps a frame is 4ms, so it matters.
+
+Record this one on the **stock camera** — it is the slow-mo case, and it is not photometric.
 
 - `latency_pulse` at the highest frame rate available. At 240fps a frame is ~4ms against 33ms at 30 —
   the measurement that most needs the better camera.
@@ -244,8 +266,8 @@ Ordered by *what stops being capturable tomorrow*, not by general interest.
 3. **`dark_ramp` at P1** — gates headroom scaling, the leading fix for dark scenes.
 4. **PWM at P3** — cheap, and decides whether deep dimming is safe.
 5. **`colour_primaries` / `brightness_x_colour` at P1** — pure new data, never captured.
-6. **Latency at P4** — highest value per frame, but needs the app change first, so it is the first to
-   drop if the rig recovery runs late.
+6. **Latency at P4** — highest value per frame. The app change it was waiting on is done, so it no
+   longer drops first for that reason.
 7. Everything else, then the moto contrast runs last.
 
 ## Before the phone goes
