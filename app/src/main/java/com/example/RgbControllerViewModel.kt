@@ -161,6 +161,10 @@ class RgbControllerViewModel(
     // never returns on its own, has something that can stop it.
     private var calibrationJob: kotlinx.coroutines.Job? = null
 
+    // Written into every wire-log row so a run's queueing can be read against how many devices were
+    // sharing the radio, which is the comparison the whole multi-device factor rests on.
+    @Volatile private var calibrationDeviceCount: Int = 0
+
     companion object {
         // Scene-orchestration exclusion set — NOT BLE transport, stays here. The raw BLE connection
         // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
@@ -848,7 +852,12 @@ class RgbControllerViewModel(
         bleGattTransport.registerCallbacks(
             onConnectionStateChange = { address, status, newState -> handleConnectionStateChange(address, status, newState) },
             onServicesDiscovered = { address, status -> handleServicesDiscovered(address, status) },
-            onCharacteristicWrite = { address, status -> handleCharacteristicWrite(address, status) },
+            onCharacteristicWrite = { address, status ->
+                // Debug tooling tap: inert unless a calibration run is in progress. This is the only
+                // place the wire's own completion timing is visible, and the colour CSV cannot see it.
+                com.example.debug.CalibrationWireLog.ack(address, status, calibrationDeviceCount)
+                handleCharacteristicWrite(address, status)
+            },
             onLog = { message -> addLog(message) }
         )
         bleGattTransport.registerWriteHooks(
@@ -2767,6 +2776,8 @@ class RgbControllerViewModel(
                 return@launch
             }
             addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
+            calibrationDeviceCount = targets.size
+            com.example.debug.CalibrationWireLog.begin(System.currentTimeMillis())
             val unfrozen = com.example.debug.CalibrationForegroundService.start(
                 getApplication(), sequence
             )
@@ -2780,10 +2791,14 @@ class RgbControllerViewModel(
                     sustainedMinutes = minutes
                 ) { command ->
                     targets.forEach { address ->
+                        com.example.debug.CalibrationWireLog.send(address, targets.size)
                         bleGattTransport.writeCommand(address, command)
                     }
                 }
-                addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}")
+                val wire = com.example.debug.CalibrationWireLog.finish(
+                    sequence, getApplication().getExternalFilesDir(null)
+                )
+                addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}, wire: ${wire?.absolutePath ?: "not written"}")
                 android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
                 if (attention && sequence != com.example.debug.CalibrationSequences.ATTENTION) {
                     // The monitor is off during a capture session, so the strip is the only way to

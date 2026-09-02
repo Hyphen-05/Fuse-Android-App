@@ -45,10 +45,16 @@ object CalibrationSequences {
     const val SUSTAINED_LOAD = "sustained_load"
     const val HOLD_WHITE = "hold_white"
     const val ATTENTION = "attention"
+    const val COLOUR_PRIMARIES = "colour_primaries"
+    const val BRIGHTNESS_X_COLOUR = "brightness_x_colour"
+    const val TRANSITION_PROBE = "transition_probe"
+    const val CCT_SWEEP = "cct_sweep"
+    const val CAPTURE_ALL = "capture_all"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
-        SUSTAINED_LOAD, HOLD_WHITE, ATTENTION
+        SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
+        COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP, CAPTURE_ALL
     )
 
     /**
@@ -145,6 +151,31 @@ object CalibrationSequences {
             SPACING_STAIRCASE -> spacingStaircase(::emit)
             DARK_RAMP -> darkRamp(::emit, ::emitBrightness)
             SUSTAINED_LOAD -> sustainedLoad(::emit, sustainedMinutes)
+            COLOUR_PRIMARIES -> colourPrimaries(::emit)
+            BRIGHTNESS_X_COLOUR -> brightnessXColour(::emit, ::emitBrightness)
+            TRANSITION_PROBE -> transitionProbe(::emit)
+            CCT_SWEEP -> cctSweep(::emit, send, ::record, startedAt)
+            CAPTURE_ALL -> {
+                // One unattended pass over everything that needs no camera repositioning and no
+                // hands. Each block re-opens with a sync marker so the segments stay separable in a
+                // single recording, and the whole thing lands in one CSV whose labels say which
+                // block a row belongs to.
+                brightnessRamp(::emit)
+                syncMarker(::emit)
+                darkRamp(::emit, ::emitBrightness)
+                syncMarker(::emit)
+                colourPrimaries(::emit)
+                syncMarker(::emit)
+                brightnessXColour(::emit, ::emitBrightness)
+                syncMarker(::emit)
+                cctSweep(::emit, send, ::record, startedAt)
+                syncMarker(::emit)
+                transitionProbe(::emit)
+                syncMarker(::emit)
+                spacingStaircase(::emit)
+                syncMarker(::emit)
+                rateRamp(::emit)
+            }
             else -> return null
         }
 
@@ -213,6 +244,112 @@ object CalibrationSequences {
         val g = (ATTENTION_G_LOW + (ATTENTION_G_HIGH - ATTENTION_G_LOW) * phase).toInt()
         val b = (ATTENTION_B_LOW + (ATTENTION_B_HIGH - ATTENTION_B_LOW) * phase).toInt()
         return Triple(255, g, b)
+    }
+
+    /**
+     * Each channel swept alone, then the pairs, then white.
+     *
+     * Answers two things nothing else does. **Per-channel response**: red, green and blue are not
+     * the same die and do not have the same output for the same byte, so a model built on a single
+     * white curve is wrong for every colour that is not white. **Crosstalk**: whether driving one
+     * channel changes what another does — shared current limiting shows up here and nowhere else.
+     *
+     * The pairs are the check on the single channels. If (255,255,0) is not what the red curve and
+     * the green curve predict added together, the channels are not independent and no per-channel
+     * model will hold.
+     */
+    private suspend fun colourPrimaries(emit: (String, Int, Int, Int) -> Unit) {
+        val levels = listOf(0, 16, 32, 64, 96, 128, 160, 192, 224, 255)
+        for (level in levels) { emit("prim_r_$level", level, 0, 0); delay(1500) }
+        for (level in levels) { emit("prim_g_$level", 0, level, 0); delay(1500) }
+        for (level in levels) { emit("prim_b_$level", 0, 0, level); delay(1500) }
+        // Secondaries at full and half, against which the single-channel curves are checked.
+        val pairs = listOf(
+            Triple(255, 255, 0), Triple(0, 255, 255), Triple(255, 0, 255),
+            Triple(128, 128, 0), Triple(0, 128, 128), Triple(128, 0, 128)
+        )
+        for ((r, g, b) in pairs) { emit("prim_pair_${r}_${g}_$b", r, g, b); delay(1500) }
+        emit("prim_white_255", 255, 255, 255)
+        delay(1500)
+    }
+
+    /**
+     * Firmware brightness crossed with colour.
+     *
+     * The strip applies its own brightness on top of the RGB it is sent, and whether that is a clean
+     * multiply — and whether it is the *same* multiply at every hue — is unmeasured. If it is clean,
+     * a model needs one curve and one scalar. If it is not, brightness and colour cannot be modelled
+     * separately at all, and every preset that dims is wrong in a way no colour tuning will fix.
+     */
+    private suspend fun brightnessXColour(
+        emit: (String, Int, Int, Int) -> Unit,
+        emitBrightness: (String, Int) -> Unit
+    ) {
+        val colours = listOf(
+            Triple(255, 255, 255), Triple(255, 0, 0), Triple(0, 255, 0),
+            Triple(0, 0, 255), Triple(255, 120, 0)
+        )
+        for (percent in listOf(10, 25, 50, 75, 100)) {
+            emitBrightness("bxc_brightness_$percent", percent)
+            delay(600)
+            for ((r, g, b) in colours) {
+                emit("bxc_${percent}_${r}_${g}_$b", r, g, b)
+                delay(1500)
+            }
+        }
+        emitBrightness("bxc_restore_100", 100)
+        delay(400)
+    }
+
+    /**
+     * Hard jumps between distant colours, with a long settle after each.
+     *
+     * Nobody has ever established whether the firmware steps straight to a commanded colour or
+     * glides to it. It decides what "a flash" physically is: if the strip interpolates, a short
+     * flash never reaches the colour it was sent, and every timing constant derived from commanded
+     * values is measuring something else. Filmed at any frame rate this is visible as either an edge
+     * or a ramp.
+     */
+    private suspend fun transitionProbe(emit: (String, Int, Int, Int) -> Unit) {
+        val jumps = listOf(
+            Triple(0, 0, 0) to Triple(255, 255, 255),
+            Triple(255, 0, 0) to Triple(0, 0, 255),
+            Triple(0, 255, 0) to Triple(255, 0, 255),
+            Triple(255, 255, 255) to Triple(0, 0, 0)
+        )
+        repeat(3) { round ->
+            for ((from, to) in jumps) {
+                emit("trans_${round}_from_${from.first}_${from.second}_${from.third}", from.first, from.second, from.third)
+                delay(1800)
+                emit("trans_${round}_to_${to.first}_${to.second}_${to.third}", to.first, to.second, to.third)
+                delay(1800)
+            }
+        }
+    }
+
+    /**
+     * The warm/cold command across its range, against what the app currently models.
+     *
+     * This is a separate command from RGB, and the app converts a colour temperature into it using
+     * numbers nobody has checked against the hardware. Logged with r/g = -3 to mark the rows as CCT
+     * rather than colour, alongside the -1 brightness rows and the -2 screen rows.
+     */
+    private suspend fun cctSweep(
+        emit: (String, Int, Int, Int) -> Unit,
+        send: (ByteArray) -> Unit,
+        record: (Long, String, Int, Int, Int) -> Unit,
+        startedAt: Long
+    ) {
+        emit("cct_black", 0, 0, 0)
+        delay(800)
+        val steps = listOf(0, 25, 50, 75, 100)
+        for (warm in steps) {
+            for (cold in steps) {
+                send(DuoCoProtocol.createCctCommand(warm, cold))
+                record(System.currentTimeMillis() - startedAt, "cct_w${warm}_c$cold", -3, -3, warm * 100 + cold)
+                delay(1500)
+            }
+        }
     }
 
     private suspend fun syncMarker(emit: (String, Int, Int, Int) -> Unit) {
