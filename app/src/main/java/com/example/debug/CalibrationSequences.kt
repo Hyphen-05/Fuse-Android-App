@@ -50,13 +50,14 @@ object CalibrationSequences {
     const val TRANSITION_PROBE = "transition_probe"
     const val CCT_SWEEP = "cct_sweep"
     const val WRITE_TYPE_PROBE = "write_type_probe"
+    const val FULL_RAMP = "full_ramp"
     const val CAPTURE_ALL = "capture_all"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
         COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
-        WRITE_TYPE_PROBE, CAPTURE_ALL
+        WRITE_TYPE_PROBE, FULL_RAMP, CAPTURE_ALL
     )
 
     /**
@@ -158,6 +159,7 @@ object CalibrationSequences {
             TRANSITION_PROBE -> transitionProbe(::emit)
             CCT_SWEEP -> cctSweep(::emit, send, ::record, startedAt)
             WRITE_TYPE_PROBE -> writeTypeProbe(send, ::record, startedAt)
+            FULL_RAMP -> fullRamp(::emit, ::emitBrightness)
             CAPTURE_ALL -> {
                 // One unattended pass over everything that needs no camera repositioning and no
                 // hands. Each block re-opens with a sync marker so the segments stay separable in a
@@ -428,6 +430,55 @@ object CalibrationSequences {
         }
         record(now(), "wt_interleave_end", -4, -4, -4)
         delay(1500)
+    }
+
+    /**
+     * Every byte from 0 to 255, then every firmware brightness percent from 1 to 100.
+     *
+     * Joe, 2026-09-02: we already know the steps are coarse at the bottom — what is not known is
+     * **where that stops**, and no sampled grid can answer it. [BRIGHTNESS_RAMP] jumps 32 → 48 → 64;
+     * if the curve stops being jumpy at 55 it is invisible. [DARK_RAMP] has every byte but stops at
+     * 32, so the whole 32-255 span is interpolation.
+     *
+     * So this measures every byte instead of guessing which ones matter. The point is not the curve
+     * itself but its **derivative**: the difference between consecutive bytes IS the step size, and
+     * it can only be had from consecutive bytes. Where that difference falls below a just-noticeable
+     * amount is the answer to "where does it get smooth", and it comes straight off this with no
+     * fitting and no assumptions about the shape.
+     *
+     * The firmware-brightness half asks the same question of the other dimmer. [DARK_RAMP] covers
+     * 1-20%; this covers all of it, so the two dimmers can finally be compared over their whole
+     * ranges rather than at the bottom of one.
+     *
+     * About 7 minutes. Worth running twice at two exposures: at any single exposure the bottom of
+     * the range and the top cannot both be measured, and that is the sensor's dynamic range rather
+     * than anything about this sequence.
+     */
+    private suspend fun fullRamp(
+        emit: (String, Int, Int, Int) -> Unit,
+        emitBrightness: (String, Int) -> Unit
+    ) {
+        // 1s a step: enough frames at any video rate to average out PWM and sensor noise, and it
+        // keeps all 256 inside four and a half minutes.
+        for (level in 0..255) {
+            emit("full_$level", level, level, level)
+            delay(1000)
+        }
+        // Descending every fourth byte: the exposure-drift check, which needs enough points to see a
+        // trend and not another four minutes to do it.
+        for (level in (0..255 step 4).reversed()) {
+            emit("full_down_$level", level, level, level)
+            delay(600)
+        }
+        // The other dimmer, over its whole range rather than the bottom fifth.
+        emit("full_bright_base", 255, 255, 255)
+        delay(1000)
+        for (percent in 1..100) {
+            emitBrightness("full_bright_$percent", percent)
+            delay(800)
+        }
+        emitBrightness("full_bright_restore_100", 100)
+        delay(400)
     }
 
     private suspend fun syncMarker(emit: (String, Int, Int, Int) -> Unit) {
