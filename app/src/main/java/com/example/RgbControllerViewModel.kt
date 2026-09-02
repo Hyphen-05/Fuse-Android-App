@@ -2780,7 +2780,9 @@ class RgbControllerViewModel(
             com.example.debug.CalibrationWireLog.begin(System.currentTimeMillis())
             // Only the camera-based latency run opens the camera. Every other sequence leaves it
             // shut: binding it costs frames, heat and battery for nothing they measure.
-            if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA) {
+            if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA ||
+                sequence == com.example.debug.CalibrationSequences.PWM_PROBE
+            ) {
                 com.example.debug.LatencyCameraProbe.start(getApplication()) { addLog(it) }
             }
             val unfrozen = com.example.debug.CalibrationForegroundService.start(
@@ -2804,7 +2806,9 @@ class RgbControllerViewModel(
                 val wire = com.example.debug.CalibrationWireLog.finish(
                     sequence, getApplication().getExternalFilesDir(null)
                 )
-                if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA) {
+                if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA ||
+                    sequence == com.example.debug.CalibrationSequences.PWM_PROBE
+                ) {
                     val lat = com.example.debug.LatencyCameraProbe.finish(
                         sequence, getApplication().getExternalFilesDir(null), System.currentTimeMillis()
                     )
