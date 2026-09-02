@@ -319,7 +319,30 @@ At 63 px/ms a 1kHz carrier would chop the streak into eight ~63px dashes, and 5k
 dashes. Both would be unmissable. So the carrier is **above ~5kHz, or the driver dims by current
 rather than by PWM** — this method cannot separate those, and for our purposes it does not need to.
 
-**What it settles:** dimming via the brightness command is flicker-free at 15%, so there is no
+### Result, 2026-09-02: flicker-free at every duty cycle, 5% included
+
+The smear method needs the camera swept during one exposure, and the strip's cable would not reach
+far enough to do it. So the same question was asked without motion: hold the strip at a duty cycle
+and log per-frame mean luma at a pinned **5ms** exposure (`pwm_probe`, driven by the phone's own
+camera). A carrier slow enough to be *seen* has a period longer than 5ms, so each frame catches a
+different phase of it and brightness scatters. A carrier far above that averages out inside one
+exposure — and is invisible anyway, which is why this measures perceptible flicker rather than the
+carrier itself.
+
+| duty | frames | mean luma | sd | cv |
+|---|---|---|---|---|
+| 5% | 594 | 5.69 | 0.112 | 2.0% |
+| 10% | 592 | 17.53 | 0.123 | 0.7% |
+| 40% | 592 | 53.41 | 0.284 | 0.5% |
+| 100% | 593 | 82.58 | 0.425 | 0.5% |
+
+Every standard deviation is a fraction of one 8-bit level, and the **absolute** sd is smallest at 5%
+— the opposite of what a slow carrier would do. A driver that switched to low-frequency PWM when
+dimmed hard would scatter frames across the whole on/off range; instead the spread never exceeds
+about ±5% of the mean, which is sensor noise.
+
+**What it settles:** dimming via the brightness command is flicker-free at 15%, and now at 5, 10 and
+40% as well, so there is no
 low-frequency carrier to beat against anything the app does, and no self-flicker under dimming.
 That was the open risk against headroom scaling, and it is now closed. What remains open for
 headroom scaling is *resolution*, not flicker — `dark_ramp` phase 2.
