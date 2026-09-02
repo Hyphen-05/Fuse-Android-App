@@ -14,6 +14,9 @@ RUNS = {
     "1786842959739": "backgrounded, 2 strips",
     "1786843126085": "foreground, 2 strips",
     "1786843291187": "foreground, 1 strip",
+    # 2026-09-02, and the first run driven by hardware anyone will actually use. The three above
+    # characterise a slower driving phone, which is the whole reason this was re-run.
+    "1788310262977": "PIXEL 11, foreground, 2 strips",
 }
 
 
