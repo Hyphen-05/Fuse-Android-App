@@ -3,8 +3,11 @@ package com.example.debug
 import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
 import android.os.SystemClock
+import android.util.Range
 import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -50,6 +53,14 @@ object LatencyCameraProbe {
     /** Y-plane mean over the centre of the frame - cheap, and the strip is what fills it. */
     private const val ROI_FRACTION = 0.5f
 
+    /** 5ms: short enough to hold 60fps and to make a frame's timestamp mean an instant. */
+    private const val EXPOSURE_NS = 5_000_000L
+
+    /** High, because 5ms of a dark room is nothing. The strip's own light is what has to register. */
+    private const val SENSITIVITY = 1600
+
+    private const val TARGET_FPS = 60
+
     private val rows = StringBuilder()
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -92,11 +103,28 @@ object LatencyCameraProbe {
             val lifecycleOwner = ProbeLifecycleOwner()
             lifecycleOwner.registry.currentState = Lifecycle.State.RESUMED
 
-            val analysis = ImageAnalysis.Builder()
+            val builder = ImageAnalysis.Builder()
                 // Latest-only: a backed-up queue would hand us stale frames, and a stale frame here
                 // is indistinguishable from a slow strip.
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
+
+            // The frame interval IS the resolution of this measurement, and left to itself the
+            // camera destroys it: in the dark room these runs happen in, auto-exposure stretched to
+            // ~66ms a frame, which is coarser than the 30fps video this was built to replace. The
+            // first run read median 47ms with a 3ms minimum — a spread dominated by sampling rather
+            // than by the strip.
+            //
+            // So exposure is pinned manually rather than asked for politely. Short exposure buys
+            // two things at once: a high frame rate, and a timestamp that means a narrow instant
+            // instead of a long smear. LEDs at full white are bright enough not to need more.
+            Camera2Interop.Extender(builder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                .setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, EXPOSURE_NS)
+                .setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, SENSITIVITY)
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(TARGET_FPS, TARGET_FPS)
+                )
+            val analysis = builder.build()
             analysis.setAnalyzer(executor) { proxy ->
                 try {
                     markFrame(proxy.imageInfo.timestamp, meanLuma(proxy))

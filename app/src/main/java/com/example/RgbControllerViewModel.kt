@@ -2763,7 +2763,7 @@ class RgbControllerViewModel(
      * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
      * start, the sequence still runs, it is just freezable again.
      */
-    override fun onAdbRunCalibration(sequence: String, minutes: Int, attention: Boolean) {
+    override fun onAdbRunCalibration(sequence: String, minutes: Int, attention: Boolean, dimPercent: Int) {
         // The next sequence starting is one of the two ways the attention fade is acknowledged, and
         // it is also how a run that is going wrong gets stopped. Cancel before launching, so the two
         // never overlap and write colours at each other.
@@ -2793,7 +2793,8 @@ class RgbControllerViewModel(
                 val file = com.example.debug.CalibrationSequences.run(
                     sequence = sequence,
                     outputDir = getApplication().getExternalFilesDir(null),
-                    sustainedMinutes = minutes
+                    sustainedMinutes = minutes,
+                    dimPercent = dimPercent
                 ) { command ->
                     targets.forEach { address ->
                         com.example.debug.CalibrationWireLog.send(address, targets.size)

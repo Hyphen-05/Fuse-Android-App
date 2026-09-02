@@ -174,11 +174,14 @@ class AdbControlReceiver : BroadcastReceiver() {
                 // duration change without a rebuild, which matters for the one sequence whose
                 // whole point is how long it runs.
                 val minutes = intent.getIntExtra("minutes", 0)
+                // --ei percent N, read only by hold_dim. Default 15 matches the duty cycle the
+                // 2026-08-19 PWM result was taken at, so a repeat is a repeat.
+                val percent = intent.getIntExtra("percent", 15)
                 // --ez attention false when someone is watching the phone anyway. Default on: the
                 // monitor is off during a capture session, so otherwise a finished run says nothing.
                 val attention = intent.getBooleanExtra("attention", true)
-                listener.onAdbRunCalibration(sequence, minutes, attention)
-                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes attention=$attention started")
+                listener.onAdbRunCalibration(sequence, minutes, attention, percent)
+                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes attention=$attention percent=$percent started")
             }
 
             "stop_calibration" -> {

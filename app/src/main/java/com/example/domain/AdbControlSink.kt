@@ -25,7 +25,12 @@ class AdbControlSink {
          * writes a CSV of what was sent when. Debug tooling only: it exists so measurements come
          * from the hardware instead of guessed constants.
          */
-        fun onAdbRunCalibration(sequence: String, minutes: Int = 0, attention: Boolean = true)
+        fun onAdbRunCalibration(
+            sequence: String,
+            minutes: Int = 0,
+            attention: Boolean = true,
+            dimPercent: Int = 15
+        )
 
         /** Cancels a running sequence, and acknowledges the attention signal, which never ends on its own. */
         fun onAdbStopCalibration()

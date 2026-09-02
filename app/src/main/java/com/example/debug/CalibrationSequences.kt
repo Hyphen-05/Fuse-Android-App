@@ -52,13 +52,14 @@ object CalibrationSequences {
     const val WRITE_TYPE_PROBE = "write_type_probe"
     const val FULL_RAMP = "full_ramp"
     const val LATENCY_CAMERA = "latency_camera"
+    const val HOLD_DIM = "hold_dim"
     const val CAPTURE_ALL = "capture_all"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
         COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
-        WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, CAPTURE_ALL
+        WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, HOLD_DIM, CAPTURE_ALL
     )
 
     /**
@@ -86,6 +87,7 @@ object CalibrationSequences {
         sequence: String,
         outputDir: File?,
         sustainedMinutes: Int = 0,
+        dimPercent: Int = 15,
         send: (ByteArray) -> Unit
     ): File? {
         log.setLength(0)
@@ -115,6 +117,18 @@ object CalibrationSequences {
         send(DuoCoProtocol.createBrightnessCommand(100))
         record(0, "brightness_pinned_100", -1, -1, -1)
         delay(400)
+
+        // Before the brightness pin, deliberately: pinning to 100 is the exact opposite of what a
+        // dim hold is for. Parks the strip at white and a commanded firmware brightness so a
+        // hand-swept PWM still has a known, exact duty cycle to photograph.
+        if (sequence == HOLD_DIM) {
+            val percent = dimPercent.coerceIn(1, 100)
+            send(DuoCoProtocol.createBrightnessCommand(percent))
+            delay(400)
+            send(DuoCoProtocol.createColorCommand(255, 255, 255))
+            delay(600_000)
+            return null
+        }
 
         // Not a measurement and not logged: it runs only when nothing is being captured, and a
         // CSV of it would look like data. It never returns on its own — see [attentionFade].
