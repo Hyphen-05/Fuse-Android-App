@@ -207,8 +207,14 @@ The 2026-08-17 attempt failed all three conditions. Corrected method:
 - Count dashes, divide by the EXIF exposure time.
 - **Repeat at 5, 10, 20 and 40%.** Whether the carrier is constant or scales with duty is itself
   unmeasured, and it decides whether deep dimming can flicker.
-- The 2026-08-19 result found no chopping at 15%. A known shutter either confirms that properly or
-  overturns it.
+- **The 15% case is already settled, and this plan misstated it.** The 2026-08-19 run had a known
+  shutter — 8.27ms at ISO 22, four stills, three usable and all agreeing — so it is not waiting on a
+  better exposure. No periodic structure anywhere along a 525px smear at 63 px/ms, where 1kHz would
+  have given eight 63px dashes and 5kHz thirteen-pixel ones. The carrier is above ~5kHz or the
+  driver dims by current, and dimming is flicker-free at 15%. See `tools/calibration/README.md`.
+- **What is actually open is the other duty cycles**, 5 and 10% especially: some drivers drop their
+  carrier at low duty, and deep dimming is exactly where that would bite. Repeating at 15% would
+  confirm a result that does not need confirming.
 
 ### P4 — Driver's screen and the strip both in frame (absolute latency)
 
