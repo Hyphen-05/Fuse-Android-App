@@ -49,12 +49,14 @@ object CalibrationSequences {
     const val BRIGHTNESS_X_COLOUR = "brightness_x_colour"
     const val TRANSITION_PROBE = "transition_probe"
     const val CCT_SWEEP = "cct_sweep"
+    const val WRITE_TYPE_PROBE = "write_type_probe"
     const val CAPTURE_ALL = "capture_all"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
-        COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP, CAPTURE_ALL
+        COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
+        WRITE_TYPE_PROBE, CAPTURE_ALL
     )
 
     /**
@@ -155,6 +157,7 @@ object CalibrationSequences {
             BRIGHTNESS_X_COLOUR -> brightnessXColour(::emit, ::emitBrightness)
             TRANSITION_PROBE -> transitionProbe(::emit)
             CCT_SWEEP -> cctSweep(::emit, send, ::record, startedAt)
+            WRITE_TYPE_PROBE -> writeTypeProbe(send, ::record, startedAt)
             CAPTURE_ALL -> {
                 // One unattended pass over everything that needs no camera repositioning and no
                 // hands. Each block re-opens with a sync marker so the segments stay separable in a
@@ -171,6 +174,8 @@ object CalibrationSequences {
                 cctSweep(::emit, send, ::record, startedAt)
                 syncMarker(::emit)
                 transitionProbe(::emit)
+                syncMarker(::emit)
+                writeTypeProbe(send, ::record, startedAt)
                 syncMarker(::emit)
                 spacingStaircase(::emit)
                 syncMarker(::emit)
@@ -350,6 +355,79 @@ object CalibrationSequences {
                 delay(1500)
             }
         }
+    }
+
+    /**
+     * The plain colour command against the music colour command, which differ by one byte.
+     *
+     * `createColorCommand` sends 0x10 in byte 7 and `createMusicColorCommand` sends 0x20; everything
+     * else, length included, is identical. So any difference between them is the **firmware's**, not
+     * the radio's — which is what makes this worth running rather than obvious. Three questions,
+     * none of which has an answer:
+     *
+     *  1. **Does the strip treat them differently?** Blocks A and B send the same hard jumps through
+     *     each. If one snaps and the other glides, every timing constant taken through one command
+     *     is wrong for the other, and the visualiser has been using the music variant all along.
+     *  2. **Is either faster on the wire?** Blocks C and D burst each flat out. Identical payload
+     *     size says they should match exactly; if the wire log disagrees, something upstream is
+     *     treating them differently and that is a finding in the app, not the strip.
+     *  3. **Do they displace each other?** They share a type byte, so the write manager's supersede
+     *     check sees a queued command of one kind as replaceable by the other. Block E alternates
+     *     them fast enough for that to bite, which is exactly the condition a running visualiser is
+     *     in.
+     *
+     * Logged with r/g = -4 to mark rows as write-type events. Colours are sent raw rather than
+     * through `emit`, because `emit` can only send the plain command.
+     */
+    private suspend fun writeTypeProbe(
+        send: (ByteArray) -> Unit,
+        record: (Long, String, Int, Int, Int) -> Unit,
+        startedAt: Long
+    ) {
+        fun now() = System.currentTimeMillis() - startedAt
+
+        // A and B: identical visual content, one command type each, slow enough to film.
+        for ((label, build) in listOf<Pair<String, (Int, Int, Int) -> ByteArray>>(
+            "plain" to DuoCoProtocol::createColorCommand,
+            "music" to DuoCoProtocol::createMusicColorCommand
+        )) {
+            repeat(6) { i ->
+                send(build(0, 0, 0))
+                record(now(), "wt_${label}_${i}_black", -4, -4, 0)
+                delay(1200)
+                send(build(255, 255, 255))
+                record(now(), "wt_${label}_${i}_white", -4, -4, 255)
+                delay(1200)
+            }
+        }
+
+        // C and D: flat out, no delay. The wire log is the whole result; the strip is irrelevant.
+        for ((label, build) in listOf<Pair<String, (Int, Int, Int) -> ByteArray>>(
+            "plain" to DuoCoProtocol::createColorCommand,
+            "music" to DuoCoProtocol::createMusicColorCommand
+        )) {
+            record(now(), "wt_burst_${label}_start", -4, -4, -4)
+            repeat(200) { i ->
+                val v = if (i % 2 == 0) 255 else 0
+                send(build(v, 0, 0))
+            }
+            record(now(), "wt_burst_${label}_end", -4, -4, -4)
+            delay(2000)
+        }
+
+        // E: alternating types at a rate where the shared type byte makes them supersede each other.
+        record(now(), "wt_interleave_start", -4, -4, -4)
+        repeat(100) { i ->
+            val cmd = if (i % 2 == 0) {
+                DuoCoProtocol.createColorCommand(255, 0, 0)
+            } else {
+                DuoCoProtocol.createMusicColorCommand(0, 0, 255)
+            }
+            send(cmd)
+            delay(20)
+        }
+        record(now(), "wt_interleave_end", -4, -4, -4)
+        delay(1500)
     }
 
     private suspend fun syncMarker(emit: (String, Int, Int, Int) -> Unit) {
