@@ -33,18 +33,28 @@ import androidx.compose.ui.platform.LocalView
 @Composable
 fun CalibrationFlashOverlay() {
     val runActive by CalibrationScreenFlash.runActive.collectAsState()
+    val brightScreen by CalibrationScreenFlash.brightScreen.collectAsState()
     val on by CalibrationScreenFlash.on.collectAsState()
     val view = LocalView.current
     val context = LocalContext.current
 
-    DisposableEffect(runActive) {
+    DisposableEffect(runActive, brightScreen) {
         val activity = context.findActivity()
         val window = activity?.window
         val restore = window?.attributes?.screenBrightness
         if (runActive) {
+            // Awake for every run: a sleeping display takes the app out of TOP, which costs the
+            // foreground service and stalls the sequence outright.
             view.keepScreenOn = true
             window?.attributes = window.attributes?.apply {
-                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+                // Bright only where the screen IS the measurement. Everywhere else it is a light
+                // source in a dark room, so it goes to the dimmest the platform will accept while
+                // still counting as on.
+                screenBrightness = if (brightScreen) {
+                    WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+                } else {
+                    MINIMUM_VISIBLE_BRIGHTNESS
+                }
             }
         }
         onDispose {
@@ -65,6 +75,12 @@ fun CalibrationFlashOverlay() {
         }
     }
 }
+
+/**
+ * Not [WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF], which on some devices reads as "screen
+ * off" rather than "screen dim" and puts the app right back into the state this is avoiding.
+ */
+private const val MINIMUM_VISIBLE_BRIGHTNESS = 0.01f
 
 private fun Context.findActivity(): Activity? {
     var ctx: Context? = this

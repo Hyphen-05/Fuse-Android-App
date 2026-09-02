@@ -31,8 +31,23 @@ object CalibrationScreenFlash {
     /** True while the screen should be white. Observed by the overlay in MainActivity. */
     val on = MutableStateFlow(false)
 
-    /** True for the length of a run: holds the screen awake, which sleeping would otherwise void. */
+    /**
+     * True for the length of **every** run: holds the screen awake.
+     *
+     * Not optional, and not the same question as brightness. A run whose phone is allowed to sleep
+     * does not simply go dark — the display turning off takes the app out of TOP, Android then
+     * refuses `startForegroundService()` outright, the process is throttled, and `delay()` inside a
+     * sequence stops advancing. On 2026-09-02 that silently stalled a brightness_ramp and a
+     * spacing_staircase: no CSV, no error, and a recording of a strip that had stopped moving.
+     */
     val runActive = MutableStateFlow(false)
+
+    /**
+     * True only for `latency_pulse`, which needs the screen bright and in frame. Every other run
+     * pins the screen to its **minimum** instead: the phone must stay awake, but in a blackout
+     * photometric run its display is a lamp pointed at the subject.
+     */
+    val brightScreen = MutableStateFlow(false)
 
     /**
      * Set by [CalibrationSequences] for the length of a latency run. Called with wall-clock

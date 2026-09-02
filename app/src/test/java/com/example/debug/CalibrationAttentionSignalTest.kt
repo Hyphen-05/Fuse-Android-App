@@ -67,19 +67,22 @@ class CalibrationAttentionSignalTest {
 class CalibrationScreenOverrideScopeTest {
 
     @org.junit.Test
-    fun `only the latency run declares the screen in use`() {
-        val screenRuns = CalibrationSequences.ALL.filter { it == CalibrationSequences.LATENCY_PULSE }
-        org.junit.Assert.assertEquals(
-            "exactly one sequence may drive the screen overlay",
-            listOf(CalibrationSequences.LATENCY_PULSE),
-            screenRuns
-        )
+    fun `the overlay is off whenever nothing is running`() {
+        // All three default false, so a fresh process never lights the screen on its own.
+        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.on.value)
+        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.runActive.value)
+        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.brightScreen.value)
     }
 
     @org.junit.Test
-    fun `the overlay is off whenever nothing is running`() {
-        // Both flags default false, so a fresh process never lights the screen on its own.
-        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.on.value)
-        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.runActive.value)
+    fun `awake and bright are separate questions`() {
+        // Keeping the screen awake is not optional for any run: a display that sleeps takes the app
+        // out of TOP, Android then refuses startForegroundService, and the sequence stalls with no
+        // CSV and no error. Brightness is the part that must stay scoped to latency_pulse.
+        org.junit.Assert.assertNotSame(
+            "runActive and brightScreen must not be the same flag",
+            CalibrationScreenFlash.runActive,
+            CalibrationScreenFlash.brightScreen
+        )
     }
 }

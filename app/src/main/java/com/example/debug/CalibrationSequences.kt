@@ -130,8 +130,11 @@ object CalibrationSequences {
             CalibrationScreenFlash.presentedListener = { atMs ->
                 record(atMs - startedAt, "screen_presented", -2, -2, -2)
             }
-            CalibrationScreenFlash.runActive.value = true
         }
+        // Awake for every run, bright for one. Letting the screen sleep does not just darken the
+        // room, it stalls the sequence — see [CalibrationScreenFlash.runActive].
+        CalibrationScreenFlash.brightScreen.value = sequence == LATENCY_PULSE
+        CalibrationScreenFlash.runActive.value = true
 
         syncMarker(::emit)
 
@@ -148,6 +151,7 @@ object CalibrationSequences {
         emit("end_black", 0, 0, 0)
         CalibrationScreenFlash.on.value = false
         CalibrationScreenFlash.runActive.value = false
+        CalibrationScreenFlash.brightScreen.value = false
         CalibrationScreenFlash.presentedListener = null
         return writeCsv(sequence, outputDir, startedAt)
     }
