@@ -55,3 +55,31 @@ class CalibrationAttentionSignalTest {
         assertTrue("one breath should be 1.2-1.6s, was ${breathMs}ms", breathMs in 1200..1600)
     }
 }
+
+/**
+ * The screen overlay pins the driving phone's display to full brightness and holds it awake. That is
+ * right for `latency_pulse`, whose whole method is the screen being bright and in frame, and wrong
+ * for everything else — during a blackout `dark_ramp` it is a lamp pointed at the subject.
+ *
+ * It fired on every sequence until 2026-09-02 and contaminated a dark_ramp take before Joe spotted
+ * the phone lighting up. Pinned here so the scoping cannot quietly widen again.
+ */
+class CalibrationScreenOverrideScopeTest {
+
+    @org.junit.Test
+    fun `only the latency run declares the screen in use`() {
+        val screenRuns = CalibrationSequences.ALL.filter { it == CalibrationSequences.LATENCY_PULSE }
+        org.junit.Assert.assertEquals(
+            "exactly one sequence may drive the screen overlay",
+            listOf(CalibrationSequences.LATENCY_PULSE),
+            screenRuns
+        )
+    }
+
+    @org.junit.Test
+    fun `the overlay is off whenever nothing is running`() {
+        // Both flags default false, so a fresh process never lights the screen on its own.
+        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.on.value)
+        org.junit.Assert.assertEquals(false, CalibrationScreenFlash.runActive.value)
+    }
+}

@@ -121,12 +121,17 @@ object CalibrationSequences {
         // Rows marked -2 are screen events, not colours — the same trick the brightness rows use
         // with -1. Recorded from a frame callback so the compositor's share of screen latency is
         // measured rather than assumed; see [CalibrationScreenFlash] for what is left over.
+        // LATENCY_PULSE only, and that scoping is the whole point. The overlay pins the phone's
+        // screen to full brightness and holds it awake, which is correct for the one run that needs
+        // the screen in frame — and is a lamp in a dark room for every run that does not. It fired
+        // on every sequence until 2026-09-02, including a blackout dark_ramp, which is the run
+        // least able to survive a constant light source pointed at the subject.
         if (sequence == LATENCY_PULSE) {
             CalibrationScreenFlash.presentedListener = { atMs ->
                 record(atMs - startedAt, "screen_presented", -2, -2, -2)
             }
+            CalibrationScreenFlash.runActive.value = true
         }
-        CalibrationScreenFlash.runActive.value = true
 
         syncMarker(::emit)
 
