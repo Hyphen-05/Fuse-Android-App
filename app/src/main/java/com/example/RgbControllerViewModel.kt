@@ -2778,6 +2778,11 @@ class RgbControllerViewModel(
             addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
             calibrationDeviceCount = targets.size
             com.example.debug.CalibrationWireLog.begin(System.currentTimeMillis())
+            // Only the camera-based latency run opens the camera. Every other sequence leaves it
+            // shut: binding it costs frames, heat and battery for nothing they measure.
+            if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA) {
+                com.example.debug.LatencyCameraProbe.start(getApplication()) { addLog(it) }
+            }
             val unfrozen = com.example.debug.CalibrationForegroundService.start(
                 getApplication(), sequence
             )
@@ -2798,6 +2803,12 @@ class RgbControllerViewModel(
                 val wire = com.example.debug.CalibrationWireLog.finish(
                     sequence, getApplication().getExternalFilesDir(null)
                 )
+                if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA) {
+                    val lat = com.example.debug.LatencyCameraProbe.finish(
+                        sequence, getApplication().getExternalFilesDir(null), System.currentTimeMillis()
+                    )
+                    addLog("Latency probe log: ${lat?.absolutePath ?: "not written"}")
+                }
                 addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}, wire: ${wire?.absolutePath ?: "not written"}")
                 android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
                 if (attention && sequence != com.example.debug.CalibrationSequences.ATTENTION) {
@@ -2823,6 +2834,8 @@ class RgbControllerViewModel(
                 com.example.debug.CalibrationScreenFlash.on.value = false
                 com.example.debug.CalibrationScreenFlash.runActive.value = false
                 com.example.debug.CalibrationScreenFlash.presentedListener = null
+                // finally, so a cancelled or thrown run cannot leave the camera bound.
+                com.example.debug.LatencyCameraProbe.finish(sequence, null, 0)
             }
         }
     }

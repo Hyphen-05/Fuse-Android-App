@@ -51,13 +51,14 @@ object CalibrationSequences {
     const val CCT_SWEEP = "cct_sweep"
     const val WRITE_TYPE_PROBE = "write_type_probe"
     const val FULL_RAMP = "full_ramp"
+    const val LATENCY_CAMERA = "latency_camera"
     const val CAPTURE_ALL = "capture_all"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
         COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
-        WRITE_TYPE_PROBE, FULL_RAMP, CAPTURE_ALL
+        WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, CAPTURE_ALL
     )
 
     /**
@@ -92,6 +93,10 @@ object CalibrationSequences {
         val startedAt = System.currentTimeMillis()
 
         fun emit(label: String, r: Int, g: Int, b: Int) {
+            // Stamped before the write, not after: the probe is timing how long the light takes to
+            // follow the command, so the clock has to start at the last instant we still hold it.
+            // Inert unless a latency run is active.
+            LatencyCameraProbe.markWrite(label)
             send(DuoCoProtocol.createColorCommand(r, g, b))
             record(System.currentTimeMillis() - startedAt, label, r, g, b)
         }
@@ -160,6 +165,7 @@ object CalibrationSequences {
             CCT_SWEEP -> cctSweep(::emit, send, ::record, startedAt)
             WRITE_TYPE_PROBE -> writeTypeProbe(send, ::record, startedAt)
             FULL_RAMP -> fullRamp(::emit, ::emitBrightness)
+            LATENCY_CAMERA -> latencyCamera(::emit)
             CAPTURE_ALL -> {
                 // One unattended pass over everything that needs no camera repositioning and no
                 // hands. Each block re-opens with a sync marker so the segments stay separable in a
@@ -479,6 +485,31 @@ object CalibrationSequences {
         }
         emitBrightness("full_bright_restore_100", 100)
         delay(400)
+    }
+
+    /**
+     * Hard black-to-white steps, watched by the driving phone's own camera.
+     *
+     * The same shape as [latencyPulse] but with the measurement inside the app rather than in a
+     * video, so it needs neither a second phone nor the driver's screen in frame — see
+     * [LatencyCameraProbe] for why that is the sounder instrument as well as the more convenient
+     * one.
+     *
+     * Long gaps between pulses on purpose. Each one has to be unambiguously attributable to its own
+     * write, and the strip has to be fully settled before the next edge, or the two blur into a
+     * single measurement of neither.
+     */
+    private suspend fun latencyCamera(emit: (String, Int, Int, Int) -> Unit) {
+        // Settle first: the probe's first frames arrive while the camera is still ramping exposure,
+        // and a pulse landing in that window measures the camera waking up.
+        emit("latcam_settle", 0, 0, 0)
+        delay(3000)
+        repeat(20) { index ->
+            emit("latcam_${index}_on", 255, 255, 255)
+            delay(900)
+            emit("latcam_${index}_off", 0, 0, 0)
+            delay(1400)
+        }
     }
 
     private suspend fun syncMarker(emit: (String, Int, Int, Int) -> Unit) {
