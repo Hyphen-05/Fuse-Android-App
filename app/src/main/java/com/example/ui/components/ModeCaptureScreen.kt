@@ -105,6 +105,71 @@ fun ModeCaptureScreen(viewModel: RgbControllerViewModel, onClose: () -> Unit) {
     val runActive = uiState.phase == ModeCapturePhase.Running || uiState.phase == ModeCapturePhase.Paused
     var showDiscardConfirm by remember { mutableStateOf(false) }
 
+    // Driven from adb rather than by hand. The phases below are the same ones the buttons trigger,
+    // in the same order, with waits where a person would have been looking at the preview and
+    // deciding it looked right. See ModeCaptureAutoRun for why the endpoints are passed in instead
+    // of tapped: a fingertip on a preview is the least repeatable part of the whole rig, and a
+    // missed tap produces a run that samples the wall and looks fine doing it.
+    val autoRequest by com.example.debug.ModeCaptureAutoRun.requested.collectAsStateWithLifecycle()
+    LaunchedEffect(autoRequest, hasCameraPermission, uiState.phase, customModes.size) {
+        val request = autoRequest ?: return@LaunchedEffect
+        if (!hasCameraPermission) {
+            com.example.debug.ModeCaptureAutoRun.status.value = "blocked: no camera permission"
+            return@LaunchedEffect
+        }
+        when (uiState.phase) {
+            ModeCapturePhase.Setup -> {
+                com.example.debug.ModeCaptureAutoRun.status.value = "setup: endpoints and lock"
+                // The camera is started by the LaunchedEffect above; give it frames before asking
+                // it to lock exposure against them, or it locks against a black preview.
+                kotlinx.coroutines.delay(2500)
+                if (request.positions > 0) {
+                    modeCaptureViewModel.onStripEndpointsSet(
+                        Offset(request.x0, request.y0), Offset(request.x1, request.y1), request.positions
+                    )
+                } else {
+                    modeCaptureViewModel.onStripEndpointsSet(
+                        Offset(request.x0, request.y0), Offset(request.x1, request.y1)
+                    )
+                }
+                kotlinx.coroutines.delay(500)
+                modeCaptureViewModel.lockCameraSettings(previewView)
+            }
+
+            ModeCapturePhase.Reference -> {
+                com.example.debug.ModeCaptureAutoRun.status.value = "reference"
+                viewModel.setPower(true)
+                viewModel.setColor(255, 255, 255)
+                viewModel.setBrightness(100)
+                // Long enough for the write to land and the strip to settle: the reference is what
+                // every later colour is corrected against, so a frame caught mid-change poisons
+                // the whole run rather than one mode of it.
+                kotlinx.coroutines.delay(2500)
+                modeCaptureViewModel.captureReference(255, 255, 255)
+                kotlinx.coroutines.delay(1000)
+                if (customModes.isEmpty()) {
+                    com.example.debug.ModeCaptureAutoRun.status.value = "blocked: no modes loaded"
+                    return@LaunchedEffect
+                }
+                com.example.debug.ModeCaptureAutoRun.status.value =
+                    "running: ${customModes.size} modes"
+                modeCaptureViewModel.startCycle(customModes) { byteValue -> viewModel.setMode(byteValue) }
+            }
+
+            ModeCapturePhase.Done -> {
+                // Exported to the app's own files dir, not through the share sheet: a chooser
+                // dialog is exactly the kind of thing an unattended run cannot answer.
+                val uri = modeCaptureViewModel.export()
+                com.example.debug.ModeCaptureAutoRun.lastExportPath = uri?.toString()
+                com.example.debug.ModeCaptureAutoRun.status.value =
+                    "done: ${uiState.completedCount}/${uiState.totalCount} exported"
+                com.example.debug.ModeCaptureAutoRun.clear()
+            }
+
+            else -> Unit
+        }
+    }
+
     fun requestClose() {
         if (runActive) showDiscardConfirm = true else onClose()
     }

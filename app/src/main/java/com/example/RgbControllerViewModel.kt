@@ -2763,7 +2763,47 @@ class RgbControllerViewModel(
      * Android froze and then killed it on 2026-08-16. The service is best-effort: if it will not
      * start, the sequence still runs, it is just freezable again.
      */
-    override fun onAdbRunCalibration(sequence: String, minutes: Int, attention: Boolean, dimPercent: Int) {
+    /**
+     * Does the strip actually emit light when told to?
+     *
+     * The failure this exists for is the nastiest one in the rig: a strip that reports CONNECTED,
+     * acks every write with status 0, and stays black. It is a device-side state, nothing sent over
+     * BLE clears it, and it needs a power cycle at the mains. Nothing else in the app can tell it
+     * from a working strip — only looking at the strip can, which is precisely what the photometer
+     * is now able to do.
+     *
+     * Full white against black, with a generous margin. In a dark room at the probe's pinned
+     * exposure a lit strip reads around 80 and a dark one around 1, so a difference of five levels
+     * is far below any real signal and far above sensor noise. Erring towards "lit" is deliberate:
+     * a false abort wastes a session, and a false pass merely produces the same nothing that would
+     * have happened anyway.
+     *
+     * Requires the photometer to already be running.
+     */
+    private suspend fun stripIsActuallyLit(targets: List<String>, bypassPacing: Boolean): Boolean {
+        fun write(command: ByteArray) =
+            targets.forEach { bleGattTransport.writeCommand(it, command, bypassPacing = bypassPacing) }
+
+        write(com.example.core.protocol.DuoCoProtocol.createBrightnessCommand(100))
+        kotlinx.coroutines.delay(300)
+        write(com.example.core.protocol.DuoCoProtocol.createColorCommand(0, 0, 0))
+        kotlinx.coroutines.delay(700)
+        val dark = com.example.debug.CalibrationPhotometer.lastLuma
+        write(com.example.core.protocol.DuoCoProtocol.createColorCommand(255, 255, 255))
+        kotlinx.coroutines.delay(700)
+        val lit = com.example.debug.CalibrationPhotometer.lastLuma
+        write(com.example.core.protocol.DuoCoProtocol.createColorCommand(0, 0, 0))
+        addLog("Liveness check: dark luma $dark, lit luma $lit.")
+        return lit - dark > 5.0
+    }
+
+    override fun onAdbRunCalibration(
+        sequence: String,
+        minutes: Int,
+        attention: Boolean,
+        dimPercent: Int,
+        pacingMs: Int
+    ) {
         // The next sequence starting is one of the two ways the attention fade is acknowledged, and
         // it is also how a run that is going wrong gets stopped. Cancel before launching, so the two
         // never overlap and write colours at each other.
@@ -2777,13 +2817,31 @@ class RgbControllerViewModel(
             }
             addLog("Calibration '$sequence' starting on ${targets.size} device(s).")
             calibrationDeviceCount = targets.size
+            // A calibration run controls its own wire timing — that is the entire point, and both
+            // this class's doc and AdbControlSink's said so while the call below quietly let
+            // bypassPacing default to false. With pacing at its 50ms default that capped every
+            // sequence at ~15Hz delivered, which is what the 2026-09-02 data actually measured.
+            // pacingMs >= 0 pins a value for the run instead, so the ceiling can be swept; the
+            // saved per-device preference is put back in the `finally` either way.
+            val bypassPacing = pacingMs < 0
+            val savedPacing = targets.associateWith { bleGattTransport.getPacingMs(it) }
+            if (!bypassPacing) {
+                targets.forEach { bleGattTransport.setPacing(it, pacingMs) }
+            }
+            addLog(
+                "Calibration '$sequence': pacing " +
+                    if (bypassPacing) "bypassed." else "pinned to ${pacingMs}ms."
+            )
             com.example.debug.CalibrationWireLog.begin(System.currentTimeMillis())
-            // Only the camera-based latency run opens the camera. Every other sequence leaves it
-            // shut: binding it costs frames, heat and battery for nothing they measure.
-            if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA ||
-                sequence == com.example.debug.CalibrationSequences.PWM_PROBE
-            ) {
-                com.example.debug.LatencyCameraProbe.start(getApplication()) { addLog(it) }
+            // Only the sequences that measure light open the camera. Every other one leaves it
+            // shut: binding it costs frames, heat and battery, and those costs land on exactly what
+            // a rate-shaped sequence is trying to measure.
+            val usesCamera = sequence in com.example.debug.CalibrationSequences.NEEDS_PHOTOMETER
+            if (usesCamera) {
+                com.example.debug.CalibrationPhotometer.start(
+                    context = getApplication(),
+                    onLog = { addLog(it) }
+                )
             }
             val unfrozen = com.example.debug.CalibrationForegroundService.start(
                 getApplication(), sequence
@@ -2792,6 +2850,21 @@ class RgbControllerViewModel(
                 addLog("Calibration '$sequence': foreground service unavailable — run may be frozen if backgrounded.")
             }
             try {
+                // Inside the try, so the finally still restores pacing and releases the camera if
+                // this bails out. A strip can report CONNECTED, ack every write with status 0, and
+                // emit nothing — seen 2026-09-02, 1688 sends and 690 acks against a black strip —
+                // and nothing in the app could tell that from working. Unattended, it turns a
+                // ninety-minute battery into ninety minutes of nothing, so the sequences that have
+                // a camera bound check before they commit to it.
+                if (usesCamera && !stripIsActuallyLit(targets, bypassPacing)) {
+                    addLog(
+                        "Calibration '$sequence' ABORTED: writes are being acked but the strip is " +
+                            "emitting nothing. That is a device-side state and no BLE command " +
+                            "clears it — power-cycle the strip at the mains."
+                    )
+                    android.util.Log.e("AdbControl", "run_calibration: aborted, strip acks but is dark")
+                    return@launch
+                }
                 val file = com.example.debug.CalibrationSequences.run(
                     sequence = sequence,
                     outputDir = getApplication().getExternalFilesDir(null),
@@ -2800,7 +2873,7 @@ class RgbControllerViewModel(
                 ) { command ->
                     targets.forEach { address ->
                         com.example.debug.CalibrationWireLog.send(address, targets.size)
-                        bleGattTransport.writeCommand(address, command)
+                        bleGattTransport.writeCommand(address, command, bypassPacing = bypassPacing)
                     }
                 }
                 val wire = com.example.debug.CalibrationWireLog.finish(
@@ -2809,7 +2882,7 @@ class RgbControllerViewModel(
                 if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA ||
                     sequence == com.example.debug.CalibrationSequences.PWM_PROBE
                 ) {
-                    val lat = com.example.debug.LatencyCameraProbe.finish(
+                    val lat = com.example.debug.CalibrationPhotometer.finish(
                         sequence, getApplication().getExternalFilesDir(null), System.currentTimeMillis()
                     )
                     addLog("Latency probe log: ${lat?.absolutePath ?: "not written"}")
@@ -2840,7 +2913,10 @@ class RgbControllerViewModel(
                 com.example.debug.CalibrationScreenFlash.runActive.value = false
                 com.example.debug.CalibrationScreenFlash.presentedListener = null
                 // finally, so a cancelled or thrown run cannot leave the camera bound.
-                com.example.debug.LatencyCameraProbe.finish(sequence, null, 0)
+                com.example.debug.CalibrationPhotometer.finish(sequence, null, 0)
+                // Same reason: a pinned pacing value is a property of one run, and a run that
+                // threw or was cancelled must not leave the app writing at a rate nobody chose.
+                savedPacing.forEach { (address, ms) -> bleGattTransport.setPacing(address, ms) }
             }
         }
     }

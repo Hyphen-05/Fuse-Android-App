@@ -80,6 +80,9 @@ dependencies {
   implementation(libs.androidx.camera.core)
   implementation(libs.androidx.camera.lifecycle)
   implementation(libs.androidx.camera.view)
+  // Explicit rather than transitive-through-camera-view: CalibrationRecorder binds VideoCapture
+  // directly, so the dependency is real and should be declared where it is used.
+  implementation(libs.androidx.camera.video)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   // Pinned past the BOM (which carries 1.4.0) for Material 3 Expressive: LoadingIndicator,

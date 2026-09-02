@@ -42,6 +42,19 @@ import com.example.hardware.debug.AdbTestMetronome
  *                        delivery path — the only way to reach it, it is never a fallback for
  *                        failed real capture; stop with stop_backend)
  *   stop_backend
+ *   run_calibration     --es sequence <name> [--ei minutes N] [--ei percent N]
+ *                       [--ez attention true|false] [--ei pacing N]
+ *                       (pacing omitted bypasses pacing, which is what a calibration run is for;
+ *                        a value pins it, which is how the write ceiling gets swept)
+ *   stop_calibration
+ *   start_recording     [--es name <label>] [--el exposure_ns N] [--ei iso N] [--ef focus N]
+ *                       [--ez uhd true]
+ *                       (aimed at the *camera* phone, not the driver — see CalibrationRecorder)
+ *   stop_recording
+ *   run_mode_capture    [--ef x0 N --ef y0 N --ef x1 N --ef y1 N] [--ei positions N]
+ *                       (opens the Mode Capture screen and drives it to completion; endpoints
+ *                        default to a vertical line down the frame, and are better taken from a
+ *                        chase_probe grid — see ModeCaptureAutoRun)
  *   status              (dumps current state to Logcat under tag AdbControl)
  *
  * All outcomes are logged to Logcat (tag "AdbControl") for scripted confirmation — e.g. after
@@ -180,8 +193,52 @@ class AdbControlReceiver : BroadcastReceiver() {
                 // --ez attention false when someone is watching the phone anyway. Default on: the
                 // monitor is off during a capture session, so otherwise a finished run says nothing.
                 val attention = intent.getBooleanExtra("attention", true)
-                listener.onAdbRunCalibration(sequence, minutes, attention, percent)
-                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes attention=$attention percent=$percent started")
+                // --ei pacing N pins the per-device write pacing for the run. Omitted means
+                // bypass it entirely, which is what a calibration run is supposed to do — see
+                // AdbControlSink.onAdbRunCalibration. Pass a value to sweep the ceiling instead
+                // of removing it.
+                val pacing = intent.getIntExtra("pacing", -1)
+                listener.onAdbRunCalibration(sequence, minutes, attention, percent, pacing)
+                Log.i(TAG, "run_calibration: sequence=$sequence minutes=$minutes attention=$attention percent=$percent pacing=$pacing started")
+            }
+
+            // The second phone, driven over adb instead of by taps on a camera app. Runs on
+            // whichever device receives the broadcast, so it is aimed at the *camera* phone while
+            // run_calibration is aimed at the driver. See CalibrationRecorder.
+            "start_recording" -> {
+                val name = intent.getStringExtra("name") ?: "session"
+                val exposureNs = intent.getLongExtra("exposure_ns", CalibrationRecorder.DEFAULT_EXPOSURE_NS)
+                val iso = intent.getIntExtra("iso", CalibrationRecorder.DEFAULT_SENSITIVITY)
+                val focus = intent.getFloatExtra("focus", CalibrationRecorder.DEFAULT_FOCUS_DIOPTRES)
+                val fhd = !intent.getBooleanExtra("uhd", false)
+                val ok = CalibrationRecorder.start(context, name, exposureNs, iso, focus, fhd) {
+                    Log.i(TAG, it)
+                }
+                Log.i(TAG, "start_recording: ok=$ok ${CalibrationRecorder.settingsLine}")
+            }
+
+            // Mode Capture, without a human at the screen. The receiver cannot reach a PreviewView,
+            // so it leaves a request and MainActivity opens the screen — see ModeCaptureAutoRun.
+            "run_mode_capture" -> {
+                val x0 = intent.getFloatExtra("x0", 0.5f)
+                val y0 = intent.getFloatExtra("y0", 0.05f)
+                val x1 = intent.getFloatExtra("x1", 0.5f)
+                val y1 = intent.getFloatExtra("y1", 0.95f)
+                val positions = intent.getIntExtra("positions", 0)
+                ModeCaptureAutoRun.request(x0, y0, x1, y1, positions)
+                // Bringing the app forward is the receiver's job: Mode Capture needs a live camera
+                // preview, and a backgrounded app has neither that nor a foreground it can keep.
+                val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(launch)
+                }
+                Log.i(TAG, "run_mode_capture: endpoints=($x0,$y0)-($x1,$y1) positions=$positions requested")
+            }
+
+            "stop_recording" -> {
+                val file = CalibrationRecorder.stop { Log.i(TAG, it) }
+                Log.i(TAG, "stop_recording: file=${file?.absolutePath ?: "none"}")
             }
 
             "stop_calibration" -> {
@@ -200,6 +257,10 @@ class AdbControlReceiver : BroadcastReceiver() {
                     "status: diagnosticsRecording=${DiagnosticLogger.isRecording()} " +
                         "excludedTags=${DiagnosticLogger.currentExcludedTags()} " +
                         "metronomeRunning=${AdbTestMetronome.isRunning()} " +
+                        "recording=${CalibrationRecorder.isRecording()} " +
+                        "recorderSettings=${CalibrationRecorder.settingsLine} " +
+                        "modeCaptureAuto=${ModeCaptureAutoRun.status.value} " +
+                        "modeCaptureExport=${ModeCaptureAutoRun.lastExportPath} " +
                         "vmListenerRegistered=${appContainer.adbControlSink.listener != null}"
                 )
             }

@@ -55,7 +55,14 @@ setup and no mid-session taps, which was the failure mode worth designing out.
 
 ## Part 1 — what has to be built first
 
-All of it is bench work. Only step 5 needs a strip to verify.
+**Built, 2026-09-02.** 308 tests pass and `assembleDebug` succeeds. What follows is the design and
+why; the one thing not yet verified against hardware is step 5's guard, which is noted again at the
+end of this file.
+
+One thing changed while building it: **the camera phone is driven over adb too**, so it is not just
+recording start and stop that Joe does not do — it is nothing at all beyond positioning. See step 6.
+
+All of it was bench work. Only step 5 needs a strip to verify.
 
 ### 1. `CalibrationPhotometer` — widen the probe
 
@@ -131,6 +138,25 @@ acked and the frame means did not move, abort the whole battery, log it loudly, 
 into the orange attention breath. This is the one piece of the build that should be verified against
 real hardware before the run, because it is the guard everything else leans on.
 
+### 6. Drive the camera phone over adb as well, instead of tapping a camera app
+
+Every previous session filmed with Open Camera and drove it by simulated taps at stored
+coordinates. That has the worst failure mode in the rig: a tap that misses produces a recording
+that looks perfectly fine and is void, and nobody finds out until the analysis. It has already
+happened once — picking the phone up rotated the UI and a whole burst of shutter taps produced no
+photos. It also cannot record what it did, because Open Camera's ISO and shutter live in its own
+SharedPreferences and adb cannot read them without root.
+
+`CalibrationRecorder` binds `VideoCapture` inside Fuse on the camera phone, with auto-exposure off,
+white balance fixed and focus fixed, and returns those settings in the log line and the filename.
+`start_recording` / `stop_recording` on the same adb surface as everything else. The file lands in
+the app's own external files dir, so the same `adb pull` that collects the CSVs collects the video.
+
+The consequence is that **the script starts and stops the recording**, and the camera phone needs
+nothing but to be pointed at the strip and plugged in. It does need USB debugging authorised to
+this laptop, which as of writing it does not have — `adb devices` shows only the Pixel 11 and the
+moto. That is the one prerequisite left.
+
 ---
 
 ## Part 2 — the run
@@ -167,18 +193,27 @@ the longest unwatched stretch, which is the exposure that matters.
 
 ## Part 3 — what Joe actually does
 
-1. Prop the **Pixel 11** facing the strip, plugged in, and leave it. This is the only framing
-   decision in the session and everything else follows it: the strip should fill the frame with a
-   little margin.
-2. Start the **Pixel 9** recording at one fixed setup, locked exposure, and leave it running for the
-   whole session. 1080p is fine — the analysis showed LEDs about 90px apart at that resolution, so
-   it was never the limiting factor. It is the measurement for `capture_all` and insurance for
-   everything else.
+1. Prop the **Pixel 11** facing the strip, plugged in. This is the framing decision the session
+   turns on: the strip should fill the frame with a little margin, and the long vertical strand
+   should run roughly down the middle, because that is where Mode Capture's default endpoints
+   assume it is.
+2. Prop the **Pixel 9** facing the strip too, plugged in, USB debugging authorised. Nothing to open,
+   nothing to set — the script starts and stops its recording and sets its exposure.
 3. Blackout, after dark, curtains closed.
-4. Start the script.
-5. Stop the Pixel 9's recording when the strip breathes orange.
+4. Run it:
 
-That is the whole of it. No taps mid-session, no exposure changes, no reframing, no second setup.
+```bash
+bash tools/capture/run-session.sh --camera <pixel-9-serial>
+```
+
+That is the whole of it. No taps, no exposure changes, no reframing, no second setup, and nothing
+to do while it runs. Without `--camera` it still runs and still answers everything except
+`capture_all`, which is skipped rather than shot blind.
+
+The script starts recording, runs each phase, pulls the files between phases and counts what
+arrived, holds the cool-down, sweeps the pacing values, polls Mode Capture rather than sleeping
+blind, stops the recording, waits for the mp4 to finalise before pulling it, and prints an
+inventory. Everything it does is logged to `captures/session-<timestamp>/session.log`.
 
 ## Part 4 — what this run still will not answer
 
@@ -206,8 +241,25 @@ higher-confidence response curve and, for the first time, a real number for the 
 
 ## The risk worth stating plainly
 
-This plan trades a proven instrument for a better one. The external camera worked; the in-app
-photometer is a build, and builds have bugs. That is exactly why the Pixel 9 should film the whole
-session anyway, why the phases are ordered cheap-first, and why the lying-strip abort in Part 1
-step 5 is the one thing verified against hardware beforehand. If the photometer turns out to be
-wrong, the video is still there and the session is recoverable as an ordinary filmed run.
+This plan trades a proven instrument for a better one. The external camera app worked; the in-app
+photometer and recorder are new code, and new code has bugs. Everything here compiles and the
+suite passes, but **none of it has met a strip**, and a rig that has only ever been exercised
+against a compiler is not a rig anyone should walk away from for two hours.
+
+So the first thing to do when there is a strip and a dark room is not the session — it is fifteen
+minutes of proving the parts:
+
+1. `chase_probe` end to end. Shortest phase, uses the photometer, and its grid rows either contain
+   a moving bright cell or the grid is wrong.
+2. `start_recording` on the camera phone, then `stop_recording`, then pull and open the mp4. It
+   either decodes at the exposure the log line claims or it does not.
+3. The liveness guard, provoked: run a photometer sequence with the strip powered down at the wall.
+   It should abort in the first ten seconds saying the strip acks but is dark. This is the guard
+   everything else leans on, and it is the one piece whose whole value is in firing correctly on a
+   day nobody is watching.
+4. `run_mode_capture`, killed after two or three modes. Enough to see it open the screen, lock, take
+   the reference and start cycling.
+
+If those four pass, the session is a script and a walk away. If the photometer turns out to be
+wrong afterwards, the Pixel 9's video is still there and the session is recoverable as an ordinary
+filmed run — which is the other reason it records throughout.

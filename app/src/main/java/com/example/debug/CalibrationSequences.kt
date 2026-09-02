@@ -55,12 +55,44 @@ object CalibrationSequences {
     const val HOLD_DIM = "hold_dim"
     const val PWM_PROBE = "pwm_probe"
     const val CAPTURE_ALL = "capture_all"
+    const val FULL_RAMP_X3 = "full_ramp_x3"
+    const val RATE_CEILING = "rate_ceiling"
+    const val CCT_PROBE = "cct_probe"
+    const val CHASE_PROBE = "chase_probe"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
         COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
-        WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, HOLD_DIM, PWM_PROBE, CAPTURE_ALL
+        WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, HOLD_DIM, PWM_PROBE, CAPTURE_ALL,
+        FULL_RAMP_X3, RATE_CEILING, CCT_PROBE, CHASE_PROBE
+    )
+
+    /**
+     * The sequences that need the phone's own camera bound.
+     *
+     * Everything else leaves it shut, and that is not an oversight: binding costs frames, heat and
+     * battery, and those costs land squarely on whatever a rate-shaped sequence is trying to
+     * measure. A camera left open through [RATE_CEILING] would be measuring a hot, busy phone.
+     */
+    val NEEDS_PHOTOMETER = setOf(
+        LATENCY_CAMERA, PWM_PROBE, FULL_RAMP_X3, CCT_PROBE, CHASE_PROBE
+    )
+
+    /**
+     * The three exposures [fullRampX3] cycles through at every byte, as (exposure ns, ISO).
+     *
+     * Their products — 0.4, 4 and 48 arbitrary units — span 120x, which is what it takes to hold
+     * byte 2 and byte 255 in the same run. The 2026-09-02 session shot the ramp twice at two
+     * exposures and joined them afterwards with a fitted scale factor; between bytes 48 and 203 the
+     * two takes agreed to 5% and the join was sound, but below byte 48 they disagreed by up to 42%
+     * and the bottom of the curve is still unsettled. Cycling *within* one run replaces the fitted
+     * factor with a known ratio and removes the question.
+     */
+    val X3_EXPOSURES = listOf(
+        2_000_000L to 200,   // least sensitive: holds the top of the range unclipped
+        5_000_000L to 800,   // the middle, and the overlap with both neighbours
+        15_000_000L to 3200  // most sensitive: resolves bytes 2-16, which is where the doubt is
     )
 
     /**
@@ -99,7 +131,7 @@ object CalibrationSequences {
             // Stamped before the write, not after: the probe is timing how long the light takes to
             // follow the command, so the clock has to start at the last instant we still hold it.
             // Inert unless a latency run is active.
-            LatencyCameraProbe.markWrite(label)
+            CalibrationPhotometer.markWrite(label)
             send(DuoCoProtocol.createColorCommand(r, g, b))
             record(System.currentTimeMillis() - startedAt, label, r, g, b)
         }
@@ -204,6 +236,10 @@ object CalibrationSequences {
             CCT_SWEEP -> cctSweep(::emit, send, ::record, startedAt)
             WRITE_TYPE_PROBE -> writeTypeProbe(send, ::record, startedAt)
             FULL_RAMP -> fullRamp(::emit, ::emitBrightness)
+            FULL_RAMP_X3 -> fullRampX3(::emit, ::emitBrightness)
+            RATE_CEILING -> rateCeiling(::emit)
+            CCT_PROBE -> cctProbe(::emit, send, ::record, startedAt)
+            CHASE_PROBE -> chaseProbe(::emit, send, ::record, startedAt)
             LATENCY_CAMERA -> latencyCamera(::emit)
             CAPTURE_ALL -> {
                 // One unattended pass over everything that needs no camera repositioning and no
@@ -527,11 +563,195 @@ object CalibrationSequences {
     }
 
     /**
+     * The full ramp again, but with the camera's exposure swept **inside** the run.
+     *
+     * The 2026-09-02 answer to "no single exposure holds byte 1 and byte 255" was to shoot the ramp
+     * twice and join the takes afterwards with a fitted scale factor. That worked in the middle —
+     * bytes 48-203 agreed to 5%, which is what proved the method — and failed at the bottom, where
+     * the two takes disagree by up to 42% and the shape is all that survives. The bottom is exactly
+     * the region the app cares about, since byte 2 already emits 5% of full light and there is
+     * nothing dimmer available.
+     *
+     * Holding each byte while the camera cycles [X3_EXPOSURES] fixes it in one pass: three
+     * measurements of *the same light*, at ratios that are known rather than fitted, so the curve
+     * joins itself. It also removes the second run, the second setup and the reframing.
+     *
+     * Each exposure gets 500ms of its own. `setExposure` returns as soon as the request is queued,
+     * not when a frame carrying it arrives, so the first frames of each window are still on the old
+     * setting — which is why every row records the exposure in force and the analysis discards the
+     * changeover rather than trusting a settling delay.
+     *
+     * About 8 minutes for the ramp, 11 with the brightness sweep.
+     */
+    private suspend fun fullRampX3(
+        emit: (String, Int, Int, Int) -> Unit,
+        emitBrightness: (String, Int) -> Unit
+    ) {
+        suspend fun sweepExposures(label: String) {
+            for ((exposure, iso) in X3_EXPOSURES) {
+                CalibrationPhotometer.setExposure(exposure, iso)
+                // Long enough that several frames land on the new setting even after the queue
+                // has drained the old ones.
+                delay(500)
+                CalibrationPhotometer.markWrite("${label}_exp_${exposure}_$iso")
+            }
+        }
+        for (level in 0..255) {
+            emit("fx3_$level", level, level, level)
+            sweepExposures("fx3_$level")
+        }
+        // The other dimmer, at the middle exposure only: firmware brightness spans a narrower range
+        // than the colour bytes do and does not need all three.
+        CalibrationPhotometer.setExposure(X3_EXPOSURES[1].first, X3_EXPOSURES[1].second)
+        emit("fx3_bright_base", 255, 255, 255)
+        delay(800)
+        for (percent in 1..100) {
+            emitBrightness("fx3_bright_$percent", percent)
+            delay(800)
+        }
+        emitBrightness("fx3_bright_restore_100", 100)
+        delay(400)
+    }
+
+    /**
+     * [rateRamp] again, but reaching for rates the app has never actually asked for.
+     *
+     * Every fast sequence run before 2026-09-02 was capped at ~15Hz delivered by
+     * `DeviceWriteManager`'s pacing wait, which the calibration path was supposed to bypass and did
+     * not. So "the strip drops writes above 15Hz" was never a measurement of the strip — nothing had
+     * ever written to it faster. This ladder goes to 200Hz, and the run is meant to be repeated at
+     * several `--ei pacing` values so the ceiling is *swept* rather than merely removed: pacing 0
+     * says what the hardware can do, and 25 and 50 say what the current defaults cost.
+     *
+     * No camera. The wire log's send-and-ack rows carry the whole answer, and binding the camera
+     * would heat the phone that is being asked how fast it can go.
+     */
+    private suspend fun rateCeiling(emit: (String, Int, Int, Int) -> Unit) {
+        val rates = listOf(10, 20, 30, 50, 75, 100, 150, 200)
+        for (rate in rates) {
+            val intervalMs = (1000L / rate).coerceAtLeast(1L)
+            val writes = rate * 4
+            emit("rc_${rate}_marker", 0, 0, 0)
+            delay(700)
+            repeat(writes) { index ->
+                if (index % 2 == 0) emit("rc_$rate", 255, 0, 0) else emit("rc_$rate", 0, 0, 255)
+                delay(intervalMs)
+            }
+        }
+    }
+
+    /**
+     * Why the CCT sweep emitted no light at all.
+     *
+     * All 25 steps of [cctSweep] measured exactly zero on 2026-09-02 — not dim, not noisy, zero,
+     * over the whole frame, while the steps either side of it registered normally. Two explanations
+     * fit: the command is wrong for this firmware, or `Fireworks` has no white channel to drive. The
+     * difference matters, and no amount of filming a dark strip will decide it.
+     *
+     * So vary the command instead of the levels, one axis at a time:
+     *  - the sub-mode byte at index 3, which `createCctCommand` hard-codes to 0x02;
+     *  - the trailing byte at index 7, hard-coded to 0x08 where the colour command sends 0x00;
+     *  - warm/cold as 0-255 rather than the 0-100 the sweep sent, in case they are raw levels;
+     *  - each of those again after a mode-switch command, in case CCT needs the strip put into a
+     *    white mode first.
+     *
+     * A known-good white is sent between every candidate as a liveness check. If those stop lighting
+     * the strip too, the run has knocked the device into a state and the rest of it is worthless —
+     * far better to see that in the trace than to conclude "no white channel" from a dead strip.
+     */
+    private suspend fun cctProbe(
+        emit: (String, Int, Int, Int) -> Unit,
+        send: (ByteArray) -> Unit,
+        record: (Long, String, Int, Int, Int) -> Unit,
+        startedAt: Long
+    ) {
+        val subModes = listOf(0x01, 0x02, 0x03)
+        val tails = listOf(0x00, 0x08)
+        val levels = listOf(255 to 0, 0 to 255, 255 to 255, 100 to 0)
+
+        suspend fun liveness(tag: String) {
+            emit("cctp_live_${tag}_white", 255, 255, 255)
+            delay(900)
+            emit("cctp_live_${tag}_black", 0, 0, 0)
+            delay(600)
+        }
+
+        suspend fun candidate(tag: String, sub: Int, tail: Int, warm: Int, cold: Int) {
+            val cmd = byteArrayOf(
+                0x7e.toByte(), 0x06.toByte(), 0x05.toByte(), sub.toByte(),
+                warm.toByte(), cold.toByte(), 0xff.toByte(), tail.toByte(), 0xef.toByte()
+            )
+            CalibrationPhotometer.markWrite(tag)
+            send(cmd)
+            // r/g = -5 marks a row as a raw protocol probe rather than a colour, the same way the
+            // write-type probe uses -4 and the CCT sweep uses -3.
+            record(System.currentTimeMillis() - startedAt, tag, -5, -5, warm * 1000 + cold)
+            delay(1500)
+        }
+
+        for (sub in subModes) {
+            for (tail in tails) {
+                liveness("s${sub}_t$tail")
+                for ((warm, cold) in levels) {
+                    candidate("cctp_s${sub}_t${tail}_w${warm}_c$cold", sub, tail, warm, cold)
+                }
+            }
+        }
+
+        // Same matrix once more, but with the strip put into a mode first. If CCT only works from a
+        // white mode, this is the block that lights and the ones above are the reason why not.
+        liveness("premode")
+        send(DuoCoProtocol.createModeCommand(1))
+        record(System.currentTimeMillis() - startedAt, "cctp_mode_switch", -5, -5, 1)
+        delay(1500)
+        for (sub in subModes) {
+            for ((warm, cold) in levels) {
+                candidate("cctp_mode_s${sub}_w${warm}_c$cold", sub, 0x08, warm, cold)
+            }
+        }
+        liveness("end")
+    }
+
+    /**
+     * Whether the long vertical strand really is consecutive LEDs on the wire.
+     *
+     * `docs/positions.md` assumes it is, and every direction Mode Capture reports rests on that
+     * assumption without it ever having been checked. The check is cheap: run a built-in mode with
+     * an obvious chase and watch which grid cell lights when. If the lit cell walks monotonically
+     * along the strand, the assumption holds; if it jumps about, every direction label from Mode
+     * Capture is arbitrary and the position map needs redoing before that run is worth anything.
+     *
+     * Slow speed on purpose — a chase running faster than the grid is sampled tells you nothing,
+     * and the grid is written every twelfth frame.
+     */
+    private suspend fun chaseProbe(
+        emit: (String, Int, Int, Int) -> Unit,
+        send: (ByteArray) -> Unit,
+        record: (Long, String, Int, Int, Int) -> Unit,
+        startedAt: Long
+    ) {
+        emit("chase_black", 0, 0, 0)
+        delay(1000)
+        // A single white pixel travelling is the clearest possible signal, but the built-in modes
+        // are what a real chase looks like, and it is the built-in modes Mode Capture will label.
+        send(DuoCoProtocol.createModeSpeedCommand(10))
+        record(System.currentTimeMillis() - startedAt, "chase_speed_10", -5, -5, 10)
+        delay(500)
+        for (mode in listOf(1, 2, 3)) {
+            send(DuoCoProtocol.createModeCommand(mode))
+            record(System.currentTimeMillis() - startedAt, "chase_mode_$mode", -5, -5, mode)
+            delay(15_000)
+        }
+        emit("chase_end", 0, 0, 0)
+        delay(500)
+    }
+
+    /**
      * Hard black-to-white steps, watched by the driving phone's own camera.
      *
      * The same shape as [latencyPulse] but with the measurement inside the app rather than in a
      * video, so it needs neither a second phone nor the driver's screen in frame — see
-     * [LatencyCameraProbe] for why that is the sounder instrument as well as the more convenient
+     * [CalibrationPhotometer] for why that is the sounder instrument as well as the more convenient
      * one.
      *
      * Long gaps between pulses on purpose. Each one has to be unambiguously attributable to its own

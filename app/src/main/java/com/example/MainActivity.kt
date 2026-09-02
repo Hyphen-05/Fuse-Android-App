@@ -351,6 +351,13 @@ fun MainScreen() {
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var showModeCaptureScreen by rememberSaveable { mutableStateOf(false) }
+    // An adb-driven capture session asks for Mode Capture by leaving a request here; the screen it
+    // needs cannot be opened from a broadcast receiver, which has no Compose tree to open it in.
+    // Debug-only in effect: nothing sets the request in a release build.
+    val modeCaptureAutoRequest by com.example.debug.ModeCaptureAutoRun.requested.collectAsState()
+    LaunchedEffect(modeCaptureAutoRequest) {
+        if (modeCaptureAutoRequest != null) showModeCaptureScreen = true
+    }
     // Unlocked by tapping the version footer at the bottom of Settings 7 times, same gesture as
     // stock Android's "tap Build number to enable Developer options" — familiar to anyone who'd
     // recognize the pattern, invisible to everyone else. Tapping the same sequence again re-hides
