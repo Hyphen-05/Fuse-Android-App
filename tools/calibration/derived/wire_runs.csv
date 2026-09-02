@@ -1,0 +1,14 @@
+condition,sequence,device,address,devices_in_run,span_s,sends,acks,survival,send_hz,ack_hz,nonzero_status_acks,max_outstanding
+-,capture_all,Fireworks (wall starburst),11:66:F0:00:01:3D,2,608.38,2862,1432,0.5003,4.7,2.35,0,1430
+-,capture_all,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,608.38,2862,1430,0.4997,4.7,2.35,0,1432
+onedev,capture_all,Fireworks (wall starburst),11:66:F0:00:01:3D,1,600.39,2862,1398,0.4885,4.77,2.33,0,1465
+macro,dark_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,95.26,93,92,0.9892,0.98,0.97,0,1
+macro,dark_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,95.26,93,92,0.9892,0.98,0.97,0,2
+bright,full_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,385.7,431,431,1.0,1.12,1.12,0,1
+bright,full_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,385.7,431,431,1.0,1.12,1.12,0,1
+dark,full_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,385.73,431,431,1.0,1.12,1.12,0,1
+dark,full_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,385.73,431,431,1.0,1.12,1.12,0,1
+-,latency_camera,Fireworks (wall starburst),11:66:F0:00:01:3D,1,53.43,50,49,0.98,0.94,0.92,0,1
+onedev,rate_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,1,61.14,1688,690,0.4088,27.61,11.29,0,998
+twodev,rate_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,62.66,1688,713,0.4224,26.94,11.38,0,976
+twodev,rate_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,62.66,1688,713,0.4224,26.94,11.38,0,975

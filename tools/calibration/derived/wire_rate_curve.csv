@@ -1,0 +1,34 @@
+condition,device,devices_in_run,requested_hz,window_s,sends,acks,survival,actual_send_hz,delivered_hz,median_ack_gap_ms
+onedev,Fireworks (wall starburst),1,2,4.79,9,9,1.0,1.88,1.88,509.0
+onedev,Fireworks (wall starburst),1,5,4.89,21,21,1.0,4.29,4.29,209.0
+onedev,Fireworks (wall starburst),1,10,5.04,40,41,1.025,7.94,8.13,109.0
+onedev,Fireworks (wall starburst),1,15,5.17,62,61,0.9839,11.99,11.79,74.5
+onedev,Fireworks (wall starburst),1,20,5.12,81,76,0.9383,15.83,14.85,58
+onedev,Fireworks (wall starburst),1,30,5.02,120,73,0.6083,23.92,14.55,61.0
+onedev,Fireworks (wall starburst),1,40,5.48,161,81,0.5031,29.4,14.79,60.0
+onedev,Fireworks (wall starburst),1,50,5.21,201,78,0.3881,38.56,14.97,59
+onedev,Fireworks (wall starburst),1,65,5.24,261,78,0.2989,49.84,14.89,59
+onedev,Fireworks (wall starburst),1,80,5.45,321,81,0.2523,58.9,14.86,60.0
+onedev,Fireworks (wall starburst),1,100,5.56,401,83,0.207,72.15,14.93,59.0
+twodev,Fireworks (wall starburst),2,2,4.84,9,10,1.1111,1.86,2.06,516
+twodev,Fireworks (wall starburst),2,5,4.98,21,21,1.0,4.22,4.22,213.0
+twodev,Fireworks (wall starburst),2,10,5.21,41,40,0.9756,7.87,7.68,112
+twodev,Fireworks (wall starburst),2,15,5.35,61,62,1.0164,11.4,11.59,77
+twodev,Fireworks (wall starburst),2,20,5.56,81,81,1.0,14.58,14.58,61.0
+twodev,Fireworks (wall starburst),2,30,5.1,120,77,0.6417,23.53,15.1,57.0
+twodev,Fireworks (wall starburst),2,40,5.45,162,81,0.5,29.71,14.86,59.0
+twodev,Fireworks (wall starburst),2,50,5.33,200,81,0.405,37.51,15.19,59.0
+twodev,Fireworks (wall starburst),2,65,5.44,261,82,0.3142,47.95,15.07,59
+twodev,Fireworks (wall starburst),2,80,5.48,321,82,0.2555,58.62,14.97,59
+twodev,Fireworks (wall starburst),2,100,5.72,402,87,0.2164,70.26,15.2,58.0
+twodev,RGB Bars (window pair),2,2,4.84,9,9,1.0,1.86,1.86,515.0
+twodev,RGB Bars (window pair),2,5,4.98,21,21,1.0,4.22,4.22,213.0
+twodev,RGB Bars (window pair),2,10,5.21,41,41,1.0,7.87,7.87,112.0
+twodev,RGB Bars (window pair),2,15,5.35,61,61,1.0,11.4,11.4,77.0
+twodev,RGB Bars (window pair),2,20,5.56,81,81,1.0,14.58,14.58,61.0
+twodev,RGB Bars (window pair),2,30,5.1,120,77,0.6417,23.53,15.1,57.5
+twodev,RGB Bars (window pair),2,40,5.45,161,82,0.5093,29.53,15.04,59
+twodev,RGB Bars (window pair),2,50,5.33,201,81,0.403,37.7,15.19,59.0
+twodev,RGB Bars (window pair),2,65,5.44,261,82,0.3142,47.95,15.07,59
+twodev,RGB Bars (window pair),2,80,5.48,321,82,0.2555,58.62,14.97,59
+twodev,RGB Bars (window pair),2,100,5.72,401,88,0.2195,70.08,15.38,58

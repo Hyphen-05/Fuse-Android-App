@@ -48,3 +48,10 @@ HANDOFF-*.md
 audit-findings-*.md
 mapping-proposal-*.md
 visualizer-review-*.md
+
+# Decoded video frame grids: ~1GB, regenerable from captures/ by
+# tools/calibration/extract_frames.sh. The derived CSVs beside them are tracked.
+tools/calibration/derived/frames/
+
+# Python bytecode from the calibration analysis scripts
+__pycache__/

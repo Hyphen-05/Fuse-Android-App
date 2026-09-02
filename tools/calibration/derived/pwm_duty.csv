@@ -1,0 +1,5 @@
+duty_pct,file,frames_total,frames_held,mean_luma,sd,cv_pct,min_luma,max_luma,flicker_visible,luma_frac_of_full
+5,pwm_fuse_latency_pwm_probe_1788331431297.csv,624,585,5.685,0.112,1.97,5.35,6.56,no,0.0688
+10,pwm_fuse_latency_pwm_probe_1788331468354.csv,622,582,17.533,0.1228,0.7,16.84,17.9,no,0.2123
+40,pwm_fuse_latency_pwm_probe_1788331494646.csv,622,584,53.417,0.2814,0.53,52.54,54.07,no,0.6468
+100,pwm_fuse_latency_pwm_probe_1788331520871.csv,623,593,82.581,0.4246,0.51,81.83,83.34,no,1.0

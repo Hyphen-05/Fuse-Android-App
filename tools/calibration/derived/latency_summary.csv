@@ -1,0 +1,5 @@
+run,sensor_clock,edge,n,min_ms,median_ms,mean_ms,sd_ms,max_ms,bracket_width_ms,settled_low_luma,settled_high_luma,on_level_decay_pct,usable
+fast_fuse_latency_latency_camera_1788329985583.csv,realtime,rise,20,12.0,39.7,43.3,25.2,127.4,32.5,0.98,89.43,-5.3,yes
+fast_fuse_latency_latency_camera_1788329985583.csv,realtime,fall,20,7.6,36.1,56.5,46.6,170.3,31.6,0.98,89.43,-5.3,yes
+fuse_latency_latency_camera_1788329789575.csv,realtime,rise,20,1.4,22.950000000000003,21.3,10.8,39.9,41.4,1.66,218.9,48.9,no - exposure hunting
+fuse_latency_latency_camera_1788329789575.csv,realtime,fall,20,0.2,15.850000000000001,23.5,20.4,74.8,24.9,1.66,218.9,48.9,no - exposure hunting
