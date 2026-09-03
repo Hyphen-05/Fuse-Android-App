@@ -1,0 +1,16 @@
+elapsed_ms,label,r,g,b
+0,brightness_pinned_100,-1,-1,-1
+414,sync_black,0,0,0
+1422,sync_flash,255,255,255
+1550,sync_gap,0,0,0
+1835,sync_flash,255,255,255
+1959,sync_gap,0,0,0
+2243,sync_flash,255,255,255
+2370,sync_gap,0,0,0
+4159,chase_black,0,0,0
+5167,chase_speed_10,-5,-5,10
+5673,chase_mode_1,-5,-5,1
+20679,chase_mode_2,-5,-5,2
+35687,chase_mode_3,-5,-5,3
+50695,chase_end,0,0,0
+51201,end_black,0,0,0
