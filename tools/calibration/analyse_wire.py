@@ -74,13 +74,16 @@ def main():
                 )
             )
 
-        # rate stairs: the colour log's rate_<hz>_marker rows cut the run into windows
-        if colour_path and seq == "rate_ramp":
+        # rate stairs: the colour log's marker rows cut the run into windows. rate_ramp writes
+        # rate_<hz>_marker; rate_ceiling — the same ladder, run at a chosen pacing — writes
+        # rc_<hz>_marker, and without this it produced a run row and no curve at all.
+        if colour_path and seq in ("rate_ramp", "rate_ceiling"):
+            stair = r"rate_(\d+)_marker" if seq == "rate_ramp" else r"rc_(\d+)_marker"
             colour = read_rows(colour_path)
             marks = [
-                (int(r["elapsed_ms"]), int(re.match(r"rate_(\d+)_marker", r["label"]).group(1)))
+                (int(r["elapsed_ms"]), int(re.match(stair, r["label"]).group(1)))
                 for r in colour
-                if re.match(r"rate_\d+_marker", r["label"] or "")
+                if re.match(stair, r["label"] or "")
             ]
             for i, (t0, hz) in enumerate(marks):
                 t1 = marks[i + 1][0] if i + 1 < len(marks) else int(colour[-1]["elapsed_ms"])

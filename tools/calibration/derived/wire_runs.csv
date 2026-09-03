@@ -9,6 +9,10 @@ bright,full_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,385.7,431,431,1.0,1.
 dark,full_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,385.73,431,431,1.0,1.12,1.12,0,1
 dark,full_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,385.73,431,431,1.0,1.12,1.12,0,1
 -,latency_camera,Fireworks (wall starburst),11:66:F0:00:01:3D,1,53.43,50,49,0.98,0.94,0.92,0,1
+bypass,rate_ceiling,Fireworks (wall starburst),11:66:F0:00:01:3D,1,53.22,2557,2343,0.9163,48.04,44.02,0,216
+pacing0,rate_ceiling,Fireworks (wall starburst),11:66:F0:00:01:3D,1,52.09,2557,2301,0.8999,49.08,44.17,0,258
+pacing25,rate_ceiling,Fireworks (wall starburst),11:66:F0:00:01:3D,1,47.05,2557,1010,0.395,54.34,21.46,0,1547
+pacing50,rate_ceiling,Fireworks (wall starburst),11:66:F0:00:01:3D,1,46.63,2557,611,0.239,54.84,13.1,0,1946
 onedev,rate_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,1,61.14,1688,690,0.4088,27.61,11.29,0,998
 twodev,rate_ramp,Fireworks (wall starburst),11:66:F0:00:01:3D,2,62.66,1688,713,0.4224,26.94,11.38,0,976
 twodev,rate_ramp,RGB Bars (window pair),BE:16:0A:00:3B:DA,2,62.66,1688,713,0.4224,26.94,11.38,0,975

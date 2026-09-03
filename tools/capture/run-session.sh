@@ -45,6 +45,16 @@ LOG="$OUT/session.log"
 say() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 skipped() { case ",$SKIP," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
+# Say "I am done with you" on the only channel Joe is actually watching. Every phase runs with
+# --ez attention false, because a breath between phases would sit in the middle of the next
+# measurement — but that left the whole session ending in silence, and on 2026-09-03 he sat
+# through twenty minutes of flashing waiting for a signal that was never coming. The strip is the
+# output device here; use it. It breathes until the next sequence or an explicit ack.
+signal_done() {
+  say "signalling on the strip (attention breath — it runs until acknowledged)"
+  cmd "$DRIVER" run_calibration --es sequence attention
+}
+
 cmd() { # cmd <serial> <command> [extras...]
   local serial="$1"; shift
   "$ADB" -s "$serial" shell "am broadcast -a $ACTION -p $PKG --es cmd $*" >>"$LOG" 2>&1
@@ -175,6 +185,7 @@ if ! skipped framing_check; then
   if ! python tools/calibration/analyse_framing.py "$FRAMING_CSV" | tee -a "$LOG"; then
     say "!! STOPPING: the camera needs moving. Nothing long has run, so this costs a minute."
     [ -n "$CAMERA" ] && cmd "$CAMERA" stop_recording
+    signal_done
     exit 1
   fi
 fi
@@ -246,6 +257,7 @@ if [ -n "$CAMERA" ]; then
   pull "$CAMERA" video
 fi
 
+signal_done
 say "=== session done. Files in $OUT"
 find "$OUT" -type f -printf '%10s  %p\n' 2>/dev/null | sort -k2 | tee -a "$LOG"
 say "Now: python tools/calibration/analyse_wire.py && ... (see tools/calibration/derived/README.md)"
