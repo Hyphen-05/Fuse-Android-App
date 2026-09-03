@@ -52,7 +52,7 @@ channels are not comparable to each other. Nothing that was asked of this data n
 at three known exposures on the premise that they would confirm each other. They do not: the two
 that see anything disagree by a factor that runs from 0.27 at byte 16 to 0.89 at byte 255, and only
 above byte 137 are they within 25%. A level-dependent disagreement cannot come from a scale error,
-so it comes from the imaging pipeline — the reasoning, and why 15ms/iso3200 is the one exposure
+so it comes from the imaging pipeline â€” the reasoning, and why 15ms/iso3200 is the one exposure
 worth believing, is in `analyse_ramp_x3.py`'s docstring. **The curve rests on one exposure.** Rows
 carry every take and the ratio so the disagreement travels with the number.
 
