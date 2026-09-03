@@ -42,6 +42,14 @@ LIT_MARGIN = 5.0
 # Y is 8-bit. Treat anything this high as clipped: above it the cell has stopped reporting how
 # much light there is and started reporting the top of the scale.
 SATURATED_Y = 250
+# A cell is part of the strip if it clears this fraction of the brightest cell's rise. Relative,
+# because the absolute level depends on exposure, distance and how much strip is in shot.
+LIT_FRACTION = 0.25
+# Below this the shortest exposure is reading sensor noise, not light; step to a longer one.
+MIN_PEAK_DELTA = 15.0
+# Brightest cell over median cell. A strip in frame measured 23x; a wall lit by that same strip
+# measured 1.4x. Three is comfortably between them and nowhere near either.
+MIN_CONTRAST = 3.0
 
 
 def rows(path):
@@ -103,46 +111,77 @@ def main():
         if lit and not clipped and (best is None or len(lit) > best[2]):
             best = (exposure, iso, len(lit))
 
-    # Position is judged at whichever exposure saw the most of the strip, clipped or not: the
-    # question here is where the strip is, and a clipped cell is still a cell the strip is in.
-    widest, widest_lit = None, []
+    # Position is judged at the SHORTEST exposure that has real signal in it, and by contrast
+    # rather than by an absolute margin. Judging it at the widest exposure — which is what this
+    # did until 2026-09-03 — measures the room, not the strip: in the dark this runs in, a strip
+    # bright enough to measure lights the whole wall, every cell brightens between black and
+    # white, and the verdict comes back "the strip fills 100% of the frame" for a camera that has
+    # the strip perfectly framed with dark wall all around it. Both phones failed that way, one of
+    # them while a photograph showed individual LEDs down the middle of the frame.
+    #
+    # At the short exposure the wall does not register and the emitters do, so the discriminating
+    # number is max cell delta over median cell delta: 23 for a strip in frame, 1.4 for a camera
+    # pointed at a wall lit by one. Everything below keys off that.
+    judged, lit, contrast = None, [], 0.0
     for exposure, iso in exposures:
         black = cells.get(("framing_black", str(exposure), str(iso)))
         white = cells.get(("framing_white", str(exposure), str(iso)))
         if not black or not white:
             continue
-        lit = [i for i in range(len(white)) if white[i] - black[i] > LIT_MARGIN]
-        if len(lit) > len(widest_lit):
-            widest, widest_lit = (exposure, iso), lit
+        deltas = [white[i] - black[i] for i in range(len(white))]
+        peak = max(deltas)
+        if peak < MIN_PEAK_DELTA:  # nothing but noise at this exposure; try a longer one
+            continue
+        median = statistics.median(deltas)
+        judged = (exposure, iso)
+        contrast = peak / max(median, 0.5)
+        lit = [i for i in range(len(deltas)) if deltas[i] > LIT_FRACTION * peak]
+        break
 
-    if not widest_lit:
+    if judged is None:
         print("FAIL  the strip is not in frame — nothing brightened between black and white.")
         print("      Either the phone is aimed somewhere else, or the strip did not light.")
         print("\n".join(notes))
         return 1
 
-    coords = [(i // grid, i % grid) for i in widest_lit]
+    if contrast < MIN_CONTRAST:
+        print(
+            f"FAIL  no localised light: at {judged[0] / 1e6:g}ms the brightest cell is only "
+            f"{contrast:.1f}x the median."
+        )
+        print("      That is a wall lit by the strip, not the strip. Aim the camera at the strand")
+        print("      itself — a phone facing a lit wall produces exactly this, and looks fine to")
+        print("      the eye.")
+        print("\n".join(notes))
+        return 1
+
+    coords = [(i // grid, i % grid) for i in lit]
     rows_used = {r for r, _ in coords}
     cols_used = {c for _, c in coords}
     edge = any(r in (0, grid - 1) or c in (0, grid - 1) for r, c in coords)
-    coverage = len(widest_lit) / (grid * grid)
+    coverage = len(lit) / (grid * grid)
 
-    if len(widest_lit) < 4:
+    if len(lit) < 3:
         problems.append(
-            f"the strip fills only {len(widest_lit)} of {grid * grid} cells — too small to "
-            "separate individual LEDs. Move the phone closer."
-        )
-    if edge:
-        problems.append(
-            "lit cells touch the frame edge, so part of the strip is probably outside it. "
-            "Pull the phone back or re-aim."
+            f"the strip lights only {len(lit)} of {grid * grid} cells — too small to separate "
+            "positions along it. Move the phone closer."
         )
     if coverage > 0.6:
         problems.append(
             f"the strip fills {coverage:.0%} of the frame, leaving no dark reference. "
             "Pull the phone back a little."
         )
+    # Not a failure. The strand is longer than any sensible frame, so its ends run off the edge in
+    # every good setup this rig has had; per-cell work does not care, and failing on it sent
+    # someone to re-aim a camera that was right.
+    if edge:
+        notes.append(
+            "  note: lit cells touch the frame edge, so the ends of the strand are outside it. "
+            "Fine unless you need the whole strip at once."
+        )
 
+    widest_lit = lit
+    print(f"         judged at {judged[0] / 1e6:g}ms iso {judged[1]}, contrast {contrast:.1f}x")
     print(f"framing: {len(widest_lit)}/{grid * grid} cells lit ({coverage:.0%} of frame)")
     print(f"         rows {min(rows_used)}-{max(rows_used)}, cols {min(cols_used)}-{max(cols_used)}")
     print("\n".join(notes))
