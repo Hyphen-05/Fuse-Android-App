@@ -9,6 +9,8 @@ python tools/calibration/analyse_wire.py
 python tools/calibration/analyse_probe.py
 python tools/calibration/analyse_photometry.py
 python tools/calibration/analyse_steps.py
+python tools/calibration/analyse_ramp_x3.py p9_fuse_latency_full_ramp_x3_*.csv
+python tools/calibration/analyse_cct.py p9_fuse_latency_cct_probe_*.csv
 python tools/calibration/build_model.py
 ```
 
@@ -29,7 +31,9 @@ from `captures/`. **`captures/` itself is not rebuildable and exists nowhere els
 | `latency_summary.csv` | run × edge direction | the distribution, and whether the run is usable at all |
 | `pwm_duty.csv` | held duty cycle | mean light and its spread — the flicker question |
 | `response_full_ramp.csv` | byte × exposure | raw per-exposure light for each commanded byte |
-| `response_stitched.csv` | byte | the joined response curve, with the two exposures' disagreement kept |
+| `response_stitched.csv` | byte | the superseded two-take curve, kept for comparison |
+| `response_x3.csv` | byte | the response curve in use, one run, with the exposures' disagreement kept |
+| `cct_probe.csv` | commanded warm/cold step | which CCT sub-mode byte lights the strip |
 | `response_per_led.csv` | LED × byte | the macro take, each emitter measured separately |
 | `steps_measured.csv` | held step of `capture_all` | commanded RGB → measured light, for the whole battery |
 | `channel_crosstalk.csv` | primary × level | whether driving one channel disturbs the others |
@@ -44,7 +48,15 @@ in the same column are meaningful. White balance, lens shading and the sensor's 
 are all still in there, so a single number is not an output in any physical unit, and the three
 channels are not comparable to each other. Nothing that was asked of this data needed either.
 
-**`confirmed_by_both` in `response_stitched.csv` is not decoration.** Between bytes 48 and 203 the
-two exposures agree to within 5%, which is what makes the curve there a measurement. Below byte 48
-they disagree by up to 42% and only the shape survives. Rows carry both takes so the disagreement
-travels with the number.
+**`agree_ratio` in `response_x3.csv` is not decoration, and it is bad news.** The x3 run was shot
+at three known exposures on the premise that they would confirm each other. They do not: the two
+that see anything disagree by a factor that runs from 0.27 at byte 16 to 0.89 at byte 255, and only
+above byte 137 are they within 25%. A level-dependent disagreement cannot come from a scale error,
+so it comes from the imaging pipeline � the reasoning, and why 15ms/iso3200 is the one exposure
+worth believing, is in `analyse_ramp_x3.py`'s docstring. **The curve rests on one exposure.** Rows
+carry every take and the ratio so the disagreement travels with the number.
+
+`response_stitched.csv` is the earlier answer to the same question and is kept only for comparison:
+it put half the strip's output at byte 40, where `response_x3.csv` puts it at byte 67. The
+difference is the dark floor, which the stitch never subtracted, so it counted the wall the strip
+was lighting as strip.
