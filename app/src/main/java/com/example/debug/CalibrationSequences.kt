@@ -59,13 +59,14 @@ object CalibrationSequences {
     const val RATE_CEILING = "rate_ceiling"
     const val CCT_PROBE = "cct_probe"
     const val CHASE_PROBE = "chase_probe"
+    const val FRAMING_CHECK = "framing_check"
 
     val ALL = listOf(
         BRIGHTNESS_RAMP, LATENCY_PULSE, RATE_RAMP, SPACING_STAIRCASE, DARK_RAMP,
         SUSTAINED_LOAD, HOLD_WHITE, ATTENTION,
         COLOUR_PRIMARIES, BRIGHTNESS_X_COLOUR, TRANSITION_PROBE, CCT_SWEEP,
         WRITE_TYPE_PROBE, FULL_RAMP, LATENCY_CAMERA, HOLD_DIM, PWM_PROBE, CAPTURE_ALL,
-        FULL_RAMP_X3, RATE_CEILING, CCT_PROBE, CHASE_PROBE
+        FULL_RAMP_X3, RATE_CEILING, CCT_PROBE, CHASE_PROBE, FRAMING_CHECK
     )
 
     /**
@@ -76,7 +77,7 @@ object CalibrationSequences {
      * measure. A camera left open through [RATE_CEILING] would be measuring a hot, busy phone.
      */
     val NEEDS_PHOTOMETER = setOf(
-        LATENCY_CAMERA, PWM_PROBE, FULL_RAMP_X3, CCT_PROBE, CHASE_PROBE
+        LATENCY_CAMERA, PWM_PROBE, FULL_RAMP_X3, CCT_PROBE, CHASE_PROBE, FRAMING_CHECK
     )
 
     /**
@@ -240,6 +241,7 @@ object CalibrationSequences {
             RATE_CEILING -> rateCeiling(::emit)
             CCT_PROBE -> cctProbe(::emit, send, ::record, startedAt)
             CHASE_PROBE -> chaseProbe(::emit, send, ::record, startedAt)
+            FRAMING_CHECK -> framingCheck(::emit)
             LATENCY_CAMERA -> latencyCamera(::emit)
             CAPTURE_ALL -> {
                 // One unattended pass over everything that needs no camera repositioning and no
@@ -560,6 +562,46 @@ object CalibrationSequences {
         }
         emitBrightness("full_bright_restore_100", 100)
         delay(400)
+    }
+
+    /**
+     * Is the camera pointed at the strip properly? Twenty seconds, before anything long starts.
+     *
+     * This is the one question in the session that a script genuinely cannot answer for itself and
+     * a person genuinely can — a phone that has been nudged, or aimed at half the strand, produces
+     * a run that completes, exports, and measures a wall. Everything downstream assumes the framing
+     * is good, so it is worth twenty seconds to know rather than to hope.
+     *
+     * Black, then white, then each primary, holding long enough for several grid rows each. What
+     * `analyse_framing.py` gets from that is:
+     *  - **is the strip in frame at all** — cells that brighten between black and white;
+     *  - **how much of the frame it fills**, which decides whether individual LEDs land in their
+     *    own grid cells or smear across one;
+     *  - **whether it runs off an edge**, which is the failure a preview makes easy to miss;
+     *  - **which exposure to shoot at**, since white is held across all of [X3_EXPOSURES] and the
+     *    right one is the brightest that does not saturate.
+     *
+     * The primaries are there because a camera can be pointed correctly and still be wrong: if one
+     * channel clips while the others do not, the exposure suits white and not colour, and every
+     * colour measurement downstream inherits it.
+     */
+    private suspend fun framingCheck(emit: (String, Int, Int, Int) -> Unit) {
+        suspend fun holdAtEveryExposure(label: String, r: Int, g: Int, b: Int) {
+            emit(label, r, g, b)
+            for ((exposure, iso) in X3_EXPOSURES) {
+                CalibrationPhotometer.setExposure(exposure, iso)
+                // Long enough that several grid rows land on the new setting: the grid is written
+                // every twelfth frame, so this is a handful of them rather than one.
+                delay(1200)
+            }
+        }
+        holdAtEveryExposure("framing_black", 0, 0, 0)
+        holdAtEveryExposure("framing_white", 255, 255, 255)
+        holdAtEveryExposure("framing_red", 255, 0, 0)
+        holdAtEveryExposure("framing_green", 0, 255, 0)
+        holdAtEveryExposure("framing_blue", 0, 0, 255)
+        emit("framing_end", 0, 0, 0)
+        delay(500)
     }
 
     /**

@@ -167,6 +167,7 @@ a phase that dies takes only its own output with it.
 
 | # | phase | mins | photometer | settles |
 |---|---|---|---|---|
+| 0 | `framing_check` | 0.5 | open | **the only phase that can stop the session** — see below |
 | 1 | `chase_probe` | 1 | open | whether the vertical strand really is consecutive LEDs |
 | 2 | `full_ramp_x3` | 11 | open | the bottom of the response curve, and per-LED uniformity, at once |
 | 3 | `cct_probe` | 2 | open | whether CCT is a wrong command or an absent channel |
@@ -174,8 +175,22 @@ a phase that dies takes only its own output with it.
 | 4 | `rate_ceiling` | 5 | **shut** | the strip's actual speed limit, finally unthrottled |
 | 5 | `capture_all` | 10 | **shut** | the whole battery again — light from the Pixel 9's video |
 | 6 | `sustained_load` | 15 | **shut** | endurance at the *delivered* rate, with the ack log this time |
-| 7 | `run_mode_capture` | 35 | open | ~200 modes: real names, categories and directions |
-| | **total** | **~80** | | plus margin, call it two hours |
+| ~~7~~ | ~~`run_mode_capture`~~ | ~~35~~ | | **parked, Joe 2026-09-03** — built and wired, opt in with `--with-mode-capture` |
+| | **total** | **~46** | | plus margin, call it an hour |
+
+**Mode Capture is parked rather than dropped.** It is built, it is driven over adb, and it needs no
+hands. It is also 35 of the session's 80 minutes and it answers a different question from everything
+else here — what the built-in modes are *called*, not what the hardware *does*. Parking it makes the
+session an hour instead of two and keeps every hardware answer in it. When it comes back, its
+endpoints are better taken from the `chase_probe` grid than from the default vertical line.
+
+**`framing_check` is the one gate.** Twenty seconds: black, white and each primary held while the
+camera cycles all three exposures, with the photometer's grid recording where in frame the light is.
+`analyse_framing.py` turns that into an exit code, so the script can act on it without anyone
+reading the output. It fails when the strip is not in frame at all, fills too few cells to separate
+LEDs, or runs off an edge — the last being the failure a live preview makes easiest to miss, because
+what is in shot looks perfect. If it fails, the session stops having cost a minute rather than two
+hours, and the message says which way to move the phone.
 
 Order is deliberate on three counts. The cheap probes run first, so a build mistake surfaces in the
 first two minutes rather than the seventieth. The photometer-shut phases are contiguous, so the
