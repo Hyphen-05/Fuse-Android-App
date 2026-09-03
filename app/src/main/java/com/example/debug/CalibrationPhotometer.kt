@@ -104,6 +104,16 @@ object CalibrationPhotometer {
     @Volatile var lastLuma: Double = 0.0
         private set
 
+    /**
+     * Frames the analyzer has actually delivered since [start].
+     *
+     * [start] binds the camera and returns; the first frame lands some time later — ~1.5s on the
+     * Pixel 11 from cold. Anything that reads [lastLuma] to decide something has to know whether
+     * the number is a measurement or the initial zero, or it will read "camera not ready yet" as
+     * "the strip is dark" and abort a session that was fine.
+     */
+    val framesSeen: Long get() = frameCounter
+
     private var provider: ProcessCameraProvider? = null
     private var owner: ProbeLifecycleOwner? = null
     private var camera: Camera? = null

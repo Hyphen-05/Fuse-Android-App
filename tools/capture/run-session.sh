@@ -53,7 +53,7 @@ cmd() { # cmd <serial> <command> [extras...]
 # The app logs every outcome under the AdbControl tag, which is the only way a script can tell a
 # sequence that started from one that silently did not. Read it back rather than assuming.
 tail_log() {
-  "$ADB" -s "$1" shell "logcat -d -s AdbControl -t 40" 2>/dev/null | tail -12 | tee -a "$LOG"
+  "$ADB" -s "$1" shell "logcat -d -s AdbControl" 2>/dev/null | tail -12 | tee -a "$LOG"
 }
 
 pull() { # pull <serial> <label>
@@ -114,10 +114,22 @@ sleep 3
 "$ADB" -s "$DRIVER" shell "dumpsys activity activities | grep -m1 topResumedActivity" 2>/dev/null |
   grep -q "$PKG" || note_fail "Fuse is not the foreground app on the driver"
 
+# Camera permission, checked rather than assumed. A fresh install does not carry it, the photometer
+# never asks for it (it is bound from a debug path, not from a screen with a rationale), and CameraX
+# fails by delivering no frames at all — which the liveness guard used to report as "the strip acks
+# but is dark", sending someone to power-cycle a strip that was working. Cost a run on 2026-09-03.
+if ! "$ADB" -s "$DRIVER" shell "dumpsys package $PKG | grep 'permission.CAMERA: granted'" 2>/dev/null |
+  grep -q "granted=true"; then
+  say "granting CAMERA to the driver (the photometer has no way to ask for it)"
+  "$ADB" -s "$DRIVER" shell "pm grant $PKG android.permission.CAMERA" >>"$LOG" 2>&1
+  "$ADB" -s "$DRIVER" shell "dumpsys package $PKG | grep 'permission.CAMERA: granted'" 2>/dev/null |
+    grep -q "granted=true" || note_fail "could not grant CAMERA on the driver"
+fi
+
 # A registered listener means the ViewModel is alive and adb commands will land somewhere.
 cmd "$DRIVER" status
 sleep 2
-if ! "$ADB" -s "$DRIVER" shell "logcat -d -s AdbControl -t 10" 2>/dev/null | grep -q "vmListenerRegistered=true"; then
+if ! "$ADB" -s "$DRIVER" shell "logcat -d -s AdbControl" 2>/dev/null | tail -10 | grep -q "vmListenerRegistered=true"; then
   note_fail "no ViewModel listener registered — the app is running but not ready"
 fi
 
@@ -216,7 +228,7 @@ if ! skipped mode_capture; then
   for _ in $(seq 1 80); do
     sleep 30
     if "$ADB" -s "$DRIVER" shell "am broadcast -a $ACTION -p $PKG --es cmd status" >/dev/null 2>&1; then
-      state=$("$ADB" -s "$DRIVER" shell "logcat -d -s AdbControl -t 5" 2>/dev/null | grep -o "modeCaptureAuto=[^ ]*" | tail -1)
+      state=$("$ADB" -s "$DRIVER" shell "logcat -d -s AdbControl" 2>/dev/null | grep -o "modeCaptureAuto=[^ ]*" | tail -1)
       say "  mode capture: $state"
       case "$state" in *done:*|*blocked:*) break ;; esac
     fi

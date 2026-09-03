@@ -2784,6 +2784,27 @@ class RgbControllerViewModel(
         fun write(command: ByteArray) =
             targets.forEach { bleGattTransport.writeCommand(it, command, bypassPacing = bypassPacing) }
 
+        // Wait for the camera to actually be delivering frames first. CalibrationPhotometer.start
+        // binds and returns; the first frame arrives ~1.5s later, and lastLuma is 0.0 until it
+        // does. Sampling straight away reads 0 for both the dark and the lit half and aborts the
+        // whole battery on a strip that was working — which is exactly what happened on the first
+        // run of framing_check against hardware, 2026-09-03.
+        val frameWaitStart = android.os.SystemClock.elapsedRealtime()
+        while (com.example.debug.CalibrationPhotometer.framesSeen == 0L &&
+            android.os.SystemClock.elapsedRealtime() - frameWaitStart < CAMERA_FIRST_FRAME_TIMEOUT_MS
+        ) {
+            kotlinx.coroutines.delay(100)
+        }
+        if (com.example.debug.CalibrationPhotometer.framesSeen == 0L) {
+            // No frames at all is a camera problem, not a strip problem, and saying "the strip is
+            // dark" would send someone to power-cycle the wrong thing.
+            addLog(
+                "Liveness check: the camera delivered no frames in " +
+                    "${CAMERA_FIRST_FRAME_TIMEOUT_MS}ms — camera permission, or another app holding it."
+            )
+            return false
+        }
+
         write(com.example.core.protocol.DuoCoProtocol.createBrightnessCommand(100))
         kotlinx.coroutines.delay(300)
         write(com.example.core.protocol.DuoCoProtocol.createColorCommand(0, 0, 0))
@@ -2793,9 +2814,22 @@ class RgbControllerViewModel(
         kotlinx.coroutines.delay(700)
         val lit = com.example.debug.CalibrationPhotometer.lastLuma
         write(com.example.core.protocol.DuoCoProtocol.createColorCommand(0, 0, 0))
-        addLog("Liveness check: dark luma $dark, lit luma $lit.")
+        addLog(
+            "Liveness check: dark luma $dark, lit luma $lit, " +
+                "frames ${com.example.debug.CalibrationPhotometer.framesSeen}."
+        )
+        android.util.Log.i(
+            "AdbControl",
+            "liveness: dark=$dark lit=$lit frames=${com.example.debug.CalibrationPhotometer.framesSeen}"
+        )
         return lit - dark > 5.0
     }
+
+    /**
+     * How long to wait for the photometer's first frame before calling the camera, rather than the
+     * strip, the thing that is wrong. Cold bind on the Pixel 11 measured ~1.5s.
+     */
+    private val CAMERA_FIRST_FRAME_TIMEOUT_MS = 6000L
 
     override fun onAdbRunCalibration(
         sequence: String,
@@ -2879,13 +2913,16 @@ class RgbControllerViewModel(
                 val wire = com.example.debug.CalibrationWireLog.finish(
                     sequence, getApplication().getExternalFilesDir(null)
                 )
-                if (sequence == com.example.debug.CalibrationSequences.LATENCY_CAMERA ||
-                    sequence == com.example.debug.CalibrationSequences.PWM_PROBE
-                ) {
+                // Every sequence that opened the camera writes its rows out, not just the two
+                // latency ones. Naming the two by hand was right when they were the only sequences
+                // with a photometer; since framing_check, chase_probe, full_ramp_x3 and cct_probe
+                // joined NEEDS_PHOTOMETER it silently threw away the entire light measurement of
+                // each of them — and framing_check's CSV is what the session's gate reads.
+                if (usesCamera) {
                     val lat = com.example.debug.CalibrationPhotometer.finish(
                         sequence, getApplication().getExternalFilesDir(null), System.currentTimeMillis()
                     )
-                    addLog("Latency probe log: ${lat?.absolutePath ?: "not written"}")
+                    addLog("Photometer log: ${lat?.absolutePath ?: "not written"}")
                 }
                 addLog("Calibration '$sequence' finished. Log: ${file?.absolutePath ?: "not written"}, wire: ${wire?.absolutePath ?: "not written"}")
                 android.util.Log.i("AdbControl", "run_calibration: finished, csv=${file?.absolutePath}")
