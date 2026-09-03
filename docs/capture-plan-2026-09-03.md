@@ -7,6 +7,12 @@ for about five minutes at the start and nothing after.
 The previous session's plan ([capture-session-plan.md](capture-session-plan.md)) is not superseded
 as a record — its room discipline and its traps still apply. What changes is the instrument.
 
+> **Superseded on one point, 2026-09-03 (run night).** The driving phone does film itself — but it
+> is the **Pixel 9**, not the Pixel 11. Joe cannot practically prop his daily phone facing the
+> strand, and a run from where it sits measures the wall. The Pixel 9 drives BLE *and* runs the
+> photometer, so everything below holds with the serials swapped and no external camera at all.
+> `--driver 47201FDAS00BHH`. Everything else in this plan ran as written.
+
 ## The idea that makes it one run
 
 **The driving phone films itself.** `LatencyCameraProbe` already does this: it binds the camera
