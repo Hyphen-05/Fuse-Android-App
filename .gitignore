@@ -55,3 +55,6 @@ tools/calibration/derived/frames/
 
 # Python bytecode from the calibration analysis scripts
 __pycache__/
+
+# Kotlin build-session scratch, created by the Gradle Kotlin plugin
+.kotlin/

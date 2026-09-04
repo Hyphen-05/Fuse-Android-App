@@ -21,6 +21,7 @@ import com.example.RgbUiState
 import com.example.TelemetryState
 import com.example.RgbControllerViewModel
 import com.example.BleConnectionState
+import com.example.core.pacing.BlePacing
 
 @Composable
 fun BLEPacingCard(state: RgbUiState, telemetry: TelemetryState, viewModel: RgbControllerViewModel) {
@@ -55,7 +56,7 @@ fun BLEPacingCard(state: RgbUiState, telemetry: TelemetryState, viewModel: RgbCo
                     ?: state.connectivity.scannedDevices.find { it.address == address }?.name
                     ?: address
 
-                val currentPacing = state.connectivity.devicePacingMs[address] ?: 100
+                val currentPacing = state.connectivity.devicePacingMs[address] ?: BlePacing.DEFAULT_MS
                 val achievedFps = telemetry.deviceAchievedFps[address] ?: 0
                 val isTesting = state.connectivity.isTestPatternRunning[address] == true
 

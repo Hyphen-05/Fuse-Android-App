@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import com.example.core.pacing.BlePacing
 
 /**
  * Result of [BleGattTransport.registerDuoCoCharacteristic]. Mirrors the two outcomes of the former
@@ -113,7 +114,7 @@ interface BleGattTransport {
     fun notifyWriteCompleted(address: String)
 
     /** Current pacing (ms) for a device's write manager, or [default] if none exists yet. */
-    fun getPacingMs(address: String, default: Int = 50): Int
+    fun getPacingMs(address: String, default: Int = BlePacing.DEFAULT_MS): Int
 
     /** Remove all three per-device maps and return the removed [BluetoothGatt] (for disconnect/close). */
     fun removeConnection(address: String): BluetoothGatt?
@@ -158,7 +159,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     @Volatile private var onCharacteristicWrite: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var onLog: (String) -> Unit = {}
 
-    @Volatile private var pacingProvider: (String) -> Int = { 50 }
+    @Volatile private var pacingProvider: (String) -> Int = { BlePacing.DEFAULT_MS }
     @Volatile private var calibrate: (String, ByteArray) -> ByteArray = { _, cmd -> cmd }
     @Volatile private var onFpsUpdate: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var diagAttribution: (String) -> String = { "" }

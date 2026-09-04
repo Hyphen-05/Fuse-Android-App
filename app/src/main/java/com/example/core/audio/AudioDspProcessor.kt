@@ -301,8 +301,18 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // moved up from its original spot further down in this function so the P1 scheduling
         // block below (which needs a decay window at the moment a flash fires) can read it too.
         // See the original comment, preserved at its old call site, for the full P2 rationale.
+        // The floor is a fixed 125ms, not `effectivePacingMs * 2.5`, and the difference matters.
+        // The intent was that a flash envelope must span a couple of wire writes or the whole flash
+        // can land in the gap between two paced writes and never be seen. That is right, but tying
+        // it to the live pacing number means changing pacing silently retunes how a beat *feels* -
+        // and the write pacing default has just dropped from 50ms to 11, which would have cut this
+        // floor from 125ms to 27 and handed every preset a snappier flash nobody asked for.
+        //
+        // 125ms is what the 50ms default was producing, kept as a constant so the feel is unchanged
+        // by a throughput change. Lowering it is a visible decision about how beats look and is
+        // Joe's to make on hardware, not a side effect of a refactor.
         val effectiveBeatFlashDecayMs = if (effectivePacingMs > 0) {
-            maxOf(state.beatFlashDecayMs, effectivePacingMs * 2.5f)
+            maxOf(state.beatFlashDecayMs, FLASH_DECAY_FLOOR_MS)
         } else {
             state.beatFlashDecayMs
         }
@@ -969,5 +979,17 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private fun applyHueNudge(degrees: Float) {
         if (degrees <= 0f) return
         hueNudgeOffset = (hueNudgeOffset - degrees).coerceIn(-2f * degrees, 2f * degrees)
+    }
+
+    companion object {
+        /**
+         * Shortest a beat-flash envelope is allowed to be, whatever the user set.
+         *
+         * A flash shorter than a couple of wire writes can land entirely in the gap between two of
+         * them and never reach the strip. 125ms is what the old 50ms write pacing was producing
+         * via `pacing * 2.5`, held here as a constant so that lowering pacing changes throughput
+         * without changing how a beat looks.
+         */
+        const val FLASH_DECAY_FLOOR_MS = 125f
     }
 }

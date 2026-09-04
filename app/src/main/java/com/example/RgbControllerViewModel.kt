@@ -57,6 +57,7 @@ import com.example.domain.model.DeviceSceneState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import java.util.UUID
+import com.example.core.pacing.BlePacing
 
 private const val TAG = "BleRgbController"
 
@@ -363,7 +364,7 @@ class RgbControllerViewModel(
                 bleGattTransport.setPacing(effect.address, effect.ms)
             }
             com.example.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
-                bleGattTransport.resetAllPacing(100)
+                bleGattTransport.resetAllPacing(BlePacing.DEFAULT_MS)
             }
             // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
             // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
@@ -861,7 +862,7 @@ class RgbControllerViewModel(
             onLog = { message -> addLog(message) }
         )
         bleGattTransport.registerWriteHooks(
-            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, 50) },
+            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, BlePacing.DEFAULT_MS) },
             calibrate = { address, command -> processCommandWithCalibration(address, command) },
             onFpsUpdate = { address, fps ->
                 _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
@@ -1265,7 +1266,7 @@ class RgbControllerViewModel(
                     0
                 } else {
                     connected.keys.mapNotNull { addr ->
-                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
+                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, BlePacing.DEFAULT_MS)
                     }.maxOrNull() ?: 0
                 }
                 prefsRepo.putPacingPrefInt("slowest_connected_pacing", slowest)
@@ -2108,7 +2109,7 @@ class RgbControllerViewModel(
      * `connectivity.devicePacingMs`. Exists so the Settings screen doesn't have to build its own
      * AppPreferencesRepositoryImpl inside a composable and bypass AppContainer's DI.
      */
-    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, 100)
+    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, BlePacing.DEFAULT_MS)
 
     override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))

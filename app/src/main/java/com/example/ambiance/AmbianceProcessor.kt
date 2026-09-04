@@ -50,7 +50,7 @@ class AmbianceProcessor(
             val saturationBoost = prefs.getFloat("saturation_boost", 1.4f)
             val brightnessCompensation = prefs.getFloat("brightness_compensation", 1.0f)
             val sceneCutSensitivity = prefs.getFloat("scene_cut_sensitivity", 110.0f)
-            val smoothnessMs = prefs.getInt("smoothness_ms", 150).coerceAtLeast(10)
+            val smoothnessMs = prefs.getInt(SMOOTHNESS_PREF_KEY, DEFAULT_SMOOTHNESS_MS).coerceAtLeast(10)
             val noiseDeadband = prefs.getFloat("noise_deadband", 0.10f)
 
             val planes = image.planes
@@ -177,8 +177,8 @@ class AmbianceProcessor(
                 newEmaLinB = ColorConverter.srgbToLinear(aggRawB)
             } else {
                 val lum = ColorConverter.luminance(emaSrgbR.toDouble(), emaSrgbG.toDouble(), emaSrgbB.toDouble()) / 255.0
-                val dynamicThreshold = (5.0 + 10.0 * lum + 15.0 * (1.0 - lum).pow(2)) * deadbandMultiplier
-                val diff = abs(aggRawR - emaSrgbR) + abs(aggRawG - emaSrgbG) + abs(aggRawB - emaSrgbB)
+                val dynamicThreshold = AmbianceOutputRules.dynamicThreshold(lum, deadbandMultiplier.toDouble())
+                val diff = AmbianceOutputRules.diff(aggRawR, aggRawG, aggRawB, emaSrgbR, emaSrgbG, emaSrgbB)
                 if (diff <= dynamicThreshold) {
                     newEmaLinR = emaState.emaLinR
                     newEmaLinG = emaState.emaLinG
@@ -222,20 +222,15 @@ class AmbianceProcessor(
             val newS = (s * effBoost).coerceIn(0f, 1f)
             var (fR, fG, fB) = hsvToRgb(h, newS, v)
 
-            val maxC = maxOf(fR, fG, fB)
-            // True black (allowing for residual EMA/noise, hence <= 2 rather than 
-            // == 0) bypasses the floor boost entirely instead of always being 
-            // pushed up to a visible minimum.
-            val trueBlackCutoff = 2
-            // Lowered from 25 — previous floor read as too bright for content 
-            // meant to be very dim.
-            val floorTarget = 14
-            if (maxC in (trueBlackCutoff + 1) until floorTarget) {
-                val boost = floorTarget.toFloat() / maxC
-                fR = (fR * boost).roundToInt().coerceIn(0, 255)
-                fG = (fG * boost).roundToInt().coerceIn(0, 255)
-                fB = (fB * boost).roundToInt().coerceIn(0, 255)
-            }
+            // True black bypasses the floor entirely rather than being pushed up to a visible
+            // minimum; dim-but-not-black content is lifted so it stays visible. The rule lives in
+            // AmbianceOutputRules so it can be simulated - see AmbianceDarkSceneSimulation, which
+            // is what established that the stepped version snaps the strip on and off in dark
+            // scenes and that the ramped one does not.
+            val floored = AmbianceOutputRules.floorRamped(fR, fG, fB)
+            fR = floored.first
+            fG = floored.second
+            fB = floored.third
 
             val finalColor = Triple(fR, fG, fB)
 
@@ -311,4 +306,12 @@ class AmbianceProcessor(
  * anyway — so both now take the conservative value rather than the fast one.
  */
 internal const val SLOWEST_PACING_PREF_KEY = "slowest_connected_pacing"
-internal const val DEFAULT_SLOWEST_PACING_MS = 100
+/** How long a fade to a new colour should take, in ms. Read by AmbianceOutputInterpolator too. */
+internal const val SMOOTHNESS_PREF_KEY = "smoothness_ms"
+internal const val DEFAULT_SMOOTHNESS_MS = 150
+/**
+ * Only used before any device has registered - once one has, the real pacing is published into
+ * this pref by the ViewModel. Kept in step with [com.example.core.pacing.BlePacing.DEFAULT_MS] so
+ * ambiance does not briefly run to a different number than the wire does.
+ */
+internal const val DEFAULT_SLOWEST_PACING_MS = com.example.core.pacing.BlePacing.DEFAULT_MS
