@@ -2054,6 +2054,20 @@ class RgbControllerViewModel(
     }
 
     /**
+     * Holds one commanded byte on the strip, for the Perception Lab's floor calibration.
+     *
+     * A single write rather than a stimulus, because the floor pass is paced by Joe tapping rather
+     * than by a script: the level stays where it is put until the next rung.
+     */
+    fun holdPerceptionByte(byte: Int) {
+        val level = byte.coerceIn(0, 255)
+        val command = DuoCoProtocol.createColorCommand(level, level, level)
+        getCurrentlyControlledDeviceAddresses()
+            .filter { bleGattTransport.isConnected(it) }
+            .forEach { bleGattTransport.writeCommand(it, command, bypassPacing = true) }
+    }
+
+    /**
      * How many devices a perception trial would actually put light on. Zero means the lab cannot
      * run.
      *
