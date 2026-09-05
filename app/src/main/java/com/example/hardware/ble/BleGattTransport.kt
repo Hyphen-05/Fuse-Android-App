@@ -249,6 +249,21 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun connect(context: Context, address: String) {
         val adapter = bluetoothAdapter ?: return
+        // Close any GATT client still held for this address before opening another. Every
+        // connectGatt() registers a client with the Bluetooth stack and only close() gives it
+        // back; overwriting the map entry leaks it. That matters most exactly when connecting is
+        // already failing — the auto-connect backoff retries five times, and a connection stranded
+        // at CONNECTING never reaches onConnectionStateChange(DISCONNECTED), which is the only
+        // place that used to close anything. Run the app's per-process registrations out and the
+        // stack stops answering, which reads as the app no longer finding devices at all.
+        activeConnections.remove(address)?.let { previous ->
+            try {
+                previous.close()
+            } catch (e: SecurityException) {
+                onLog("SecurityException closing the previous GATT client for $address.")
+            }
+        }
+        discoveryGate.forget(address)
         val device = adapter.getRemoteDevice(address)
         val gatt = device.connectGatt(context, false, gattCallback)
         activeConnections[address] = gatt
