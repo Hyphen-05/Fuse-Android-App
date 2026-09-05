@@ -2068,6 +2068,32 @@ class RgbControllerViewModel(
     }
 
     /**
+     * The firmware brightness the app currently has set, for the quantisation probe to record and
+     * to put back.
+     *
+     * Read from state rather than from the strip because the strip cannot be asked. It is the same
+     * number `SetBrightness` persists, so it survives the probe borrowing the setting even if the
+     * process dies mid-run.
+     */
+    fun perceptionBrightnessPercent(): Int = _uiState.value.coreControl.brightness
+
+    /**
+     * Commands a firmware brightness for the probe **without touching the saved setting**.
+     *
+     * Deliberately not `dispatch(RgbIntent.SetBrightness)`: that writes the pref and moves the
+     * slider, and the probe is borrowing the brightness for a minute rather than changing Joe's
+     * mind about it. Because nothing is persisted, putting it back is just calling this again with
+     * [perceptionBrightnessPercent]'s value — and if the app dies mid-probe, the saved setting is
+     * still his and the next sync restores it.
+     */
+    fun setPerceptionBrightness(percent: Int) {
+        val command = DuoCoProtocol.createBrightnessCommand(percent)
+        getCurrentlyControlledDeviceAddresses()
+            .filter { bleGattTransport.isConnected(it) }
+            .forEach { bleGattTransport.writeCommand(it, command, bypassPacing = true) }
+    }
+
+    /**
      * How many devices a perception trial would actually put light on. Zero means the lab cannot
      * run.
      *

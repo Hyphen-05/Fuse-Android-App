@@ -18,8 +18,11 @@ import com.example.core.perception.Answer
 import com.example.core.perception.FloorFinder
 import com.example.core.perception.PerceptionSession
 import com.example.core.perception.PerceptionTrials
+import com.example.core.perception.QuantisationProbe
 import com.example.core.perception.Response
 import com.example.core.perception.SessionConfig
+import com.example.core.perception.Stimulus
+import com.example.core.perception.StimulusStep
 import com.example.core.perception.Trial
 import com.example.core.perception.TrialKind
 import kotlinx.coroutines.delay
@@ -81,8 +84,17 @@ fun PerceptionLabScreen(
     var shownAt by remember { mutableLongStateOf(0L) }
     var inFloorPass by remember { mutableStateOf(false) }
     var resumable by remember { mutableStateOf(readInProgress(context)) }
+    // Which of the two things the floor pass is calibrating for. The floor is needed either way —
+    // a probe that walks from a byte the strip cannot render measures nothing, the same way the
+    // first sitting did.
+    var afterFloor by remember { mutableStateOf(LabRun.SITTING) }
+    var probe by remember { mutableStateOf<ProbeRun?>(null) }
+    var probeResumable by remember { mutableStateOf(readProbeInProgress(context)) }
 
     val targets = remember { viewModel.perceptionTargetCount() }
+    // Captured once, on entry, so the number put back at the end is the one he had before the probe
+    // borrowed it — not whatever the last segment happened to command.
+    val joeBrightness = remember { viewModel.perceptionBrightnessPercent() }
 
     suspend fun present(t: Trial) {
         awaitingAnswer = false
@@ -143,6 +155,32 @@ fun PerceptionLabScreen(
         scope.launch { present(previous) }
     }
 
+    fun startProbe(floorResult: FloorFinder.FloorResult, seed: Long, restore: List<Boolean>?) {
+        val plan = QuantisationProbe.planFor(floorResult)
+        probe = ProbeRun(
+            seed = seed,
+            plan = plan,
+            trials = QuantisationProbe.buildTrials(plan, seed),
+            answers = restore.orEmpty()
+        )
+    }
+
+    /**
+     * Puts the strip and Joe's brightness back, whatever the screen was in the middle of.
+     *
+     * The probe is the only thing here that borrows a setting of his, so this is the one exit path
+     * that has to run on every way out — finishing, closing, or backing out mid-run.
+     */
+    fun restoreStrip() {
+        viewModel.setPerceptionBrightness(joeBrightness)
+        viewModel.holdPerceptionByte(0)
+    }
+
+    // The Close button is not the only way off this screen — tapping a nav-bar tab drops it without
+    // calling onClose. Left to that, a probe abandoned during its full-brightness segment would
+    // hand Joe's strips back at 100%. Restoring on disposal covers every exit, and is idempotent.
+    DisposableEffect(Unit) { onDispose { restoreStrip() } }
+
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -155,7 +193,7 @@ fun PerceptionLabScreen(
                     modifier = Modifier.weight(1f)
                 )
                 IconButton(onClick = {
-                    viewModel.holdPerceptionByte(0)
+                    restoreStrip()
                     onClose()
                 }) {
                     Icon(Icons.Default.Close, contentDescription = "Close")
@@ -171,10 +209,28 @@ fun PerceptionLabScreen(
                 )
 
                 savedPath != null -> FinishedPanel(
-                    session = session!!,
+                    session = session,
+                    probe = probe,
                     floor = floor,
                     answered = answered,
                     savedPath = savedPath!!
+                )
+
+                probe != null -> ProbePanel(
+                    run = probe!!,
+                    joeBrightness = joeBrightness,
+                    onPlay = { stimulus -> viewModel.playPerceptionStimulus(stimulus) },
+                    onBrightness = { viewModel.setPerceptionBrightness(it) },
+                    onDark = { viewModel.holdPerceptionByte(0) },
+                    onAnswers = { answers ->
+                        probe = probe!!.copy(answers = answers)
+                        saveProbeInProgress(context, probe!!, floor)
+                    },
+                    onFinish = {
+                        savedPath = writeProbeReport(context, probe!!, floor, joeBrightness)
+                        clearProbeInProgress(context)
+                        restoreStrip()
+                    }
                 )
 
                 session != null -> TrialPanel(
@@ -195,16 +251,21 @@ fun PerceptionLabScreen(
                         floor = found
                         inFloorPass = false
                         viewModel.holdPerceptionByte(0)
-                        startSession(
-                            FloorFinder.sessionConfigFor(found),
-                            System.currentTimeMillis(),
-                            null
-                        )
+                        if (afterFloor == LabRun.PROBE) {
+                            startProbe(found, System.currentTimeMillis(), null)
+                        } else {
+                            startSession(
+                                FloorFinder.sessionConfigFor(found),
+                                System.currentTimeMillis(),
+                                null
+                            )
+                        }
                     }
                 )
 
                 else -> IntroPanel(
                     resumable = resumable,
+                    probeResumable = probeResumable,
                     onResume = {
                         val r = resumable
                         if (r != null) {
@@ -213,11 +274,28 @@ fun PerceptionLabScreen(
                             startSession(r.config, r.seed, r.answers)
                         }
                     },
+                    onResumeProbe = {
+                        val r = probeResumable
+                        if (r?.floor != null) {
+                            floor = r.floor
+                            probeResumable = null
+                            startProbe(r.floor, r.seed, r.answers)
+                        }
+                    },
                     onDiscard = {
                         clearInProgress(context)
+                        clearProbeInProgress(context)
                         resumable = null
+                        probeResumable = null
                     },
-                    onStart = { inFloorPass = true }
+                    onStart = {
+                        afterFloor = LabRun.SITTING
+                        inFloorPass = true
+                    },
+                    onStartProbe = {
+                        afterFloor = LabRun.PROBE
+                        inFloorPass = true
+                    }
                 )
             }
         }
@@ -226,13 +304,39 @@ fun PerceptionLabScreen(
 
 // --- intro -------------------------------------------------------------------------------------
 
+/** Which of the two runs the lab offers. Both start with the same floor calibration. */
+private enum class LabRun { SITTING, PROBE }
+
 @Composable
 private fun ColumnScope.IntroPanel(
     resumable: InProgress?,
+    probeResumable: ProbeInProgress?,
     onResume: () -> Unit,
+    onResumeProbe: () -> Unit,
     onDiscard: () -> Unit,
-    onStart: () -> Unit
+    onStart: () -> Unit,
+    onStartProbe: () -> Unit
 ) {
+    if (probeResumable != null && probeResumable.floor != null) {
+        Text(
+            "There is a quantisation probe in progress with ${probeResumable.answers.size} " +
+                "answers already given. Carrying on picks up at the same byte, at the same floor.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        val resumeProbe = remember { MutableInteractionSource() }
+        Button(
+            onClick = onResumeProbe,
+            modifier = Modifier.fillMaxWidth().height(52.dp).joyfulPress(resumeProbe),
+            interactionSource = resumeProbe,
+            shape = CircleShape
+        ) { Text("Carry on the probe (${probeResumable.answers.size} done)") }
+        TextButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth()) {
+            Text("Throw it away and start fresh")
+        }
+        return
+    }
+
     if (resumable != null) {
         Text(
             "There is a sitting in progress with ${resumable.answers.size} answers already given. " +
@@ -272,7 +376,24 @@ private fun ColumnScope.IntroPanel(
         modifier = Modifier.fillMaxWidth().height(52.dp).joyfulPress(start),
         interactionSource = start,
         shape = CircleShape
-    ) { Text("Start") }
+    ) { Text("Full sitting (about 11 minutes)") }
+
+    Text(
+        "Or the quantisation probe — your own suggestion, and the shorter one. It walks the level " +
+            "up one byte at a time and only ever asks whether anything changed. If the strip can " +
+            "only render every few bytes, the gaps between your yes answers say how many. Near " +
+            "the end it turns the brightness up to full by itself for a minute, to see whether " +
+            "those gaps close, and puts your setting back afterwards.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    val probe = remember { MutableInteractionSource() }
+    OutlinedButton(
+        onClick = onStartProbe,
+        modifier = Modifier.fillMaxWidth().height(52.dp).joyfulPress(probe),
+        interactionSource = probe,
+        shape = CircleShape
+    ) { Text("Quantisation probe (about 6 minutes)") }
 }
 
 // --- floor calibration -------------------------------------------------------------------------
@@ -517,15 +638,183 @@ private fun AnswerButton(label: String, modifier: Modifier, onClick: () -> Unit)
     ) { Text(label, style = MaterialTheme.typography.titleLarge) }
 }
 
+// --- quantisation probe --------------------------------------------------------------------------
+
+/**
+ * A probe run: the plan, the trials it expands to, and the answers so far.
+ *
+ * Nothing here adapts to an answer, so the trial list is a pure function of `(seed, plan)` and an
+ * answer is an index into it. Going back a trial is dropping the last answer, and resuming is
+ * restoring the list — neither needs the sequence to be stored or replayed.
+ */
+private data class ProbeRun(
+    val seed: Long,
+    val plan: List<QuantisationProbe.Segment>,
+    val trials: List<QuantisationProbe.ProbeTrial>,
+    val answers: List<Boolean>
+) {
+    val index: Int get() = answers.size
+    val current: QuantisationProbe.ProbeTrial? get() = trials.getOrNull(index)
+}
+
+/** Held at the starting level before the watch window opens, so entering it is not the answer. */
+private const val PROBE_SETTLE_MS = 700L
+
+/** The watch window: the starting level, then the level one byte up. */
+private const val PROBE_PRE_MS = 1300L
+private const val PROBE_POST_MS = 1500L
+
+/** After a brightness change, before anything is judged against it. */
+private const val PROBE_BRIGHTNESS_SETTLE_MS = 900L
+
+/**
+ * The probe itself: one commanded byte at a time, and only ever "did anything change".
+ *
+ * ## The walk is continuous on purpose
+ *
+ * Consecutive step trials share a level — trial *i* runs `b+i` to `b+i+1` and trial *i+1* starts at
+ * `b+i+1` — so the strip climbs steadily through the run rather than being reset between questions.
+ * Each trial's transition is then the only change inside its own window, and a change too small to
+ * see is never accumulated across trials into one that is. That is what separates a grid from a
+ * threshold: a grid puts a whole emitted level into one of these increments and nothing into the
+ * rest, while a threshold above one byte makes every one of them invisible.
+ *
+ * The controls interrupt the walk (an anchor jumps twelve bytes and comes back), so every trial
+ * opens with a settling hold before the watch window, and the screen says which is which. The entry
+ * transient is therefore outside the window Joe is judging — and the catch trials measure whatever
+ * of it leaks in anyway.
+ */
+@Composable
+private fun ColumnScope.ProbePanel(
+    run: ProbeRun,
+    joeBrightness: Int,
+    onPlay: suspend (Stimulus) -> Unit,
+    onBrightness: (Int) -> Unit,
+    onDark: () -> Unit,
+    onAnswers: (List<Boolean>) -> Unit,
+    onFinish: () -> Unit
+) {
+    var phase by remember { mutableStateOf("") }
+    var awaiting by remember { mutableStateOf(false) }
+    var replay by remember { mutableIntStateOf(0) }
+    var commanded by remember { mutableIntStateOf(joeBrightness) }
+
+    val trial = run.current
+
+    LaunchedEffect(run.index, replay) {
+        val t = run.trials.getOrNull(run.index) ?: return@LaunchedEffect
+        awaiting = false
+        val want = t.brightnessPercent ?: joeBrightness
+        if (want != commanded) {
+            phase = "Turning the brightness to $want%"
+            onDark()
+            onBrightness(want)
+            delay(PROBE_BRIGHTNESS_SETTLE_MS)
+            commanded = want
+        }
+        phase = "Settling"
+        onPlay(Stimulus("probe_settle", listOf(StimulusStep(t.fromByte, PROBE_SETTLE_MS))))
+        phase = "Watch"
+        onPlay(
+            Stimulus(
+                "probe_${t.fromByte}_${t.toByte}",
+                listOf(
+                    StimulusStep(t.fromByte, PROBE_PRE_MS),
+                    StimulusStep(t.toByte, PROBE_POST_MS)
+                )
+            )
+        )
+        phase = ""
+        awaiting = true
+    }
+
+    fun answer(changed: Boolean) {
+        if (!awaiting) return
+        awaiting = false
+        val next = run.answers + changed
+        onAnswers(next)
+        if (next.size >= run.trials.size) onFinish()
+    }
+
+    val progress = if (run.trials.isEmpty()) 1.0 else run.index.toDouble() / run.trials.size
+    Text(
+        "Probe · ${run.index + 1} of ${run.trials.size}" +
+            (trial?.let { " · ${segmentLabel(it.segment)}" } ?: ""),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    LinearProgressIndicator(
+        progress = { progress.toFloat() },
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = when {
+            phase.isNotEmpty() -> phase
+            awaiting -> "Did anything change?"
+            else -> "…"
+        },
+        style = MaterialTheme.typography.headlineMedium,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Text(
+        text = if (awaiting) {
+            "Only the change matters, not how big it was. Most of these will be nothing at all — " +
+                "\"no change\" is the expected answer and not a failure to notice."
+        } else {
+            "The strip climbs one step at a time. Watch it, not the phone."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
+
+    Spacer(Modifier.weight(1f))
+
+    if (awaiting) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AnswerButton("It changed", Modifier.weight(1f)) { answer(true) }
+            AnswerButton("No change", Modifier.weight(1f)) { answer(false) }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            TextButton(onClick = { replay += 1 }, modifier = Modifier.weight(1f)) {
+                Text("Show again")
+            }
+            TextButton(
+                onClick = { if (run.answers.isNotEmpty()) onAnswers(run.answers.dropLast(1)) },
+                enabled = run.answers.isNotEmpty(),
+                modifier = Modifier.weight(1f)
+            ) { Text("Back a trial") }
+        }
+    }
+}
+
+private fun segmentLabel(segment: String): String = when (segment) {
+    "low" -> "low levels"
+    "high" -> "higher levels"
+    "low_full" -> "low levels, full brightness"
+    else -> segment
+}
+
 // --- finished ----------------------------------------------------------------------------------
 
 @Composable
 private fun ColumnScope.FinishedPanel(
-    session: PerceptionSession,
+    session: PerceptionSession?,
+    probe: ProbeRun?,
     floor: FloorFinder.FloorResult?,
     answered: Int,
     savedPath: String
 ) {
+    if (probe != null) {
+        ProbeFinishedPanel(probe, floor, savedPath)
+        return
+    }
+    if (session == null) return
     val report = session.report()
     Text("Done — $answered trials.", style = MaterialTheme.typography.titleMedium)
     if (floor != null) {
@@ -550,6 +839,68 @@ private fun ColumnScope.FinishedPanel(
             style = MaterialTheme.typography.bodySmall
         )
     }
+    Text(
+        "Saved to $savedPath",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+/**
+ * What the probe found, phrased as what it does and does not settle.
+ *
+ * Deliberately reports the two shapes separately rather than announcing a conclusion: a mean
+ * spacing near one byte and a segment that saw nothing at all are opposite findings, and which one
+ * turned up is the whole result. The controls are shown first because neither reading means
+ * anything without them.
+ */
+@Composable
+private fun ColumnScope.ProbeFinishedPanel(
+    probe: ProbeRun,
+    floor: FloorFinder.FloorResult?,
+    savedPath: String
+) {
+    val report = QuantisationProbe.report(probe.plan, probe.trials, probe.answers)
+    Text("Probe done — ${probe.answers.size} answers.", style = MaterialTheme.typography.titleMedium)
+    if (floor != null) {
+        Text(
+            "Walked up from byte ${floor.clearlyOn}, where you called it clearly lit.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Text(
+        "Said something changed on ${report.catchFalsePositives} of ${report.catchTrials} " +
+            "no-change trials, and missed ${report.anchorsMissed} of ${report.anchorTrials} " +
+            "obvious ones. Both should be near zero for the rest to mean anything.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    report.segments.forEach { s ->
+        Text(
+            text = buildString {
+                append(segmentLabel(s.label).replaceFirstChar { it.uppercase() })
+                append(": ")
+                when {
+                    s.stepTrials == 0 -> append("not reached.")
+                    s.sawNothing -> append(
+                        "no change seen at any single byte across ${s.stepTrials} steps."
+                    )
+                    else -> {
+                        append("changed at ${s.changeAtBytes.size} of ${s.stepTrials} steps")
+                        s.meanSpacing?.let { append(", about %.1f bytes apart".format(it)) }
+                        append(".")
+                    }
+                }
+            },
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    Text(
+        "Your brightness has been put back to where it was.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
     Text(
         "Saved to $savedPath",
         style = MaterialTheme.typography.bodySmall,
@@ -740,5 +1091,147 @@ private fun writeReport(
     file.absolutePath
 } catch (e: Exception) {
     android.util.Log.e("PerceptionLab", "Could not write report", e)
+    null
+}
+
+// --- probe persistence ---------------------------------------------------------------------------
+
+/** A part-finished probe, as read back off disk. */
+private data class ProbeInProgress(
+    val seed: Long,
+    val floor: FloorFinder.FloorResult?,
+    val answers: List<Boolean>
+)
+
+private fun probeInProgressFile(context: android.content.Context) =
+    File(perceptionDir(context), "probe-in-progress.json")
+
+/**
+ * Writes the probe's resumable form after every answer.
+ *
+ * Only the seed, the floor and the answers: the plan is derived from the floor and the trials from
+ * the plan and the seed, so there is nothing else that could drift. Kept in its own file rather
+ * than sharing the sitting's, so having one of each part-finished does not make them fight over it.
+ */
+private fun saveProbeInProgress(
+    context: android.content.Context,
+    run: ProbeRun,
+    floor: FloorFinder.FloorResult?
+) {
+    try {
+        val root = JSONObject()
+        root.put("seed", run.seed)
+        root.put("savedAtMs", System.currentTimeMillis())
+        floor?.let {
+            root.put(
+                "floor",
+                JSONObject().apply {
+                    put("firstVisible", it.firstVisible)
+                    put("clearlyOn", it.clearlyOn)
+                }
+            )
+        }
+        root.put("answers", JSONArray().apply { run.answers.forEach { put(it) } })
+        probeInProgressFile(context).writeText(root.toString())
+    } catch (e: Exception) {
+        android.util.Log.e("PerceptionLab", "Could not save probe progress", e)
+    }
+}
+
+private fun readProbeInProgress(context: android.content.Context): ProbeInProgress? = try {
+    val file = probeInProgressFile(context)
+    if (!file.exists()) {
+        null
+    } else {
+        val root = JSONObject(file.readText())
+        val answers = root.getJSONArray("answers").let { a ->
+            (0 until a.length()).map { a.getBoolean(it) }
+        }
+        val floor = root.optJSONObject("floor")?.let {
+            FloorFinder.FloorResult(it.getInt("firstVisible"), it.getInt("clearlyOn"))
+        }
+        // Without a floor there is no plan to rebuild, and an empty run costs nothing to restart.
+        if (answers.isEmpty() || floor == null) {
+            null
+        } else {
+            ProbeInProgress(seed = root.getLong("seed"), floor = floor, answers = answers)
+        }
+    }
+} catch (e: Exception) {
+    android.util.Log.e("PerceptionLab", "Could not read saved probe", e)
+    null
+}
+
+private fun clearProbeInProgress(context: android.content.Context) {
+    try {
+        probeInProgressFile(context).delete()
+    } catch (e: Exception) {
+        android.util.Log.e("PerceptionLab", "Could not clear saved probe", e)
+    }
+}
+
+/**
+ * Writes the finished probe to JSON beside the sitting reports.
+ *
+ * Every trial is written with the two bytes it compared and the answer given, so the spacings can
+ * be recomputed differently later — the derived figures here are a convenience, not the record.
+ * [joeBrightness] is written because the whole result is a statement about one brightness setting
+ * and is meaningless pooled across two.
+ */
+private fun writeProbeReport(
+    context: android.content.Context,
+    run: ProbeRun,
+    floor: FloorFinder.FloorResult?,
+    joeBrightness: Int
+): String? = try {
+    val report = QuantisationProbe.report(run.plan, run.trials, run.answers)
+    val root = JSONObject()
+    root.put("kind", "quantisation_probe")
+    root.put("generatedAtMs", System.currentTimeMillis())
+    root.put("seed", run.seed)
+    root.put("brightnessPercent", joeBrightness)
+    floor?.let {
+        root.put(
+            "floor",
+            JSONObject().apply {
+                put("firstVisible", it.firstVisible)
+                put("clearlyOn", it.clearlyOn)
+            }
+        )
+    }
+    root.put("catchTrials", report.catchTrials)
+    root.put("catchFalsePositives", report.catchFalsePositives)
+    root.put("anchorTrials", report.anchorTrials)
+    root.put("anchorsMissed", report.anchorsMissed)
+    root.put("segments", JSONArray().apply {
+        report.segments.forEach { s ->
+            put(JSONObject().apply {
+                put("label", s.label)
+                put("commandedBrightness", s.brightnessPercent ?: JSONObject.NULL)
+                put("stepTrials", s.stepTrials)
+                put("changeAtBytes", JSONArray(s.changeAtBytes))
+                put("spacings", JSONArray(s.spacings))
+                put("meanSpacing", s.meanSpacing ?: JSONObject.NULL)
+            })
+        }
+    })
+    root.put("trials", JSONArray().apply {
+        run.trials.take(run.answers.size).forEachIndexed { i, t ->
+            put(JSONObject().apply {
+                put("segment", t.segment)
+                put("kind", t.kind.name)
+                put("fromByte", t.fromByte)
+                put("toByte", t.toByte)
+                put("commandedBrightness", t.brightnessPercent ?: JSONObject.NULL)
+                put("walkIndex", t.walkIndex)
+                put("changed", run.answers[i])
+            })
+        }
+    })
+    val file = File(perceptionDir(context), "probe_${System.currentTimeMillis()}.json")
+    file.writeText(root.toString(2))
+    file.absolutePath
+} catch (e: Exception) {
+    android.util.Log.e("PerceptionLab", "Could not write probe report", e)
     null
 }

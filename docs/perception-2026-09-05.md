@@ -88,6 +88,41 @@ low at a high firmware brightness, rather than running the brightness slider low
 opposite of how the app is used today. That is a change to how his lights behave and needs his
 agreement on the wall, not a derivation.
 
+### Built, 2026-09-05 — and four things the design above did not say
+
+It is in the Perception Lab as a second run alongside the sitting: **Settings > Experimental >
+Perception Lab > Quantisation probe**. Same floor calibration first, ~76 trials, about six minutes.
+Logic in `core/perception/QuantisationProbe.kt`, results as `probe_*.json` beside the sitting
+files, read with the same `tools/perception/analyse.py`.
+
+Four decisions that are load-bearing and were not in the sketch above:
+
+- **Both outcomes are results, and they do not look alike.** A grid puts a whole emitted level into
+  one increment and nothing into the rest, so it reads as **periodic yes answers**. A genuine
+  threshold above one byte makes *every* one-byte increment subthreshold, so it reads as **no
+  answer anywhere** — which refutes the grid and leaves the three-byte figure standing. The probe
+  is therefore not a test that can only confirm; it can come back negative, and that is designed
+  for rather than tolerated.
+- **Anchor trials, because "saw nothing" has to be distinguishable from "was not watching".** Catch
+  trials (both intervals identical, honest answer *no change*) only catch one of the two ways this
+  fails. Roughly one trial in nine steps twelve bytes, where the honest answer is *changed*. A run
+  of no answers with the anchors missed is a tired viewer, not a measurement — and without the
+  anchors those two records are byte-for-byte identical.
+- **The walk is continuous.** Trial *i* runs `b+i → b+i+1` and trial *i+1* starts at `b+i+1`, so
+  the strip climbs steadily and each trial's transition is the only change inside its own window.
+  That is what stops a change too small to see from accumulating across several trials into one
+  that is — which would have turned a grid and a threshold back into the same record.
+- **A third segment, high up.** An integer multiply predicts spacing that is **constant in
+  commanded bytes** all the way up; anything proportional to the level would widen. One segment
+  cannot tell those apart, and the difference decides whether a correction is a constant or a
+  curve.
+
+Two caveats to carry into reading the result. Each trial's entry transient (an anchor's twelve-byte
+jump comes back down at the start of the next trial) sits in a 700ms settling hold *before* the
+watch window, but nothing prevents him judging it anyway — that leak is what the catch rate
+measures. And the whole result is a statement about **one brightness setting**, which is why the
+setting is written into every file: two probes at two brightnesses must never be pooled.
+
 ## Dithering: invisible, and not preferred
 
 **15 of 16 dither trials answered "can't tell"**, at every write interval from 20ms to 100ms. He

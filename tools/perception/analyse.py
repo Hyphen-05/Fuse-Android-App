@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Read a Perception Lab sitting and say what it establishes.
+"""Read a Perception Lab sitting or quantisation probe and say what it establishes.
 
 Usage:  python tools/perception/analyse.py tools/perception/results/perception_*.json
+        python tools/perception/analyse.py tools/perception/results/probe_*.json
+
+Both file kinds are handled; the `kind` field picks the reader.
 
 The load-bearing number is the false-positive rate on the catch trials, so it is printed
 first and everything else is printed underneath a verdict about it. A sitting with a high
@@ -82,6 +85,75 @@ def summarise(path, d):
     print()
 
 
+def summarise_probe(path, d):
+    """Read a quantisation probe: does the emitted level move on a grid, and how coarse.
+
+    The two outcomes look nothing alike and both are results. Periodic yes answers at a
+    regular spacing say the strip renders every N commanded bytes and N is that spacing.
+    No yes answers anywhere - with the anchors hit - says one commanded byte is genuinely
+    below what the eye resolves here, which refutes the grid and leaves the sitting's
+    three-byte threshold standing as a real one.
+
+    Neither reading survives bad controls, so they are printed first.
+    """
+    print(f"=== {path}  (quantisation probe)")
+    floor = d.get("floor")
+    if floor:
+        print(f"floor: first visible byte {floor['firstVisible']}, clearly lit {floor['clearlyOn']}")
+    print(f"brightness as Joe had it: {d['brightnessPercent']}%")
+
+    catch_n, catch_fp = d["catchTrials"], d["catchFalsePositives"]
+    anchor_n, anchor_missed = d["anchorTrials"], d["anchorsMissed"]
+    fp = catch_fp / catch_n if catch_n else 0.0
+    miss = anchor_missed / anchor_n if anchor_n else 0.0
+    print(f"no-change trials called changed: {catch_fp}/{catch_n} ({fp:.0%})")
+    print(f"obvious changes missed:          {anchor_missed}/{anchor_n} ({miss:.0%})")
+    if fp > FALSE_POSITIVE_LIMIT:
+        print("  Guessing. The spacings below are not spacings. Discard.")
+    if miss > FALSE_POSITIVE_LIMIT:
+        print("  Attention lapsed. A segment reading 'saw nothing' below means nothing.")
+    print()
+
+    for seg in d["segments"]:
+        commanded = seg["commandedBrightness"]
+        at = f"at {commanded}% brightness" if commanded is not None else "at his own brightness"
+        changes, spacings = seg["changeAtBytes"], seg["spacings"]
+        print(f"{seg['label']} ({at}), {seg['stepTrials']} one-byte steps:")
+        if seg["stepTrials"] == 0:
+            print("  not reached")
+        elif not changes:
+            print("  no change seen at any single byte - no grid this coarse, or none at all")
+        else:
+            print(f"  changed at bytes {changes}")
+            if spacings:
+                print(f"  spacings {spacings}, mean {seg['meanSpacing']:.2f} bytes")
+            else:
+                print("  one change only - not enough to call a spacing")
+        print()
+
+    low = next((s for s in d["segments"] if s["label"] == "low"), None)
+    high = next((s for s in d["segments"] if s["label"] == "high"), None)
+    full = next((s for s in d["segments"] if s["label"] == "low_full"), None)
+    if low and high and low["meanSpacing"] and high["meanSpacing"]:
+        ratio = high["meanSpacing"] / low["meanSpacing"]
+        shape = "constant - consistent with an integer multiply" if ratio < 1.5 else \
+            "widens with level - NOT a plain integer multiply"
+        print(f"low vs high spacing: {low['meanSpacing']:.2f} -> {high['meanSpacing']:.2f}  {shape}")
+    if low and full and low["meanSpacing"]:
+        if full["meanSpacing"]:
+            print(
+                f"his brightness vs 100%: {low['meanSpacing']:.2f} -> {full['meanSpacing']:.2f} bytes"
+            )
+            predicted = low["meanSpacing"] * d["brightnessPercent"] / 100.0
+            print(
+                f"  an integer multiply predicts {predicted:.2f} at 100%"
+                f" (spacing x {d['brightnessPercent']}%)"
+            )
+        elif full["stepTrials"]:
+            print("his brightness gridded; at 100% no single byte was visible at all - unexpected")
+    print()
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -89,7 +161,10 @@ def main(argv):
     found = False
     for path, d in load(argv[1:]):
         found = True
-        summarise(path, d)
+        if d.get("kind") == "quantisation_probe":
+            summarise_probe(path, d)
+        else:
+            summarise(path, d)
     if not found:
         print("no sittings matched")
         return 1
