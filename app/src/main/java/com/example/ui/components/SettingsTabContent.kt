@@ -178,6 +178,7 @@ fun LazyListScope.SettingsTabContent(
     telemetry: TelemetryState,
     viewModel: RgbControllerViewModel,
     onOpenModeCapture: () -> Unit = {},
+    onOpenPerceptionLab: () -> Unit = {},
     experimentalUnlocked: Boolean = false,
     onToggleExperimentalUnlocked: () -> Unit = {}
 ) {
@@ -1217,6 +1218,52 @@ fun LazyListScope.SettingsTabContent(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Start Mode Capture",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Perception Lab. The capture programme measured the strip and never measured the
+                // viewer; this asks him directly, on his own strips, with his own brightness set
+                // where he actually runs it.
+                val perceptionLabInteractionSource = remember { MutableInteractionSource() }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Perception Lab",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Plays two short stretches of light on your strips and asks which one had the thing. Answers what you can actually see, so smoothness settings stop being guessed. \"Can't tell\" is a real answer.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onOpenPerceptionLab,
+                        interactionSource = perceptionLabInteractionSource,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_perception_lab_btn")
+                            .joyfulPress(perceptionLabInteractionSource),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary
+                        ),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = "Perception Lab",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Start a sitting",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }

@@ -2042,7 +2042,8 @@ class RgbControllerViewModel(
      * caller is responsible for restoring, which the lab does between trials.
      */
     suspend fun playPerceptionStimulus(stimulus: com.example.core.perception.Stimulus) {
-        val targets = getCurrentlyControlledDeviceAddresses()
+        // Same filter as perceptionTargetCount, so what the screen counted is what gets written to.
+        val targets = getCurrentlyControlledDeviceAddresses().filter { bleGattTransport.isConnected(it) }
         for (step in stimulus.steps) {
             val command = DuoCoProtocol.createColorCommand(step.byte, step.byte, step.byte)
             targets.forEach { address ->
@@ -2052,8 +2053,18 @@ class RgbControllerViewModel(
         }
     }
 
-    /** How many devices a perception trial would play on. Zero means the lab cannot run. */
-    fun perceptionTargetCount(): Int = getCurrentlyControlledDeviceAddresses().size
+    /**
+     * How many devices a perception trial would actually put light on. Zero means the lab cannot
+     * run.
+     *
+     * Connectedness is checked as well as Active Control, because
+     * [getCurrentlyControlledDeviceAddresses] filters saved devices on the Active Control flag
+     * alone and says nothing about whether a link exists. A saved-but-disconnected strip therefore
+     * passed the lab's guard, and a whole sitting would have been asked of Joe against a strip that
+     * never lit — every answer of his recorded against light he could not have seen.
+     */
+    fun perceptionTargetCount(): Int =
+        getCurrentlyControlledDeviceAddresses().count { bleGattTransport.isConnected(it) }
 
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
         if (_uiState.value.coreControl.isDemoMode) {

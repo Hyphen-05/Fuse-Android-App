@@ -115,7 +115,8 @@ fun PerceptionLabScreen(
 
             when {
                 targets == 0 -> Text(
-                    "No devices under Active Control. Turn one on and reopen this screen.",
+                    "No strip is connected and under Active Control. Connect one, turn " +
+                        "Active Control on for it, and reopen this screen.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error
                 )

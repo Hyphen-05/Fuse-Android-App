@@ -351,6 +351,7 @@ fun MainScreen() {
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var showModeCaptureScreen by rememberSaveable { mutableStateOf(false) }
+    var showPerceptionLabScreen by rememberSaveable { mutableStateOf(false) }
     // An adb-driven capture session asks for Mode Capture by leaving a request here; the screen it
     // needs cannot be opened from a broadcast receiver, which has no Compose tree to open it in.
     // Debug-only in effect: nothing sets the request in a release build.
@@ -575,6 +576,7 @@ fun MainScreen() {
                 onTabSelected = {
                     selectedTab = it
                     showModeCaptureScreen = false
+                    showPerceptionLabScreen = false
                 }
             )
         }
@@ -588,6 +590,11 @@ fun MainScreen() {
                 com.example.ui.components.ModeCaptureScreen(
                     viewModel = viewModel,
                     onClose = { showModeCaptureScreen = false }
+                )
+            } else if (showPerceptionLabScreen) {
+                com.example.ui.components.PerceptionLabScreen(
+                    viewModel = viewModel,
+                    onClose = { showPerceptionLabScreen = false }
                 )
             } else if (selectedTab == 1) {
                 ModesScreen(
@@ -663,6 +670,7 @@ fun MainScreen() {
                         telemetry = telemetry,
                         viewModel = viewModel,
                         onOpenModeCapture = { showModeCaptureScreen = true },
+                        onOpenPerceptionLab = { showPerceptionLabScreen = true },
                         experimentalUnlocked = experimentalUnlocked,
                         onToggleExperimentalUnlocked = { experimentalUnlocked = !experimentalUnlocked }
                     )
