@@ -37,16 +37,56 @@ and 8 straddled the edge of visibility, and its dither and fade blocks both ran 
 **Roughly three commanded bytes, and near-constant in absolute terms rather than proportional.**
 That is the number the whole exercise was after.
 
-### What it implies, and how far to trust the implication
+### This is probably not a perceptual threshold at all
 
-If three bytes is the threshold at base 5, then a **one-byte** change down there is comfortably
-invisible — so *dark-scene steppiness cannot be one-byte quantisation*. Whatever he is seeing when
-he calls a dark scene steppy must be a jump of three bytes or more.
+**Read the table again: the threshold is flat.** A real detection threshold follows roughly Weber's
+law and scales with the level — at bases 5, 10 and 25 that predicts something like 1, 2 and 5
+bytes. A constant ~3 bytes is not what an eye does. It is what a **grid** does.
 
-That points away from quantisation and toward whatever in the Ambiance path emits multi-byte jumps:
-`AmbianceOutputRules.floorRamped` and the interpolator's ease. **It is an inference from his
-thresholds, not something he reported**, so it is a lead to check against the wall, not a
-conclusion — but it is the first evidence-backed lead this problem has had.
+Joe said so unprompted after the sitting, and his phrasing is the diagnostic one:
+
+> *"i either could very clearly tell something changed or nothing at all, no like just about."*
+
+A perceptual threshold has a "just about" region by definition — that is what a threshold *is*. He
+reports none.
+
+**The hypothesis: the firmware quantises the emitted level, and his brightness setting sets how
+coarsely.** If it multiplies colour byte by brightness and keeps an integer, then at his **22%** the
+emitted level only changes every `1 / 0.22 ≈ 4.5` commanded bytes. A step of `d` bytes crosses a
+boundary with probability about `d × 0.22`; a 2-down/1-up staircase converges where he is right
+about 71% of the time, so it should settle at `d ≈ 3.2`. **Measured mean: 3.17.**
+
+It also predicts the binary phenomenology exactly: either the step crosses a boundary — a whole
+increment, which near the floor is a large jump — or it changes nothing whatsoever.
+
+So the reading in the first version of this document, that steppiness *cannot* be quantisation, was
+**wrong and is retracted**. On this hypothesis it is quantisation — not of the byte we command, but
+of the level the firmware emits, coarsened about 4.5x by the brightness setting. At 22% roughly
+**56 of 256 levels survive**.
+
+The fit uses one free parameter (his brightness) and was made after the fact, so the arithmetic
+agreement is suggestive rather than conclusive. **The flatness is the stronger evidence**, because
+it is a qualitative prediction that does not depend on the fit at all.
+
+### The experiment that settles it
+
+Not another staircase — staircases are what disguised this as a threshold in the first place. A
+**direct quantisation probe**:
+
+- Hold a base level, step the commanded byte up **one at a time**, and after each ask only "did
+  anything change?".
+- Record which increments produced a change. **The spacing between the yes answers is the grid**,
+  read straight off with no model in between.
+- Then run the identical probe at **100% firmware brightness**, which the app can set itself with
+  `DuoCoProtocol.createBrightnessCommand`. If the spacing collapses toward one byte there, the
+  integer-multiply hypothesis is confirmed and its arithmetic is known.
+
+**Restore his brightness afterwards** — it is his setting, not the probe's.
+
+If it confirms, the consequence is a real product change: **deep dimming should run the colour bytes
+low at a high firmware brightness, rather than running the brightness slider low**, which is the
+opposite of how the app is used today. That is a change to how his lights behave and needs his
+agreement on the wall, not a derivation.
 
 ## Dithering: invisible, and not preferred
 
@@ -68,6 +108,11 @@ pointing the other way.
 
 ## What the next sitting should change
 
+0. **Run the quantisation probe first** (design above). Until it is known whether the ~3-byte
+   threshold is his eye or the firmware's grid, every other number here is of uncertain meaning —
+   including the dithering result, since dithering between two commanded bytes that map to the
+   *same* emitted level would do nothing at all, which would explain the fade block's outcome
+   without any perceptual claim.
 1. **More fade trials.** Four is too few for the block whose answer decides the most. It was sized
    when the sitting was 195 trials long and needed trimming everywhere; at 76 there is room.
 2. **A base level above 25.** All three thresholds came out near three bytes with no sign of
