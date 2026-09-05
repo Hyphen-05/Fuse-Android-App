@@ -2029,6 +2029,32 @@ class RgbControllerViewModel(
         return addresses.maxOf { bleGattTransport.getPacingMs(it) }
     }
 
+    /**
+     * Plays one perception-lab stimulus on every device under active control, bypassing pacing.
+     *
+     * Pacing is bypassed for the same reason the calibration sequences bypass it: the stimulus
+     * controls its own timing, and that timing *is* the thing under test. A dither alternating
+     * every 20ms cannot be rendered at all through a 50ms pacing gate - `updateCommand` would
+     * coalesce the pair down to whichever arrived last, and Joe would be asked to judge a stimulus
+     * that never reached the strip.
+     *
+     * Returns when the stimulus has finished. Cancellation leaves the strip wherever it was; the
+     * caller is responsible for restoring, which the lab does between trials.
+     */
+    suspend fun playPerceptionStimulus(stimulus: com.example.core.perception.Stimulus) {
+        val targets = getCurrentlyControlledDeviceAddresses()
+        for (step in stimulus.steps) {
+            val command = DuoCoProtocol.createColorCommand(step.byte, step.byte, step.byte)
+            targets.forEach { address ->
+                bleGattTransport.writeCommand(address, command, bypassPacing = true)
+            }
+            kotlinx.coroutines.delay(step.holdMs)
+        }
+    }
+
+    /** How many devices a perception trial would play on. Zero means the lab cannot run. */
+    fun perceptionTargetCount(): Int = getCurrentlyControlledDeviceAddresses().size
+
     fun sendCommandToDeviceDirect(address: String, command: ByteArray) {
         if (_uiState.value.coreControl.isDemoMode) {
             val finalCmd = processCommandWithCalibration(address, command)
