@@ -127,10 +127,7 @@ class AmbianceOutputInterpolator(
     private fun easeStep(dtMs: Long) {
         if (!hasTarget) return
 
-        val smoothnessMs = preferencesRepository
-            .getAmbiancePrefInt(SMOOTHNESS_PREF_KEY, DEFAULT_SMOOTHNESS_MS)
-            .coerceAtLeast(10)
-        val alpha = AmbianceOutputRules.easeAlpha(dtMs, smoothnessMs)
+        val alpha = AmbianceOutputRules.easeAlpha(dtMs)
         currentLinR += alpha * (targetLinR - currentLinR)
         currentLinG += alpha * (targetLinG - currentLinG)
         currentLinB += alpha * (targetLinB - currentLinB)

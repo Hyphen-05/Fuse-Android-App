@@ -5,7 +5,6 @@ import com.example.core.pacing.BlePacing
 import com.example.sim.SimulatedDevice
 import com.example.sim.SimulatedRoom
 import com.example.sim.TraceMetrics
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -30,14 +29,35 @@ import kotlin.random.Random
  *     there is nothing to fade through.
  *  4. **The deadband is largest in dark scenes** - 20 summed bytes at black against 15 at white.
  *
- * Prints a table. The assertions are deliberately few and about direction, not exact values: the
- * numbers are a measurement of a model, and the model is only as good as the LUT behind it.
+ * ## READ THIS BEFORE TRUSTING ANY NUMBER BELOW
+ *
+ * **This simulation scored the 2026-09-04 change as a clear improvement, and on the hardware Joe's
+ * verdict was "everything is steppy now".** The table it prints is kept because the mechanism it
+ * exposes is real - the floor cliff genuinely is a 140x snap - but its *ranking* of configurations
+ * is discredited and no longer asserted.
+ *
+ * Two reasons it was wrong, both worth knowing before extending it:
+ *
+ *  1. **The metric counted the size of each step and ignored how often steps happened.** A change
+ *     that doubled the number of visible transitions per second scored well for having halved
+ *     their size. Lurch and shimmer are both failures and they trade against each other, so a
+ *     one-sided metric will always recommend trading toward the other one.
+ *  2. **It models firmware brightness at 100%, and Joe runs at 22%.** The byte-to-light LUT was
+ *     only ever measured at full brightness, and how the two compose has never been measured at
+ *     all. Every level in this file is therefore in an unverified regime.
+ *
+ * There was also a check available that would have caught this and was not run: the shipped
+ * configuration was *known* to be steppy in dark scenes and fine in bright ones, and this
+ * simulation said the opposite - byte 6 scored zero visible steps and byte 20 scored eleven. A
+ * metric that fails the one case with ground truth behind it should not have been used to justify
+ * anything.
+ *
+ * The instrument that replaces it is `core/perception`, which asks Joe directly.
  */
 class AmbianceDarkSceneSimulation {
 
     private val seconds = 30
     private val deadbandMultiplier = 1.0
-    private val smoothnessMs = 150
 
     /** One knob per candidate cause, so their contributions can be told apart. */
     private data class Config(
@@ -117,7 +137,7 @@ class AmbianceDarkSceneSimulation {
             while (nextTick <= t) {
                 room.advanceTo(nextTick)
                 val alpha = if (config.timeBasedEase)
-                    AmbianceOutputRules.easeAlpha(tickMs, smoothnessMs) else 0.5
+                    AmbianceOutputRules.easeAlpha(tickMs) else 0.5
                 curLinR += alpha * (tgtLinR - curLinR)
                 curLinG += alpha * (tgtLinG - curLinG)
                 curLinB += alpha * (tgtLinB - curLinB)
@@ -205,20 +225,17 @@ class AmbianceDarkSceneSimulation {
             println()
         }
 
-        // The point of the change, stated as something that can fail. Not exact values - the
-        // numbers are a measurement of a model - but the direction and the order of magnitude.
-        assertTrue(
-            "the old configuration should show visible steps to fix ($beforeSteps found)",
-            beforeSteps >= 10
+        // No assertion about which configuration is better. Hardware answered that question and
+        // answered it against this model; asserting the model's preference here would re-enshrine
+        // the thing that was wrong. What is still worth guarding is that the harness runs and that
+        // the shipped configuration is exercised at all.
+        assertTrue("the before configuration should produce some visible steps", beforeSteps > 0)
+        assertTrue("the shipped configuration should produce a trace to look at", nowLargest > 0.0)
+        println(
+            "before: %d visible steps, largest %.1f%%   now: %d visible steps, largest %.1f%%"
+                .format(beforeSteps, beforeLargest * 100, nowSteps, nowLargest * 100)
         )
-        assertEquals(
-            "what ships now should show no visible steps at any level",
-            0, nowSteps
-        )
-        assertTrue(
-            "the largest single jump should have at least halved: $beforeLargest -> $nowLargest",
-            nowLargest < beforeLargest / 2
-        )
+        println("Neither column is evidence of better or worse - see the class comment.")
     }
 
     @Test
@@ -250,21 +267,21 @@ class AmbianceDarkSceneSimulation {
     }
 
     @Test
-    fun `the time-based ease preserves the shipped feel at the shipped tick rate`() {
-        // The whole point of the change is that fades stop depending on tick rate. It must not
-        // retune the default: at the shipped 100ms tick and 150ms smoothness the alpha has to come
-        // out at the shipped flat 0.5.
-        val atShipped = AmbianceOutputRules.easeAlpha(100L, 150)
+    fun `the time-based ease reproduces the shipped fade at the shipped tick rate`() {
+        // The point of the change is that fades stop depending on tick rate. It must not retune
+        // them: at the 50ms tick that was actually running, the alpha has to be the shipped 0.5.
+        val atShipped = AmbianceOutputRules.easeAlpha(50L)
         assertTrue(
-            "alpha at the shipped tick should be near 0.5, was $atShipped",
-            abs(atShipped - 0.5) < 0.02
+            "alpha at the 50ms tick should be the shipped 0.5, was $atShipped",
+            abs(atShipped - 0.5) < 1e-9
         )
-        // And five times the tick rate must close the same distance over the same wall time.
-        val fast = (1..5).fold(1.0) { remaining, _ -> remaining * (1 - AmbianceOutputRules.easeAlpha(20L, 150)) }
-        val slow = 1.0 - AmbianceOutputRules.easeAlpha(100L, 150)
+        // And the same wall time must close the same distance however it is chopped up. This is
+        // the property that was missing: without it, changing pacing changes how every fade looks.
+        val inOneStep = 1.0 - AmbianceOutputRules.easeAlpha(100L)
+        val inFiveSteps = (1..5).fold(1.0) { left, _ -> left * (1 - AmbianceOutputRules.easeAlpha(20L)) }
         assertTrue(
-            "100ms of easing should be the same whether taken in one tick or five, $fast vs $slow",
-            abs(fast - slow) < 0.01
+            "100ms of easing should be the same in one step or five: $inOneStep vs $inFiveSteps",
+            abs(inOneStep - inFiveSteps) < 1e-9
         )
     }
 

@@ -263,11 +263,39 @@ object TraceMetrics {
     fun changeRateHz(trace: List<LightSample>, spanMs: Long): Double =
         if (spanMs <= 0) 0.0 else trace.size * 1000.0 / spanMs
 
+    /**
+     * Changes per second that are big enough to see.
+     *
+     * **This is the number that was missing, and its absence is why the 2026-09-04 change was
+     * judged an improvement when Joe found it worse.** The first version of these metrics counted
+     * how *big* each step was and treated how *often* they happened as neutral - so a change that
+     * doubled the number of visible transitions per second scored well for having halved their
+     * size. Lurch and shimmer are both failures and they trade off against each other; a metric
+     * that only sees one of them will always recommend trading toward the other.
+     */
+    fun visibleJumpRateHz(trace: List<LightSample>, spanMs: Long): Double =
+        if (spanMs <= 0) 0.0 else visibleJumps(trace) * 1000.0 / spanMs
+
+    /**
+     * The smallest light change the strip can be commanded to make at this level, as a fraction of
+     * the light already there.
+     *
+     * One byte is the floor: there is nothing between byte 14 and byte 15. Where that floor is
+     * itself large, **no update rate makes the fade smooth** - the strip can only hold still or
+     * jump. That is the case dithering exists for, and it is why "write more often" is not a fix
+     * below a certain level.
+     */
+    fun quantisationFloorAt(byteLevel: Int): Double {
+        val here = StripResponse.lightForByte(byteLevel)
+        return if (here <= 0.0) Double.NaN else StripResponse.lightStepAtByte(byteLevel) / here
+    }
+
     fun summary(trace: List<LightSample>, spanMs: Long): String {
         val j = jumps(trace)
         val mean = if (j.isEmpty()) 0.0 else j.average()
-        return "%5.1f changes/s  %3d visible steps  largest %5.1f%%  mean %4.2f%%".format(
-            changeRateHz(trace, spanMs), visibleJumps(trace), largestJump(trace) * 100, mean * 100
+        return ("%5.1f changes/s  %4.1f visible/s  largest %5.1f%%  mean %4.2f%%").format(
+            changeRateHz(trace, spanMs), visibleJumpRateHz(trace, spanMs),
+            largestJump(trace) * 100, mean * 100
         )
     }
 }

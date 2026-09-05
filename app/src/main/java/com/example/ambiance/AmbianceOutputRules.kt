@@ -2,7 +2,6 @@ package com.example.ambiance
 
 import com.example.core.color.ColorConverter
 import kotlin.math.abs
-import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
@@ -103,20 +102,33 @@ object AmbianceOutputRules {
     // ---------------------------------------------------------------- the ease
 
     /**
-     * The fraction of the remaining distance [AmbianceOutputInterpolator] closes on one tick.
+     * The fraction of the remaining distance [AmbianceOutputInterpolator] closes in [dtMs].
      *
-     * The shipped value is a flat 0.5 *per tick*, which makes the fade duration a function of how
-     * often the tick happens rather than of anything the user set. Ticking five times as often - as
-     * lowering the write pacing does - would make every fade five times faster, which is a feel
-     * change nobody asked for.
+     * The shipped rule was a flat half of the remaining distance **per tick**, which makes the fade
+     * duration a function of how often the tick happens rather than of anything anyone chose - so
+     * changing the write pacing, which is what sets the tick rate, silently changes every fade.
      *
-     * `1 - exp(-dt/tau)` closes the same proportion per unit *time*, so the fade lasts as long as
-     * `smoothnessMs` says regardless of tick rate. Tau is chosen so that at the shipped 100ms tick
-     * and the default 150ms smoothness the alpha comes out near the old 0.5, and the current feel
-     * is preserved rather than quietly retuned.
+     * This closes the same proportion per unit *time* instead. The constant is picked so that it is
+     * **exactly the shipped behaviour at the tick rate that was actually running**: half the
+     * distance every [HALF_LIFE_MS], which is what a flat 0.5 per tick meant when the tick was 50ms.
+     * At any other tick rate it now does the equivalent thing rather than a different one.
+     *
+     * A first attempt tied this to the user's `smoothness_ms` (150ms), which looked principled and
+     * was not: it made every fade about 1.8x slower and quietly repurposed a setting that the
+     * interpolator had never read. Fade feel is Joe's to change deliberately, not a refactor's to
+     * change on the way past.
      */
-    fun easeAlpha(dtMs: Long, smoothnessMs: Int): Double {
-        val tau = (smoothnessMs.coerceAtLeast(1)).toDouble()
-        return 1.0 - exp(-dtMs.coerceAtLeast(0L).toDouble() / tau)
+    fun easeAlpha(dtMs: Long): Double {
+        val dt = dtMs.coerceAtLeast(0L).toDouble()
+        return 1.0 - 0.5.pow(dt / HALF_LIFE_MS)
     }
+
+    /**
+     * How long the ease takes to close half the remaining distance.
+     *
+     * 50ms because that is the tick the shipped code was running at when it closed half the
+     * distance per tick - so this reproduces the fade people have been looking at, rather than
+     * proposing a new one.
+     */
+    const val HALF_LIFE_MS = 50.0
 }
