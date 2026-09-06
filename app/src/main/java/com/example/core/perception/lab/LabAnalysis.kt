@@ -225,7 +225,8 @@ object LabAnalysis {
         val unsureCount: Int,
         val repeatedPairs: Int,
         val repeatedPairsAgreeing: Int,
-        val transitivityViolations: Int
+        val transitivityViolations: Int,
+        val hardFlips: Int
     ) {
         val unsureRate: Double
             get() = if (comparisons == 0) 0.0 else unsureCount.toDouble() / comparisons
@@ -235,6 +236,22 @@ object LabAnalysis {
             get() = if (repeatedPairs == 0) null
             else repeatedPairsAgreeing.toDouble() / repeatedPairs
 
+        /**
+         * Disagreements that actually contradict, as a share of the repeats.
+         *
+         * [consistency] counts "can't tell once, picked A the other time" as a disagreement, and
+         * that is the wrong reading: it is one answer at the edge of visibility, not a reversal.
+         * Only a **hard flip** — decisive both times, naming opposite winners — says the vote was a
+         * coin.
+         *
+         * The distinction is not academic. Block 4's first run scored 0.5 consistency, which reads
+         * as a failed block; two of its three disagreements were hard flips and both sat at the one
+         * anchor where he had no preference to be consistent about. At the other anchor his answers
+         * agreed and were unanimous. A single number over both anchors hid the actual result.
+         */
+        val hardFlipRate: Double?
+            get() = if (repeatedPairs == 0) null else hardFlips.toDouble() / repeatedPairs
+
         /** The arms in vote order. Only worth reading when [trustworthy] holds. */
         val ranking: List<Int>
             get() = votes.entries.sortedByDescending { it.value }.map { it.key }
@@ -243,11 +260,21 @@ object LabAnalysis {
             get() = comparisons > 0 &&
                 unsureRate <= MOSTLY_UNSURE &&
                 transitivityViolations == 0 &&
-                (consistency ?: 0.0) >= CONSISTENT_ENOUGH
+                (hardFlipRate ?: 1.0) <= MAX_HARD_FLIPS
 
         companion object {
             /** Agreeing with yourself on 3 of 4 repeats is the floor for reading a ranking at all. */
             const val CONSISTENT_ENOUGH = 0.75
+
+            /**
+             * How many outright contradictions a readable block may contain.
+             *
+             * The gate is on [hardFlipRate] rather than [consistency] because a block where he was
+             * often unsure is a block whose arms were too close together, and that is a fact about
+             * the *stimuli* — it belongs in [unsureRate], where it already is. Counting it twice
+             * fails blocks that produced a clean answer wherever they asked a real question.
+             */
+            const val MAX_HARD_FLIPS = 0.25
 
             /** Above this share of "can't tell", the block did not manage to ask its question. */
             const val MOSTLY_UNSURE = 0.5
@@ -262,16 +289,42 @@ object LabAnalysis {
      * measuring whether he invents a preference between two identical things, which is a fact about
      * the *block* rather than a vote for either arm.
      */
+    /**
+     * What makes two trials the same question: the arms, and the scope they were asked in.
+     */
+    private data class PairKey(val anchorLevel: Int?, val toLevel: Int?, val arms: Pair<Int, Int>)
+
+    /**
+     * The same reading, split by one meta key — the anchor a comparison was asked at, usually.
+     *
+     * Block 4's first run is the case for this existing. Pooled across both anchors it scored 0.5
+     * consistency and looked like a failed block; split, one anchor was unanimous and the other had
+     * no preference in it at all, which is a result and an actionable one.
+     */
+    fun preferenceReadingsBy(
+        trials: List<LabTrial>,
+        answers: List<LabAnswer>,
+        kind: String,
+        metaKey: String
+    ): Map<Int, PreferenceReading> = trials.take(answers.size)
+        .filter { it.kind == kind && !it.isCatch }
+        .mapNotNull { it.meta[metaKey] }
+        .distinct()
+        .sorted()
+        .associateWith { preferenceReading(trials, answers, kind, metaKey to it) }
+
     fun preferenceReading(
         trials: List<LabTrial>,
         answers: List<LabAnswer>,
-        kind: String
+        kind: String,
+        only: Pair<String, Int>? = null
     ): PreferenceReading {
         val rows = trials.take(answers.size).zip(answers)
             .filter { it.first.kind == kind && !it.first.isCatch }
+            .filter { only == null || it.first.meta[only.first] == only.second }
         val votes = mutableMapOf<Int, Int>()
         // Keyed by the unordered pair, so the same two arms asked in either order collate.
-        val winnerByPair = mutableMapOf<Pair<Int, Int>, MutableList<Int?>>()
+        val winnerByPair = mutableMapOf<PairKey, MutableList<Int?>>()
         var unsure = 0
         for ((trial, answer) in rows) {
             val first = trial.meta["armFirst"] ?: continue
@@ -284,7 +337,12 @@ object LabAnalysis {
                 else -> null
             }
             if (winner == null) unsure++ else votes[winner] = votes.getValue(winner) + 1
-            val key = if (first <= second) first to second else second to first
+            // The scope is part of the key. The same two arms asked at a dark anchor and at a
+            // bright one are two different questions, and collating them invents contradictions
+            // out of a preference that simply depends on level — which is the thing block 4 asks
+            // two anchors in order to find.
+            val arms = if (first <= second) first to second else second to first
+            val key = PairKey(trial.meta["anchorLevel"], trial.meta["toLevel"], arms)
             winnerByPair.getOrPut(key) { mutableListOf() }.add(winner)
         }
         val repeated = winnerByPair.filterValues { it.size > 1 }
@@ -297,7 +355,8 @@ object LabAnalysis {
             // "Can't tell" both times is agreement: he gave the same answer twice, and that answer
             // was that there is nothing to choose between them.
             repeatedPairsAgreeing = repeated.count { (_, ws) -> ws.distinct().size == 1 },
-            transitivityViolations = transitivityViolations(winnerByPair)
+            transitivityViolations = transitivityViolations(winnerByPair),
+            hardFlips = repeated.count { (_, ws) -> ws.filterNotNull().distinct().size > 1 }
         )
     }
 
@@ -308,10 +367,10 @@ object LabAnalysis {
      * nothing about ordering, and treating it as an edge in either direction would manufacture
      * violations out of indifference.
      */
-    private fun transitivityViolations(winnerByPair: Map<Pair<Int, Int>, List<Int?>>): Int {
+    private fun transitivityViolations(winnerByPair: Map<PairKey, List<Int?>>): Int {
         val beats = mutableSetOf<Pair<Int, Int>>()
         for ((pair, winners) in winnerByPair) {
-            val (lo, hi) = pair
+            val (lo, hi) = pair.arms
             val loWins = winners.count { it == lo }
             val hiWins = winners.count { it == hi }
             when {

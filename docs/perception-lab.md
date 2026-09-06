@@ -5,7 +5,8 @@ Read this before changing anything under `core/perception/`, `core/perception/la
 
 Results and what they concluded live elsewhere: [perception-2026-09-05.md](perception-2026-09-05.md)
 (first sitting), [quantisation-2026-09-05.md](quantisation-2026-09-05.md) (the grid rule),
-[battery-2026-09-06.md](battery-2026-09-06.md) (blocks 0-3).
+[battery-2026-09-06.md](battery-2026-09-06.md) (blocks 0-3),
+[taste-2026-09-06.md](taste-2026-09-06.md) (blocks 4-6).
 
 ## What it is for
 
@@ -73,9 +74,9 @@ Every one of these was paid for by a failure.
 - **Results are one row per trial**, as JSON under `getExternalFilesDir(null)/perception/` (battery
   blocks under `perception/lab/`), so any analysis can be redone without another sitting.
 
-## Three mistakes that are now tests, not comments
+## Four mistakes that are now tests, not comments
 
-`LabBlocksTest` (23 tests). Each of these shipped once and cost a sitting or a wrong conclusion:
+`LabBlocksTest` (45 tests). Each of these shipped once and cost a sitting or a wrong conclusion:
 
 - **Nothing is commanded below the measured floor.**
 - **Every dither pair straddles a grid boundary.** The first attempt compared bytes 5 and 6, which
@@ -84,6 +85,12 @@ Every one of these was paid for by a failure.
   alternate 4 and 5 bytes apart and an averaged pair lands inside a level about half the time.
 - **Rate trials pin both fade endpoints**, so what differs is update count and not final level.
   `PerceptionTrials.fadePlain` stops wherever it lands; `LabBlocks.fadeAt` does not.
+- **A block that builds stimuli at 100% pins `LabTrial.brightnessPercent` on every trial.** The
+  runner drives firmware brightness *per trial* from that field, so leaving it null plays a
+  100%-context stimulus at the viewer's own setting and divides every emitted level by four. That
+  spoiled block 6 on 2026-09-06: its lifted arm was meant to sit above level 64 and arrived at 24.
+  The test asserts both directions — a `commandsBrightness` block pins 100, and one that is not must
+  pin nothing.
 
 ## Sitting length
 
@@ -108,7 +115,9 @@ Lab > Test battery**.
 | 6 | `near_black` | where the floor sits, and whether dim scenes should be lifted into the smooth region | yes |
 | 7-9 | — | two visualiser taste blocks, then validation | no |
 
-**Blocks 4-6 were built on 2026-09-06 and have not been run.** They are preference measurements and
+**Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
+[taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered, block 5 suggestive but its controls
+failed, block 6 spoiled by a brightness bug and needing a re-run. They are preference measurements and
 differ from blocks 0-3 in three ways that are all enforced by `LabBlocksTest`:
 
 - **`truth = PREFERENCE`, never scored.** The first sitting's fade block scored "picked the dithered

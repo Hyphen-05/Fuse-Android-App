@@ -1,0 +1,441 @@
+{
+  "kind": "lab_block",
+  "block": "smoothing",
+  "generatedAtMs": 1788677613428,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 2,
+  "catchFalsePositives": 0,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "catch",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 50,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 1778
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 120,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 1426
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 120,
+        "armSecond": 300
+      },
+      "answer": "unsure",
+      "responseMs": 828
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 300,
+        "armSecond": 25
+      },
+      "answer": "b",
+      "responseMs": 1124
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 50,
+        "armSecond": 300
+      },
+      "answer": "b",
+      "responseMs": 942
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 25,
+        "armSecond": 120
+      },
+      "answer": "a",
+      "responseMs": 1328
+    },
+    {
+      "kind": "catch",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 50,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 878
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 300,
+        "armSecond": 25
+      },
+      "answer": "b",
+      "responseMs": 1369
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 25,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 666
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 120,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 1289
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 25,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 1111
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 120,
+        "armSecond": 25
+      },
+      "answer": "unsure",
+      "responseMs": 684
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "armFirst": 300,
+        "armSecond": 120
+      },
+      "answer": "unsure",
+      "responseMs": 798
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "armFirst": 300,
+        "armSecond": 50
+      },
+      "answer": "b",
+      "responseMs": 968
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 50,
+        "armSecond": 120
+      },
+      "answer": "a",
+      "responseMs": 766
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 50,
+        "armSecond": 300
+      },
+      "answer": "a",
+      "responseMs": 2246
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 120,
+        "armSecond": 300
+      },
+      "answer": "unsure",
+      "responseMs": 1284
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 50,
+        "armSecond": 25
+      },
+      "answer": "unsure",
+      "responseMs": 924
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 120,
+        "armSecond": 25
+      },
+      "answer": "b",
+      "responseMs": 1451
+    },
+    {
+      "kind": "smoothing",
+      "question": "Which change felt better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 42,
+        "toLevel": 62,
+        "visibleSteps": 8,
+        "repeat": 1,
+        "armFirst": 300,
+        "armSecond": 25
+      },
+      "answer": "a",
+      "responseMs": 798
+    }
+  ]
+}

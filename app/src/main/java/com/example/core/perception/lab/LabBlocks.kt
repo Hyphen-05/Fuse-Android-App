@@ -12,9 +12,10 @@ import kotlin.random.Random
  * unit the later blocks need comes first even if its own answer is dull, because stimuli spaced in
  * the wrong units is the failure that cost the first sitting most of its trials.
  *
- * Blocks 0-3 are built. Blocks 4-9 are described in [PLANNED] and deliberately not implemented yet:
- * their stimuli want spacing in *visible steps*, which is exactly what block 1 produces, and
- * guessing that spacing now would repeat the original mistake one level up.
+ * Blocks 0-1 and 3-6 are built; block 2 is retired in place. Blocks 7-9 are described in [PLANNED].
+ * Blocks 4-6 could only be written once block 1 had run, because their stimuli are spaced in
+ * *visible steps* — guessing that spacing would have repeated the hardcoded-base-level mistake one
+ * level up.
  */
 object LabBlocks {
 
@@ -619,7 +620,7 @@ object LabBlocks {
                         SMOOTHING.id, "smoothing",
                         settleThenMove(from, to, a), a,
                         settleThenMove(from, to, b), b,
-                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, meta
+                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, context, meta
                     )
                 )
             }
@@ -631,14 +632,14 @@ object LabBlocks {
                         SMOOTHING.id, "smoothing",
                         settleThenMove(from, to, a), a,
                         settleThenMove(from, to, b), b,
-                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, meta + ("repeat" to 1)
+                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, context, meta + ("repeat" to 1)
                     )
                 )
             }
             main.add(
                 catchPair(
                     SMOOTHING.id, settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
-                    SMOOTHING_QUESTION, SMOOTHING_HINT, meta
+                    SMOOTHING_QUESTION, SMOOTHING_HINT, context, meta
                 )
             )
         }
@@ -710,7 +711,7 @@ object LabBlocks {
                         JUMPS.id, "cut_or_ease",
                         settleThenMove(from, to, 0L), 0L,
                         settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
-                        JUMP_QUESTION, JUMP_HINT, random, meta
+                        JUMP_QUESTION, JUMP_HINT, random, context, meta
                     )
                 )
             }
@@ -720,7 +721,7 @@ object LabBlocks {
             out.add(
                 catchPair(
                     JUMPS.id, settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
-                    JUMP_QUESTION, JUMP_HINT, mapOf("anchorLevel" to fromLevel, "toLevel" to toLevel)
+                    JUMP_QUESTION, JUMP_HINT, context, mapOf("anchorLevel" to fromLevel, "toLevel" to toLevel)
                 )
             )
         }
@@ -779,7 +780,7 @@ object LabBlocks {
                     NEAR_BLACK.id, "floor",
                     fadeToFloor(a.toInt(), context), a,
                     fadeToFloor(b.toInt(), context), b,
-                    FLOOR_QUESTION, FLOOR_HINT, random, emptyMap()
+                    FLOOR_QUESTION, FLOOR_HINT, random, context, emptyMap()
                 )
             )
         }
@@ -789,7 +790,7 @@ object LabBlocks {
                     NEAR_BLACK.id, "floor",
                     fadeToFloor(a.toInt(), context), a,
                     fadeToFloor(b.toInt(), context), b,
-                    FLOOR_QUESTION, FLOOR_HINT, random, mapOf("repeat" to 1)
+                    FLOOR_QUESTION, FLOOR_HINT, random, context, mapOf("repeat" to 1)
                 )
             )
         }
@@ -802,7 +803,7 @@ object LabBlocks {
                         NEAR_BLACK.id, "lift",
                         dimWalkTopping(a.toInt(), context), a,
                         dimWalkTopping(b.toInt(), context), b,
-                        LIFT_QUESTION, LIFT_HINT, random, emptyMap()
+                        LIFT_QUESTION, LIFT_HINT, random, context, emptyMap()
                     )
                 )
             }
@@ -811,14 +812,14 @@ object LabBlocks {
         main.add(
             catchPair(
                 NEAR_BLACK.id, fadeToFloor(FLOOR_LEVELS[1], context), FLOOR_LEVELS[1].toLong(),
-                FLOOR_QUESTION, FLOOR_HINT, emptyMap()
+                FLOOR_QUESTION, FLOOR_HINT, context, emptyMap()
             )
         )
         LIFT_TOPS.take(2).forEach { top ->
             main.add(
                 catchPair(
                     NEAR_BLACK.id, dimWalkTopping(top, context), top.toLong(),
-                    LIFT_QUESTION, LIFT_HINT, emptyMap()
+                    LIFT_QUESTION, LIFT_HINT, context, emptyMap()
                 )
             )
         }
@@ -896,6 +897,7 @@ object LabBlocks {
         question: String,
         hint: String,
         random: Random,
+        context: LabContext,
         meta: Map<String, Int>
     ): LabTrial {
         val aIsFirst = random.nextBoolean()
@@ -912,7 +914,12 @@ object LabBlocks {
                 "armFirst" to (if (aIsFirst) armA else armB).toInt(),
                 "armSecond" to (if (aIsFirst) armB else armA).toInt()
             ),
-            brightnessPercent = null
+            // The runner drives firmware brightness from this field per trial, so a block that
+            // builds its stimuli in a 100% context and leaves this null gets them played at Joe's
+            // own setting with every emitted level divided by four. That is what happened to block
+            // 6 on 2026-09-06: its lifted arm was meant to sit above level 64 and arrived at 24,
+            // so the one question it existed to ask was never put.
+            brightnessPercent = if (context.brightnessPercent == 100) 100 else null
         )
     }
 
@@ -929,6 +936,7 @@ object LabBlocks {
         arm: Long,
         question: String,
         hint: String,
+        context: LabContext,
         meta: Map<String, Int>
     ): LabTrial = LabTrial(
         block = block,
@@ -940,7 +948,7 @@ object LabBlocks {
         truth = LabTruth.KNOWN,
         correctOptionId = "unsure",
         meta = meta + mapOf("armFirst" to arm.toInt(), "armSecond" to arm.toInt()),
-        brightnessPercent = null
+        brightnessPercent = if (context.brightnessPercent == 100) 100 else null
     )
 
 

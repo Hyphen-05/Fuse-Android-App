@@ -511,6 +511,31 @@ class LabBlocksTest {
     }
 
     @Test
+    fun `a block that builds stimuli at 100 percent declares it on every trial`() {
+        // The bug that spoiled block 6's first sitting on 2026-09-06. Its stimuli were built in a
+        // 100% context, where byte and emitted level are the same number, but every trial carried a
+        // null brightness - and the runner reads brightness per trial. So it played at Joe's 25%,
+        // dividing every emitted level by four: the lifted arm was meant to sit above level 64 and
+        // arrived at 24, still deep inside the steppy region. The block ran perfectly and never
+        // asked its question.
+        for (spec in LabBlocks.ALL.filter { it.commandsBrightness }) {
+            val trials = LabBlocks.trialsFor(spec, joe, 4L)
+            assertTrue("${spec.id} produced nothing", trials.isNotEmpty())
+            assertTrue(
+                "${spec.id} commands brightness but leaves trials at the viewer's setting",
+                trials.all { it.brightnessPercent == 100 }
+            )
+        }
+        // And the converse: a block that does not command brightness must not claim to.
+        for (spec in LabBlocks.ALL.filter { !it.commandsBrightness && !it.isRetired }) {
+            assertTrue(
+                "${spec.id} does not command brightness but pins one",
+                LabBlocks.trialsFor(spec, joe, 4L).all { it.brightnessPercent == null }
+            )
+        }
+    }
+
+    @Test
     fun `taste stimuli stay on or above the floor`() {
         for (spec in listOf(LabBlocks.SMOOTHING, LabBlocks.JUMPS)) {
             LabBlocks.trialsFor(spec, joe, 4L).forEach { t ->
@@ -608,6 +633,56 @@ class LabBlocksTest {
         val reading = LabAnalysis.preferenceReading(trials, answers, "lift")
         assertTrue("a cycle must be counted", reading.transitivityViolations > 0)
         assertTrue(!reading.trustworthy)
+    }
+
+    @Test
+    fun `the same two arms at two anchors are two questions, not a contradiction`() {
+        // Block 4 asks every pair at a dark anchor and a bright one. Pooling them turns "prefers
+        // fast when dark, indifferent when bright" - which is the finding the two anchors exist to
+        // produce - into a pile of self-contradictions.
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+        val answers = trials.map { t ->
+            if (t.kind != "smoothing" || t.isCatch) LabAnswer("unsure", 400)
+            else {
+                val first = t.meta.getValue("armFirst")
+                val second = t.meta.getValue("armSecond")
+                // Opposite preferences at the two anchors, consistently held at each.
+                val wantLower = t.meta.getValue("anchorLevel") < 20
+                val lowerIsFirst = first < second
+                LabAnswer(if (wantLower == lowerIsFirst) "a" else "b", 400)
+            }
+        }
+        val pooled = LabAnalysis.preferenceReading(trials, answers, "smoothing")
+        assertEquals("opposite-but-consistent anchors must not read as flips", 0, pooled.hardFlips)
+        val byAnchor = LabAnalysis.preferenceReadingsBy(trials, answers, "smoothing", "anchorLevel")
+        assertEquals(2, byAnchor.size)
+        val anchors = byAnchor.keys.sorted()
+        assertEquals(
+            "each anchor must produce its own ranking",
+            byAnchor.getValue(anchors.first()).ranking,
+            byAnchor.getValue(anchors.last()).ranking.reversed()
+        )
+    }
+
+    @Test
+    fun `an unsure answer beside a decisive one is not counted as a contradiction`() {
+        // "Can't tell once, picked A the other time" is one answer at the edge of visibility. Only
+        // naming opposite winners twice says the vote was a coin, and only that should fail a block.
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+        var seen = mutableSetOf<String>()
+        val answers = trials.map { t ->
+            if (t.kind != "smoothing" || t.isCatch) LabAnswer("unsure", 400)
+            else {
+                val key = pairKey(t)
+                // Decisive the first time a pair is asked, unsure on its repeat.
+                if (seen.add(key)) LabAnswer("a", 400) else LabAnswer("unsure", 400)
+            }
+        }
+        val reading = LabAnalysis.preferenceReading(trials, answers, "smoothing")
+        assertTrue(reading.repeatedPairs > 0)
+        assertTrue("consistency counts it as a disagreement", reading.consistency!! < 1.0)
+        assertEquals("but it is not a hard flip", 0, reading.hardFlips)
+        assertEquals(0.0, reading.hardFlipRate!!, 0.0001)
     }
 
     @Test

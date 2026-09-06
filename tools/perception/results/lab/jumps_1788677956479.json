@@ -1,0 +1,405 @@
+{
+  "kind": "lab_block",
+  "block": "jumps",
+  "generatedAtMs": 1788677956479,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 3,
+  "catchFalsePositives": 2,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 35,
+        "visibleSteps": 33,
+        "requestedSteps": 32,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 890
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 18,
+        "visibleSteps": 16,
+        "requestedSteps": 16,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 1134
+    },
+    {
+      "kind": "catch",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 6,
+        "armFirst": 50,
+        "armSecond": 50
+      },
+      "answer": "b",
+      "responseMs": 1292
+    },
+    {
+      "kind": "catch",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "armFirst": 50,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 1522
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "requestedSteps": 8,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 612
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 6,
+        "visibleSteps": 4,
+        "requestedSteps": 4,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 628
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "requestedSteps": 8,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 589
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 35,
+        "visibleSteps": 33,
+        "requestedSteps": 32,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 596
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 18,
+        "visibleSteps": 16,
+        "requestedSteps": 16,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "b",
+      "responseMs": 1501
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 6,
+        "visibleSteps": 4,
+        "requestedSteps": 4,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 677
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 18,
+        "visibleSteps": 16,
+        "requestedSteps": 16,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 585
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 4,
+        "visibleSteps": 2,
+        "requestedSteps": 2,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 678
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 6,
+        "visibleSteps": 4,
+        "requestedSteps": 4,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "b",
+      "responseMs": 1030
+    },
+    {
+      "kind": "catch",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 4,
+        "armFirst": 50,
+        "armSecond": 50
+      },
+      "answer": "b",
+      "responseMs": 621
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 4,
+        "visibleSteps": 2,
+        "requestedSteps": 2,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "a",
+      "responseMs": 765
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 35,
+        "visibleSteps": 33,
+        "requestedSteps": 32,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "b",
+      "responseMs": 640
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 4,
+        "visibleSteps": 2,
+        "requestedSteps": 2,
+        "armFirst": 0,
+        "armSecond": 50
+      },
+      "answer": "unsure",
+      "responseMs": 740
+    },
+    {
+      "kind": "cut_or_ease",
+      "question": "Which suited the change better?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "anchorLevel": 2,
+        "toLevel": 10,
+        "visibleSteps": 8,
+        "requestedSteps": 8,
+        "armFirst": 50,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 921
+    }
+  ]
+}
