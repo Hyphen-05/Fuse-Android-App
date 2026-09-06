@@ -90,6 +90,7 @@ fun PerceptionLabScreen(
     var afterFloor by remember { mutableStateOf(LabRun.SITTING) }
     var probe by remember { mutableStateOf<ProbeRun?>(null) }
     var probeResumable by remember { mutableStateOf(readProbeInProgress(context)) }
+    var inBattery by remember { mutableStateOf(false) }
 
     val targets = remember { viewModel.perceptionTargetCount() }
     // Captured once, on entry, so the number put back at the end is the one he had before the probe
@@ -216,6 +217,15 @@ fun PerceptionLabScreen(
                     savedPath = savedPath!!
                 )
 
+                inBattery -> LabBatteryPanel(
+                    viewModel = viewModel,
+                    joeBrightness = joeBrightness,
+                    onExit = {
+                        restoreStrip()
+                        inBattery = false
+                    }
+                )
+
                 probe != null -> ProbePanel(
                     run = probe!!,
                     joeBrightness = joeBrightness,
@@ -295,7 +305,8 @@ fun PerceptionLabScreen(
                     onStartProbe = {
                         afterFloor = LabRun.PROBE
                         inFloorPass = true
-                    }
+                    },
+                    onOpenBattery = { inBattery = true }
                 )
             }
         }
@@ -315,8 +326,26 @@ private fun ColumnScope.IntroPanel(
     onResumeProbe: () -> Unit,
     onDiscard: () -> Unit,
     onStart: () -> Unit,
-    onStartProbe: () -> Unit
+    onStartProbe: () -> Unit,
+    onOpenBattery: () -> Unit
 ) {
+    // The battery is the way in now. The two runs below it are kept because they are what produced
+    // the floor and the grid rule, and re-running either is occasionally the right move — but
+    // neither is where a new question should start.
+    Text(
+        "The test battery is a set of short blocks, run one at a time in the order that unblocks " +
+            "the most. Start here.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    val battery = remember { MutableInteractionSource() }
+    Button(
+        onClick = onOpenBattery,
+        modifier = Modifier.fillMaxWidth().height(56.dp).joyfulPress(battery),
+        interactionSource = battery,
+        shape = CircleShape
+    ) { Text("Test battery") }
+    HorizontalDivider()
     if (probeResumable != null && probeResumable.floor != null) {
         Text(
             "There is a quantisation probe in progress with ${probeResumable.answers.size} " +
@@ -409,7 +438,7 @@ private enum class FloorStage { ASCENDING_TO_VISIBLE, ASCENDING_TO_CLEAR, DESCEN
  * on its own cannot do.
  */
 @Composable
-private fun ColumnScope.FloorPanel(
+internal fun ColumnScope.FloorPanel(
     onLevel: (Int) -> Unit,
     onDone: (FloorFinder.FloorResult) -> Unit
 ) {
@@ -628,7 +657,7 @@ private fun hintFor(kind: TrialKind?): String = when (kind) {
 }
 
 @Composable
-private fun AnswerButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+internal fun AnswerButton(label: String, modifier: Modifier, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     Button(
         onClick = onClick,
@@ -918,7 +947,7 @@ private data class InProgress(
     val answers: List<Answer>
 )
 
-private fun perceptionDir(context: android.content.Context) =
+internal fun perceptionDir(context: android.content.Context) =
     File(context.getExternalFilesDir(null), "perception").apply { mkdirs() }
 
 private fun inProgressFile(context: android.content.Context) =
