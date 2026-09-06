@@ -1,0 +1,765 @@
+{
+  "kind": "quantisation_probe",
+  "generatedAtMs": 1788630240972,
+  "seed": 1788629864998,
+  "brightnessPercent": 25,
+  "floor": {
+    "firstVisible": 5,
+    "clearlyOn": 5
+  },
+  "catchTrials": 6,
+  "catchFalsePositives": 0,
+  "anchorTrials": 8,
+  "anchorsMissed": 0,
+  "segments": [
+    {
+      "label": "low",
+      "commandedBrightness": null,
+      "stepTrials": 24,
+      "changeAtBytes": [
+        8,
+        12,
+        16,
+        20,
+        24,
+        28
+      ],
+      "spacings": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "meanSpacing": 4
+    },
+    {
+      "label": "high",
+      "commandedBrightness": null,
+      "stepTrials": 20,
+      "changeAtBytes": [
+        48,
+        52,
+        56,
+        60,
+        64
+      ],
+      "spacings": [
+        4,
+        4,
+        4,
+        4
+      ],
+      "meanSpacing": 4
+    },
+    {
+      "label": "low_full",
+      "commandedBrightness": 100,
+      "stepTrials": 16,
+      "changeAtBytes": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20
+      ],
+      "spacings": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "meanSpacing": 1
+    }
+  ],
+  "trials": [
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 5,
+      "toByte": 6,
+      "commandedBrightness": null,
+      "walkIndex": 0,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 6,
+      "toByte": 7,
+      "commandedBrightness": null,
+      "walkIndex": 1,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 7,
+      "toByte": 8,
+      "commandedBrightness": null,
+      "walkIndex": 2,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 8,
+      "toByte": 9,
+      "commandedBrightness": null,
+      "walkIndex": 3,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 9,
+      "toByte": 10,
+      "commandedBrightness": null,
+      "walkIndex": 4,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "ANCHOR",
+      "fromByte": 10,
+      "toByte": 22,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 10,
+      "toByte": 11,
+      "commandedBrightness": null,
+      "walkIndex": 5,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "CATCH",
+      "fromByte": 11,
+      "toByte": 11,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 11,
+      "toByte": 12,
+      "commandedBrightness": null,
+      "walkIndex": 6,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "CATCH",
+      "fromByte": 12,
+      "toByte": 12,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 12,
+      "toByte": 13,
+      "commandedBrightness": null,
+      "walkIndex": 7,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 13,
+      "toByte": 14,
+      "commandedBrightness": null,
+      "walkIndex": 8,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 14,
+      "toByte": 15,
+      "commandedBrightness": null,
+      "walkIndex": 9,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "ANCHOR",
+      "fromByte": 15,
+      "toByte": 27,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 15,
+      "toByte": 16,
+      "commandedBrightness": null,
+      "walkIndex": 10,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 16,
+      "toByte": 17,
+      "commandedBrightness": null,
+      "walkIndex": 11,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "CATCH",
+      "fromByte": 17,
+      "toByte": 17,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 17,
+      "toByte": 18,
+      "commandedBrightness": null,
+      "walkIndex": 12,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 18,
+      "toByte": 19,
+      "commandedBrightness": null,
+      "walkIndex": 13,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 19,
+      "toByte": 20,
+      "commandedBrightness": null,
+      "walkIndex": 14,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 20,
+      "toByte": 21,
+      "commandedBrightness": null,
+      "walkIndex": 15,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 21,
+      "toByte": 22,
+      "commandedBrightness": null,
+      "walkIndex": 16,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 22,
+      "toByte": 23,
+      "commandedBrightness": null,
+      "walkIndex": 17,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "ANCHOR",
+      "fromByte": 23,
+      "toByte": 35,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 23,
+      "toByte": 24,
+      "commandedBrightness": null,
+      "walkIndex": 18,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "CATCH",
+      "fromByte": 24,
+      "toByte": 24,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 24,
+      "toByte": 25,
+      "commandedBrightness": null,
+      "walkIndex": 19,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 25,
+      "toByte": 26,
+      "commandedBrightness": null,
+      "walkIndex": 20,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 26,
+      "toByte": 27,
+      "commandedBrightness": null,
+      "walkIndex": 21,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "ANCHOR",
+      "fromByte": 27,
+      "toByte": 39,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 27,
+      "toByte": 28,
+      "commandedBrightness": null,
+      "walkIndex": 22,
+      "changed": false
+    },
+    {
+      "segment": "low",
+      "kind": "STEP",
+      "fromByte": 28,
+      "toByte": 29,
+      "commandedBrightness": null,
+      "walkIndex": 23,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 48,
+      "toByte": 49,
+      "commandedBrightness": null,
+      "walkIndex": 0,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 49,
+      "toByte": 50,
+      "commandedBrightness": null,
+      "walkIndex": 1,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 50,
+      "toByte": 51,
+      "commandedBrightness": null,
+      "walkIndex": 2,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 51,
+      "toByte": 52,
+      "commandedBrightness": null,
+      "walkIndex": 3,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 52,
+      "toByte": 53,
+      "commandedBrightness": null,
+      "walkIndex": 4,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 53,
+      "toByte": 54,
+      "commandedBrightness": null,
+      "walkIndex": 5,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "ANCHOR",
+      "fromByte": 54,
+      "toByte": 66,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 54,
+      "toByte": 55,
+      "commandedBrightness": null,
+      "walkIndex": 6,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 55,
+      "toByte": 56,
+      "commandedBrightness": null,
+      "walkIndex": 7,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 56,
+      "toByte": 57,
+      "commandedBrightness": null,
+      "walkIndex": 8,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 57,
+      "toByte": 58,
+      "commandedBrightness": null,
+      "walkIndex": 9,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 58,
+      "toByte": 59,
+      "commandedBrightness": null,
+      "walkIndex": 10,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 59,
+      "toByte": 60,
+      "commandedBrightness": null,
+      "walkIndex": 11,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 60,
+      "toByte": 61,
+      "commandedBrightness": null,
+      "walkIndex": 12,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "CATCH",
+      "fromByte": 61,
+      "toByte": 61,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 61,
+      "toByte": 62,
+      "commandedBrightness": null,
+      "walkIndex": 13,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 62,
+      "toByte": 63,
+      "commandedBrightness": null,
+      "walkIndex": 14,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 63,
+      "toByte": 64,
+      "commandedBrightness": null,
+      "walkIndex": 15,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 64,
+      "toByte": 65,
+      "commandedBrightness": null,
+      "walkIndex": 16,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 65,
+      "toByte": 66,
+      "commandedBrightness": null,
+      "walkIndex": 17,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "ANCHOR",
+      "fromByte": 66,
+      "toByte": 78,
+      "commandedBrightness": null,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 66,
+      "toByte": 67,
+      "commandedBrightness": null,
+      "walkIndex": 18,
+      "changed": false
+    },
+    {
+      "segment": "high",
+      "kind": "STEP",
+      "fromByte": 67,
+      "toByte": 68,
+      "commandedBrightness": null,
+      "walkIndex": 19,
+      "changed": false
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 5,
+      "toByte": 6,
+      "commandedBrightness": 100,
+      "walkIndex": 0,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "ANCHOR",
+      "fromByte": 6,
+      "toByte": 18,
+      "commandedBrightness": 100,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 6,
+      "toByte": 7,
+      "commandedBrightness": 100,
+      "walkIndex": 1,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 7,
+      "toByte": 8,
+      "commandedBrightness": 100,
+      "walkIndex": 2,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 8,
+      "toByte": 9,
+      "commandedBrightness": 100,
+      "walkIndex": 3,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 9,
+      "toByte": 10,
+      "commandedBrightness": 100,
+      "walkIndex": 4,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 10,
+      "toByte": 11,
+      "commandedBrightness": 100,
+      "walkIndex": 5,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "ANCHOR",
+      "fromByte": 11,
+      "toByte": 23,
+      "commandedBrightness": 100,
+      "walkIndex": -1,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 11,
+      "toByte": 12,
+      "commandedBrightness": 100,
+      "walkIndex": 6,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 12,
+      "toByte": 13,
+      "commandedBrightness": 100,
+      "walkIndex": 7,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 13,
+      "toByte": 14,
+      "commandedBrightness": 100,
+      "walkIndex": 8,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 14,
+      "toByte": 15,
+      "commandedBrightness": 100,
+      "walkIndex": 9,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 15,
+      "toByte": 16,
+      "commandedBrightness": 100,
+      "walkIndex": 10,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 16,
+      "toByte": 17,
+      "commandedBrightness": 100,
+      "walkIndex": 11,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 17,
+      "toByte": 18,
+      "commandedBrightness": 100,
+      "walkIndex": 12,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 18,
+      "toByte": 19,
+      "commandedBrightness": 100,
+      "walkIndex": 13,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "CATCH",
+      "fromByte": 19,
+      "toByte": 19,
+      "commandedBrightness": 100,
+      "walkIndex": -1,
+      "changed": false
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 19,
+      "toByte": 20,
+      "commandedBrightness": 100,
+      "walkIndex": 14,
+      "changed": true
+    },
+    {
+      "segment": "low_full",
+      "kind": "STEP",
+      "fromByte": 20,
+      "toByte": 21,
+      "commandedBrightness": 100,
+      "walkIndex": 15,
+      "changed": true
+    }
+  ]
+}
