@@ -1,0 +1,336 @@
+{
+  "kind": "lab_block",
+  "block": "rate",
+  "generatedAtMs": 1788665577703,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 3,
+  "catchFalsePositives": 1,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 15,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 2813
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 10,
+        "referenceHz": 60
+      },
+      "answer": "b",
+      "responseMs": 878
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 20,
+        "referenceHz": 60
+      },
+      "answer": "b",
+      "responseMs": 2881
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 30,
+        "referenceHz": 60
+      },
+      "answer": "b",
+      "responseMs": 1519
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 20,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 970
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 30,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 760
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 20,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 3150
+    },
+    {
+      "kind": "catch",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1389
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 30,
+        "referenceHz": 60
+      },
+      "answer": "a",
+      "responseMs": 1257
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 45,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1334
+    },
+    {
+      "kind": "catch",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1810
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 10,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1236
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 45,
+        "referenceHz": 60
+      },
+      "answer": "a",
+      "responseMs": 598
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 10,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1008
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 15,
+        "referenceHz": 60
+      },
+      "answer": "a",
+      "responseMs": 750
+    },
+    {
+      "kind": "catch",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 60
+      },
+      "answer": "a",
+      "responseMs": 606
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 15,
+        "referenceHz": 60
+      },
+      "answer": "b",
+      "responseMs": 600
+    },
+    {
+      "kind": "rate",
+      "question": "Which fade was smoother?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "rateHz": 45,
+        "referenceHz": 60
+      },
+      "answer": "unsure",
+      "responseMs": 1350
+    }
+  ]
+}

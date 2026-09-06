@@ -1,0 +1,604 @@
+{
+  "kind": "lab_block",
+  "block": "scale",
+  "generatedAtMs": 1788665315373,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 1,
+  "catchFalsePositives": 0,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 20,
+        "anchor": 16,
+        "delta": 4
+      },
+      "answer": "yes",
+      "responseMs": 4545
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 128,
+        "toByte": 144,
+        "anchor": 128,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 861
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 32,
+        "toByte": 36,
+        "anchor": 32,
+        "delta": 4
+      },
+      "answer": "yes",
+      "responseMs": 1030
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 20,
+        "anchor": 4,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 625
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 32,
+        "toByte": 34,
+        "anchor": 32,
+        "delta": 2
+      },
+      "answer": "yes",
+      "responseMs": 936
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 32,
+        "toByte": 40,
+        "anchor": 32,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 673
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 64,
+        "toByte": 72,
+        "anchor": 64,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 465
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 12,
+        "anchor": 4,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 515
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 12,
+        "anchor": 8,
+        "delta": 4
+      },
+      "answer": "yes",
+      "responseMs": 515
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 8,
+        "anchor": 4,
+        "delta": 4
+      },
+      "answer": "yes",
+      "responseMs": 510
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 32,
+        "toByte": 48,
+        "anchor": 32,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 431
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 128,
+        "toByte": 130,
+        "anchor": 128,
+        "delta": 2
+      },
+      "answer": "no",
+      "responseMs": 787
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 24,
+        "anchor": 8,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 559
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 6,
+        "anchor": 4,
+        "delta": 2
+      },
+      "answer": "yes",
+      "responseMs": 641
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 64,
+        "toByte": 65,
+        "anchor": 64,
+        "delta": 1
+      },
+      "answer": "no",
+      "responseMs": 1032
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 10,
+        "anchor": 8,
+        "delta": 2
+      },
+      "answer": "yes",
+      "responseMs": 472
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 32,
+        "anchor": 16,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 1401
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 16,
+        "anchor": 8,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 516
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 128,
+        "toByte": 129,
+        "anchor": 128,
+        "delta": 1
+      },
+      "answer": "no",
+      "responseMs": 835
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 18,
+        "anchor": 16,
+        "delta": 2
+      },
+      "answer": "yes",
+      "responseMs": 592
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 128,
+        "toByte": 132,
+        "anchor": 128,
+        "delta": 4
+      },
+      "answer": "no",
+      "responseMs": 840
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 128,
+        "toByte": 136,
+        "anchor": 128,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 614
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 24,
+        "anchor": 16,
+        "delta": 8
+      },
+      "answer": "yes",
+      "responseMs": 696
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 9,
+        "anchor": 8,
+        "delta": 1
+      },
+      "answer": "yes",
+      "responseMs": 507
+    },
+    {
+      "kind": "catch",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": "no",
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 4,
+        "anchor": 4,
+        "delta": 0
+      },
+      "answer": "no",
+      "responseMs": 869
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 4,
+        "toByte": 5,
+        "anchor": 4,
+        "delta": 1
+      },
+      "answer": "yes",
+      "responseMs": 470
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 64,
+        "toByte": 80,
+        "anchor": 64,
+        "delta": 16
+      },
+      "answer": "yes",
+      "responseMs": 442
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 32,
+        "toByte": 33,
+        "anchor": 32,
+        "delta": 1
+      },
+      "answer": "yes",
+      "responseMs": 544
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 17,
+        "anchor": 16,
+        "delta": 1
+      },
+      "answer": "yes",
+      "responseMs": 780
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 64,
+        "toByte": 66,
+        "anchor": 64,
+        "delta": 2
+      },
+      "answer": "no",
+      "responseMs": 867
+    },
+    {
+      "kind": "jnd",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "fromByte": 64,
+        "toByte": 68,
+        "anchor": 64,
+        "delta": 4
+      },
+      "answer": "yes",
+      "responseMs": 795
+    }
+  ]
+}

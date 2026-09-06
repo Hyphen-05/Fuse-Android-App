@@ -1,0 +1,287 @@
+{
+  "kind": "lab_block",
+  "block": "floor_grid",
+  "generatedAtMs": 1788665147455,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 3,
+  "catchFalsePositives": 0,
+  "anchorTrials": 1,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 5,
+        "toByte": 6
+      },
+      "answer": "no",
+      "responseMs": 1012
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 6,
+        "toByte": 7
+      },
+      "answer": "no",
+      "responseMs": 1029
+    },
+    {
+      "kind": "anchor",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": "yes",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 7,
+        "toByte": 23
+      },
+      "answer": "yes",
+      "responseMs": 1373
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 7,
+        "toByte": 8
+      },
+      "answer": "no",
+      "responseMs": 1203
+    },
+    {
+      "kind": "catch",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": "no",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 8
+      },
+      "answer": "no",
+      "responseMs": 903
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 8,
+        "toByte": 9
+      },
+      "answer": "yes",
+      "responseMs": 5794
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 9,
+        "toByte": 10
+      },
+      "answer": "no",
+      "responseMs": 800
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 10,
+        "toByte": 11
+      },
+      "answer": "no",
+      "responseMs": 1109
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 11,
+        "toByte": 12
+      },
+      "answer": "no",
+      "responseMs": 893
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 12,
+        "toByte": 13
+      },
+      "answer": "yes",
+      "responseMs": 665
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 13,
+        "toByte": 14
+      },
+      "answer": "no",
+      "responseMs": 876
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 14,
+        "toByte": 15
+      },
+      "answer": "no",
+      "responseMs": 665
+    },
+    {
+      "kind": "catch",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": "no",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 15,
+        "toByte": 15
+      },
+      "answer": "no",
+      "responseMs": 638
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 15,
+        "toByte": 16
+      },
+      "answer": "no",
+      "responseMs": 822
+    },
+    {
+      "kind": "catch",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": "no",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 16
+      },
+      "answer": "no",
+      "responseMs": 980
+    },
+    {
+      "kind": "step",
+      "question": "Did anything change?",
+      "optionIds": [
+        "yes",
+        "no"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "fromByte": 16,
+        "toByte": 17
+      },
+      "answer": "yes",
+      "responseMs": 768
+    }
+  ]
+}

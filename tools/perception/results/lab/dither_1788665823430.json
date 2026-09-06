@@ -1,0 +1,339 @@
+{
+  "kind": "lab_block",
+  "block": "dither",
+  "generatedAtMs": 1788665823430,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 2,
+  "catchFalsePositives": 0,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "againstByte": 12
+      },
+      "answer": "b",
+      "responseMs": 3422
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "againstByte": 13
+      },
+      "answer": "unsure",
+      "responseMs": 1991
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "againstByte": 12
+      },
+      "answer": "b",
+      "responseMs": 989
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "againstByte": 13
+      },
+      "answer": "unsure",
+      "responseMs": 1865
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "holdMs": 20
+      },
+      "answer": "b",
+      "responseMs": 1517
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "holdMs": 40
+      },
+      "answer": "b",
+      "responseMs": 2928
+    },
+    {
+      "kind": "catch",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "holdMs": 60
+      },
+      "answer": "unsure",
+      "responseMs": 2539
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "holdMs": 60
+      },
+      "answer": "a",
+      "responseMs": 1305
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 12,
+        "holdMs": 100
+      },
+      "answer": "a",
+      "responseMs": 727
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "againstByte": 32
+      },
+      "answer": "b",
+      "responseMs": 885
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "againstByte": 33
+      },
+      "answer": "b",
+      "responseMs": 1932
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "againstByte": 32
+      },
+      "answer": "unsure",
+      "responseMs": 4327
+    },
+    {
+      "kind": "between",
+      "question": "Which was brighter?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "againstByte": 33
+      },
+      "answer": "unsure",
+      "responseMs": 448
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "holdMs": 20
+      },
+      "answer": "b",
+      "responseMs": 937
+    },
+    {
+      "kind": "catch",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "holdMs": 40
+      },
+      "answer": "unsure",
+      "responseMs": 909
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "holdMs": 40
+      },
+      "answer": "a",
+      "responseMs": 696
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "holdMs": 60
+      },
+      "answer": "b",
+      "responseMs": 476
+    },
+    {
+      "kind": "flicker",
+      "question": "Which one flickered?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "lowerByte": 32,
+        "holdMs": 100
+      },
+      "answer": "a",
+      "responseMs": 897
+    }
+  ]
+}
