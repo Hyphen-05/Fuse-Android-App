@@ -324,7 +324,8 @@ class LabBlocksTest {
         // Blocks 4-8 are preferences. The type has to keep that separate from discrimination, or a
         // vote count gets reported as a score - which is exactly what the first sitting's fade
         // block did.
-        val all = LabBlocks.ALL.flatMap { LabBlocks.trialsFor(it, joe, 4L) }
+        val measurementBlocks = listOf(LabBlocks.FLOOR_GRID, LabBlocks.SCALE, LabBlocks.RATE, LabBlocks.DITHER)
+        val all = measurementBlocks.flatMap { LabBlocks.trialsFor(it, joe, 4L) }
         assertTrue("nothing in blocks 0-3 is a taste question", all.none { it.isPreference })
         // Every control is scorable, and every trial measuring an unknown is not - those are the
         // two things that must not be confused with each other or with taste.
@@ -341,5 +342,287 @@ class LabBlocksTest {
         )
         assertTrue(preference.isPreference)
         assertTrue(!preference.isScorable)
+    }
+
+    // --- the visible-step scale --------------------------------------------------------------------
+
+    private val scale = VisibleScale.MEASURED_2026_09_06
+
+    @Test
+    fun `the scale never claims a change finer than the hardware can make`() {
+        // One output level is the smallest step the strip has. A scale that interpolated below that
+        // would space stimuli the strip cannot render - the 2026-09-05 mistake, one level up.
+        for (level in 1..255) {
+            assertTrue("threshold at $level is below one level", scale.thresholdAt(level) >= 1.0)
+        }
+    }
+
+    @Test
+    fun `the scale reproduces the anchors it was measured at`() {
+        assertEquals(1.0, scale.thresholdAt(4), 0.001)
+        assertEquals(1.0, scale.thresholdAt(32), 0.001)
+        assertEquals(4.0, scale.thresholdAt(64), 0.001)
+        assertEquals(8.0, scale.thresholdAt(128), 0.001)
+        // Above the top anchor it extends the Weber fraction rather than holding flat.
+        assertEquals(16.0, scale.thresholdAt(256), 0.5)
+    }
+
+    @Test
+    fun `a jump of the same visible size is a different number of levels at each anchor`() {
+        // This is the whole reason the taste blocks are spaced in visible steps rather than bytes:
+        // eight steps near the floor is eight levels, and eight steps up at 64 is far more.
+        val darkTo = scale.levelAfterVisibleSteps(2, 8.0, maxLevel = 255)
+        val brightTo = scale.levelAfterVisibleSteps(64, 8.0, maxLevel = 255)
+        assertEquals(8.0, scale.stepsBetween(2, darkTo), 0.6)
+        assertEquals(8.0, scale.stepsBetween(64, brightTo), 0.6)
+        assertTrue(
+            "the bright jump must span more levels for the same visible size",
+            brightTo - 64 > darkTo - 2
+        )
+    }
+
+    @Test
+    fun `running out of range returns the ceiling rather than an unreachable level`() {
+        // At 25% the strip stops at level 64, and a 32-step jump from the floor does not fit. The
+        // caller has to be able to see that it did not get what it asked for.
+        val capped = scale.levelAfterVisibleSteps(2, 200.0, maxLevel = 64)
+        assertEquals(64, capped)
+        assertTrue(scale.stepsBetween(2, capped) < 200.0)
+    }
+
+    // --- blocks 4-6, the taste blocks ---------------------------------------------------------------
+
+    private fun tasteBlocks() = listOf(LabBlocks.SMOOTHING, LabBlocks.JUMPS, LabBlocks.NEAR_BLACK)
+
+    @Test
+    fun `every taste trial is a preference with its arms recorded`() {
+        for (spec in tasteBlocks()) {
+            val trials = LabBlocks.trialsFor(spec, joe, 4L)
+            assertTrue("${spec.id} produced nothing", trials.isNotEmpty())
+            for (t in trials.filter { !it.isCatch }) {
+                assertTrue("${spec.id}: ${t.kind} is not a preference", t.isPreference)
+                assertNull("${spec.id}: a taste trial cannot have a right answer", t.correctOptionId)
+                // The options are "a" and "b", which say nothing once the order is shuffled. Without
+                // the arm identities travelling with the trial the answers are unreadable.
+                assertTrue("${spec.id}: no armFirst", t.meta.containsKey("armFirst"))
+                assertTrue("${spec.id}: no armSecond", t.meta.containsKey("armSecond"))
+                assertNotEquals(
+                    "${spec.id}: a non-catch trial compared an arm with itself",
+                    t.meta["armFirst"], t.meta["armSecond"]
+                )
+                assertEquals("${spec.id}: a comparison needs two intervals", 2, t.intervals.size)
+            }
+        }
+    }
+
+    @Test
+    fun `every taste block asks some pair twice, or its votes cannot be trusted`() {
+        // Consistency is not a nicety here. Without a repeat there is no way to tell a preference
+        // from a coin, and the reading has no way to say so.
+        for (spec in listOf(LabBlocks.SMOOTHING, LabBlocks.NEAR_BLACK)) {
+            val trials = LabBlocks.trialsFor(spec, joe, 4L).filter { !it.isCatch }
+            val pairs = trials.map { pairKey(it) }
+            assertTrue("${spec.id} repeats no pair", pairs.size > pairs.distinct().size)
+        }
+        // The jumps block repeats every pair by construction: two arms, one ladder rung each.
+        val jumps = LabBlocks.trialsFor(LabBlocks.JUMPS, joe, 4L).filter { !it.isCatch }
+        assertEquals(LabBlocks.JUMP_REPEATS, jumps.count { it.meta["requestedSteps"] == 2 })
+    }
+
+    private fun pairKey(t: LabTrial): String {
+        val a = t.meta["armFirst"] ?: 0
+        val b = t.meta["armSecond"] ?: 0
+        val anchor = t.meta["anchorLevel"] ?: 0
+        return "${t.kind}:$anchor:${minOf(a, b)}-${maxOf(a, b)}"
+    }
+
+    @Test
+    fun `a taste block's catch trials compare something with itself`() {
+        for (spec in tasteBlocks()) {
+            val catches = LabBlocks.trialsFor(spec, joe, 4L).filter { it.isCatch }
+            assertTrue("${spec.id} has no catch trials", catches.isNotEmpty())
+            catches.forEach {
+                assertEquals("${spec.id}: a catch must be scorable", "unsure", it.correctOptionId)
+                assertEquals(it.intervals[0].steps, it.intervals[1].steps)
+            }
+        }
+    }
+
+    @Test
+    fun `settling-speed arms differ only in how they travel, not where they start or finish`() {
+        // The confound `fadeAt` was written to remove in block 2, applied to an eased move: two
+        // half-lives that ended on different bytes would be compared on final level as much as on
+        // the journey, and the answer would look like a preference about smoothness.
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L).filter { it.kind == "smoothing" }
+        assertTrue(trials.isNotEmpty())
+        trials.forEach { t ->
+            val (a, b) = t.intervals
+            assertEquals("must start together", a.steps.first().byte, b.steps.first().byte)
+            assertEquals("must finish together", a.steps.last().byte, b.steps.last().byte)
+            assertEquals("must take the same time", a.durationMs, b.durationMs)
+        }
+    }
+
+    @Test
+    fun `a slower half-life really is further from settled partway through`() {
+        // Guards the stimulus itself rather than the block: if `easedMove` collapsed to the same
+        // shape at every half-life, every trial above would still pass and the block would be
+        // comparing two identical things.
+        val fast = LabBlocks.easedMove(from = 4, to = 100, halfLifeMs = 25L)
+        val slow = LabBlocks.easedMove(from = 4, to = 100, halfLifeMs = 300L)
+        val at = { s: com.example.core.perception.Stimulus -> s.steps[6].byte }
+        assertTrue("the slow arm must lag the fast one", at(slow) < at(fast))
+        assertEquals(100, fast.steps.last().byte)
+        assertEquals(100, slow.steps.last().byte)
+    }
+
+    @Test
+    fun `a cut is one write and an ease is many, over the same window`() {
+        val trials = LabBlocks.trialsFor(LabBlocks.JUMPS, joe, 4L).filter { it.kind == "cut_or_ease" }
+        assertTrue(trials.isNotEmpty())
+        trials.forEach { t ->
+            val sizes = t.intervals.map { s -> s.steps.count { it.holdMs <= LabBlocks.TICK_MS } }
+            assertNotEquals("a cut and an ease must differ in update count", sizes[0], sizes[1])
+            assertEquals(
+                "but must land on the same level",
+                t.intervals[0].steps.last().byte,
+                t.intervals[1].steps.last().byte
+            )
+        }
+    }
+
+    @Test
+    fun `the lift arms hold the scene's shape and move only its height`() {
+        val ctx = LabBlocks.FULL_BRIGHTNESS_CONTEXT
+        val low = LabBlocks.dimWalkTopping(20, ctx)
+        val high = LabBlocks.dimWalkTopping(96, ctx)
+        assertEquals("the two arms must be the same scene", low.steps.size, high.steps.size)
+        assertEquals(low.durationMs, high.durationMs)
+        assertTrue(high.steps.maxOf { it.byte } > low.steps.maxOf { it.byte } * 3)
+    }
+
+    @Test
+    fun `the near-black block runs where the smooth region is reachable`() {
+        // Its lifted arm sits above emitted level 64, which at Joe's 25% is the top of the range -
+        // the comparison could not be played at all at his own brightness.
+        assertTrue(LabBlocks.NEAR_BLACK.commandsBrightness)
+        assertTrue(LabBlocks.LIFT_TOPS.max() > 64)
+        assertTrue(LabBlocks.LIFT_TOPS.max() <= LabBlocks.maxLevel(LabBlocks.FULL_BRIGHTNESS_CONTEXT))
+    }
+
+    @Test
+    fun `taste stimuli stay on or above the floor`() {
+        for (spec in listOf(LabBlocks.SMOOTHING, LabBlocks.JUMPS)) {
+            LabBlocks.trialsFor(spec, joe, 4L).forEach { t ->
+                t.intervals.forEach { s ->
+                    s.steps.forEach {
+                        assertTrue(
+                            "${spec.id} commands byte ${it.byte}, below the floor ${joe.floorClearlyOn}",
+                            it.byte >= joe.floorClearlyOn
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a retired block is kept in place and cannot be run`() {
+        // Position 2 is block 2 in every results file and every doc. Dropping it would renumber
+        // block 3's data; leaving it runnable would spend a sitting on answers already known to
+        // mean nothing.
+        assertEquals(LabBlocks.RATE, LabBlocks.ALL[2])
+        assertTrue(LabBlocks.RATE.isRetired)
+        assertTrue(LabBlocks.ALL.filter { it != LabBlocks.RATE }.none { it.isRetired })
+    }
+
+    @Test
+    fun `no block runs longer than the menu says it will`() {
+        // The original lab design was a median of 195 trials and 25-35 minutes, and Joe was asked to
+        // sit through it once. Short separately-runnable blocks are what replaced it, and a ladder
+        // quietly doubling in a later edit is how that gets undone.
+        for (spec in LabBlocks.ALL) {
+            if (spec.isRetired) continue
+            val trials = LabBlocks.trialsFor(spec, joe, 4L)
+            val playMs = trials.sumOf { t -> t.intervals.sumOf { it.durationMs } }
+            // Two seconds per trial for reading the question and answering it.
+            val minutes = (playMs + trials.size * 2000L) / 60_000.0
+            assertTrue(
+                "${spec.id} is ${"%.1f".format(minutes)} min against an advertised ${spec.estimateMinutes}",
+                minutes <= spec.estimateMinutes
+            )
+        }
+    }
+
+    // --- the preference reading ----------------------------------------------------------------------
+
+    /** Answers a taste block as someone who consistently prefers the arm with the lower number. */
+    private fun prefersLower(trials: List<LabTrial>, kind: String): List<LabAnswer> =
+        trials.map { t ->
+            if (t.kind != kind || t.isCatch) LabAnswer("unsure", 400)
+            else {
+                val first = t.meta.getValue("armFirst")
+                val second = t.meta.getValue("armSecond")
+                LabAnswer(if (first < second) "a" else "b", 400)
+            }
+        }
+
+    @Test
+    fun `a consistent viewer produces a clean ranking`() {
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+        val reading = LabAnalysis.preferenceReading(trials, prefersLower(trials, "smoothing"), "smoothing")
+        assertEquals(LabBlocks.HALF_LIVES_MS.map { it.toInt() }, reading.ranking)
+        assertEquals(0, reading.transitivityViolations)
+        assertEquals(1.0, reading.consistency!!, 0.0001)
+        assertTrue(reading.trustworthy)
+    }
+
+    @Test
+    fun `a viewer who cannot separate the arms is not read as having a preference`() {
+        // Block 2's failure: 10 "can't tell" out of 15 read naively as "one rate is as good as
+        // another", when what it meant was that none of them were any good.
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+        val reading = LabAnalysis.preferenceReading(
+            trials, trials.map { LabAnswer("unsure", 400) }, "smoothing"
+        )
+        assertEquals(1.0, reading.unsureRate, 0.0001)
+        assertTrue("all-unsure must not read as trustworthy", !reading.trustworthy)
+    }
+
+    @Test
+    fun `a cyclic preference is reported as a confound rather than ranked`() {
+        // A over B, B over C, C over A means the arms are not on one axis. A vote count would still
+        // produce a tidy-looking ordering out of it.
+        val trials = LabBlocks.trialsFor(LabBlocks.NEAR_BLACK, joe, 4L)
+        val cycle = listOf(20, 44, 96)
+        val answers = trials.map { t ->
+            if (t.kind != "lift" || t.isCatch) LabAnswer("unsure", 400)
+            else {
+                val first = t.meta.getValue("armFirst")
+                val second = t.meta.getValue("armSecond")
+                // Each arm beats the next one round the cycle.
+                val firstWins = cycle[(cycle.indexOf(first) + 1) % cycle.size] == second
+                LabAnswer(if (firstWins) "a" else "b", 400)
+            }
+        }
+        val reading = LabAnalysis.preferenceReading(trials, answers, "lift")
+        assertTrue("a cycle must be counted", reading.transitivityViolations > 0)
+        assertTrue(!reading.trustworthy)
+    }
+
+    @Test
+    fun `disagreeing with yourself on a repeated pair shows up as low consistency`() {
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+        var flip = false
+        val answers = trials.map { t ->
+            if (t.kind != "smoothing" || t.isCatch) LabAnswer("unsure", 400)
+            else {
+                flip = !flip
+                LabAnswer(if (flip) "a" else "b", 400)
+            }
+        }
+        val reading = LabAnalysis.preferenceReading(trials, answers, "smoothing")
+        assertTrue(reading.repeatedPairs > 0)
+        assertTrue("alternating answers must not read as consistent", reading.consistency!! < 1.0)
     }
 }

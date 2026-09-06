@@ -192,6 +192,146 @@ object LabAnalysis {
         val flickerVisibleByHold: Map<Long, Double>
     )
 
+    // --- blocks 4-6: the taste blocks ---------------------------------------------------------------
+
+    /**
+     * A paired-comparison block, read back.
+     *
+     * All three taste blocks share this because they share a shape: two arms, randomised into two
+     * intervals, and a vote. What differs is only what an arm *is* — a half-life in ms, a floor
+     * level, the top of a lifted scene — so the arm is carried as an integer in `armFirst`/
+     * `armSecond` and the reading never needs to know which block it is looking at.
+     *
+     * ## Why the three health numbers come before the winner
+     *
+     * A preference block can fail in three ways that all produce a confident-looking ranking:
+     *
+     *  - **[consistency]** — he was asked some pairs twice and did not agree with himself. Below
+     *    [CONSISTENT_ENOUGH] the votes are noise wearing a ranking's clothes.
+     *  - **[transitivityViolations]** — he preferred A to B, B to C and C to A. That is not a bad
+     *    answer; it means the arms are not on one axis, so a *single* number cannot summarise them
+     *    and the design has a confound in it.
+     *  - **[unsureRate]** — most of the trials were "can't tell". A ranking built from the handful
+     *    that were not is a ranking of the trials he could separate, which is a different question
+     *    from the one asked.
+     *
+     * That last one is the failure block 2 walked into: 10 "can't tell" out of 15, which read
+     * naively said one rate was as good as another and actually said none of them were any good.
+     */
+    data class PreferenceReading(
+        val kind: String,
+        val votes: Map<Int, Int>,
+        val comparisons: Int,
+        val unsureCount: Int,
+        val repeatedPairs: Int,
+        val repeatedPairsAgreeing: Int,
+        val transitivityViolations: Int
+    ) {
+        val unsureRate: Double
+            get() = if (comparisons == 0) 0.0 else unsureCount.toDouble() / comparisons
+
+        /** Null when no pair was asked twice, which is itself a reason to distrust the block. */
+        val consistency: Double?
+            get() = if (repeatedPairs == 0) null
+            else repeatedPairsAgreeing.toDouble() / repeatedPairs
+
+        /** The arms in vote order. Only worth reading when [trustworthy] holds. */
+        val ranking: List<Int>
+            get() = votes.entries.sortedByDescending { it.value }.map { it.key }
+
+        val trustworthy: Boolean
+            get() = comparisons > 0 &&
+                unsureRate <= MOSTLY_UNSURE &&
+                transitivityViolations == 0 &&
+                (consistency ?: 0.0) >= CONSISTENT_ENOUGH
+
+        companion object {
+            /** Agreeing with yourself on 3 of 4 repeats is the floor for reading a ranking at all. */
+            const val CONSISTENT_ENOUGH = 0.75
+
+            /** Above this share of "can't tell", the block did not manage to ask its question. */
+            const val MOSTLY_UNSURE = 0.5
+        }
+    }
+
+    /**
+     * Read one [kind] of comparison out of a taste block — "smoothing", "floor", "lift",
+     * "cut_or_ease".
+     *
+     * Catch trials are excluded here and read by [controls] instead: on a taste block a catch is
+     * measuring whether he invents a preference between two identical things, which is a fact about
+     * the *block* rather than a vote for either arm.
+     */
+    fun preferenceReading(
+        trials: List<LabTrial>,
+        answers: List<LabAnswer>,
+        kind: String
+    ): PreferenceReading {
+        val rows = trials.take(answers.size).zip(answers)
+            .filter { it.first.kind == kind && !it.first.isCatch }
+        val votes = mutableMapOf<Int, Int>()
+        // Keyed by the unordered pair, so the same two arms asked in either order collate.
+        val winnerByPair = mutableMapOf<Pair<Int, Int>, MutableList<Int?>>()
+        var unsure = 0
+        for ((trial, answer) in rows) {
+            val first = trial.meta["armFirst"] ?: continue
+            val second = trial.meta["armSecond"] ?: continue
+            votes.putIfAbsent(first, 0)
+            votes.putIfAbsent(second, 0)
+            val winner = when (answer.optionId) {
+                "a" -> first
+                "b" -> second
+                else -> null
+            }
+            if (winner == null) unsure++ else votes[winner] = votes.getValue(winner) + 1
+            val key = if (first <= second) first to second else second to first
+            winnerByPair.getOrPut(key) { mutableListOf() }.add(winner)
+        }
+        val repeated = winnerByPair.filterValues { it.size > 1 }
+        return PreferenceReading(
+            kind = kind,
+            votes = votes.toSortedMap(),
+            comparisons = rows.size,
+            unsureCount = unsure,
+            repeatedPairs = repeated.size,
+            // "Can't tell" both times is agreement: he gave the same answer twice, and that answer
+            // was that there is nothing to choose between them.
+            repeatedPairsAgreeing = repeated.count { (_, ws) -> ws.distinct().size == 1 },
+            transitivityViolations = transitivityViolations(winnerByPair)
+        )
+    }
+
+    /**
+     * Cycles in the preference graph: A over B, B over C, C over A.
+     *
+     * Only pairs with a clear majority winner contribute an edge. A pair he could not separate says
+     * nothing about ordering, and treating it as an edge in either direction would manufacture
+     * violations out of indifference.
+     */
+    private fun transitivityViolations(winnerByPair: Map<Pair<Int, Int>, List<Int?>>): Int {
+        val beats = mutableSetOf<Pair<Int, Int>>()
+        for ((pair, winners) in winnerByPair) {
+            val (lo, hi) = pair
+            val loWins = winners.count { it == lo }
+            val hiWins = winners.count { it == hi }
+            when {
+                loWins > hiWins -> beats.add(lo to hi)
+                hiWins > loWins -> beats.add(hi to lo)
+                else -> Unit
+            }
+        }
+        val arms = beats.flatMap { listOf(it.first, it.second) }.distinct().sorted()
+        var violations = 0
+        for (a in arms) for (b in arms) for (c in arms) {
+            if (a == b || b == c || a == c) continue
+            // Counted once per cycle rather than once per rotation of it.
+            if (a < b && a < c && (a to b) in beats && (b to c) in beats && (c to a) in beats) {
+                violations++
+            }
+        }
+        return violations
+    }
+
     fun ditherReading(trials: List<LabTrial>, answers: List<LabAnswer>): DitherReading {
         val rows = trials.take(answers.size).zip(answers)
         val between = rows.filter { it.first.kind == "between" }

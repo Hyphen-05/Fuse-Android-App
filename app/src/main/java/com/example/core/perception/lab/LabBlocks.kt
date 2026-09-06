@@ -25,8 +25,19 @@ object LabBlocks {
         val purpose: String,
         val estimateMinutes: Int,
         /** True when the block drives firmware brightness itself and must restore it. */
-        val commandsBrightness: Boolean = false
-    )
+        val commandsBrightness: Boolean = false,
+        /**
+         * Why this block can no longer answer its question, if it cannot.
+         *
+         * A retired block keeps its place in [ALL] so the numbering does not shift, and the menu
+         * refuses to run it. Leaving it runnable would cost a sitting to re-collect numbers that are
+         * already known to mean nothing — which is worse than deleting it, because the answers would
+         * look like data.
+         */
+        val retiredBecause: String? = null
+    ) {
+        val isRetired: Boolean get() = retiredBecause != null
+    }
 
     val FLOOR_GRID = BlockSpec(
         id = "floor_grid",
@@ -47,7 +58,13 @@ object LabBlocks {
         id = "rate",
         title = "How fast must frames arrive",
         purpose = "The update rate above which a fade stops looking like separate updates",
-        estimateMinutes = 4
+        estimateMinutes = 4,
+        retiredBecause = "As designed this cannot work. A fade's step count is set by the number " +
+            "of output levels it crosses, which is identical at every update rate, so both " +
+            "intervals contain the same visible steps and the question has no answer. Joe ran it " +
+            "on 2026-09-06 and said it was hard \"because none of them were smooth\" - correctly. " +
+            "Rate's real payoff is latency, which needs a reference event to compare against and " +
+            "so needs a different block."
     )
 
     val DITHER = BlockSpec(
@@ -57,22 +74,45 @@ object LabBlocks {
         estimateMinutes = 5
     )
 
-    /** In run order. */
-    val ALL = listOf(FLOOR_GRID, SCALE, RATE, DITHER)
+    val SMOOTHING = BlockSpec(
+        id = "smoothing",
+        title = "How fast should a change settle",
+        purpose = "Your preferred settling speed when the picture changes - the 2026-09-04 number",
+        estimateMinutes = 6
+    )
+
+    val JUMPS = BlockSpec(
+        id = "jumps",
+        title = "Cut or ease",
+        purpose = "How big a change has to be before an instant cut beats an eased one",
+        estimateMinutes = 5
+    )
+
+    val NEAR_BLACK = BlockSpec(
+        id = "near_black",
+        title = "Dark scenes",
+        purpose = "Where the floor should sit, and whether dim scenes should be lifted to be smooth",
+        estimateMinutes = 6,
+        commandsBrightness = true
+    )
+
+    /**
+     * In run order, and the index here is the block number everything else refers to.
+     *
+     * [RATE] stays in the list at position 2 although it is retired, because the numbering is how
+     * the results files, the docs and Joe all name these. Renumbering to close a gap would silently
+     * rename block 3's data.
+     */
+    val ALL = listOf(FLOOR_GRID, SCALE, RATE, DITHER, SMOOTHING, JUMPS, NEAR_BLACK)
 
     /**
      * The rest of the battery, recorded so the plan survives this session.
      *
-     * Not implemented on purpose. Blocks 4-6 and 7-8 are preference measurements, and a preference
-     * measured without consistency repeats and transitivity checks is noise — the first sitting's
-     * fade block was four trials and its "result" should never have been quoted. They also want
-     * their stimuli spaced in visible steps, which is [SCALE]'s output.
+     * Blocks 7-8 want a running visualiser to modulate, which is a larger piece of wiring than the
+     * steady-level stimuli everything so far has used. Block 9 wants blocks 4-6 answered first: it
+     * scores the model those produce, so there is nothing for it to predict until they have run.
      */
     val PLANNED: List<String> = listOf(
-        "4. Ambiance smoothing - preferred fade time constant, by paired comparison at matched " +
-            "perceptual spacing. The number that was got wrong on 2026-09-04.",
-        "5. Jumps - the step size above which an instant cut beats an eased one.",
-        "6. Near-black - hold a floor or go dark. Taste on FLOOR_TARGET, never asked.",
         "7. Visualiser: where he sits on the measured comfort/coupling line (r=0.87, 27 tunings).",
         "8. Visualiser: brightness-modulated against hue-modulated at matched energy. Tests a " +
             "recorded belief that is steering every preset and has never been measured.",
@@ -427,7 +467,482 @@ object LabBlocks {
         "One holds a single level. The other alternates between two of them. If neither " +
             "flickers, \"can't tell\" is the right answer."
 
+    // --- blocks 4-6: the taste blocks -----------------------------------------------------------------
+
+    /*
+     * What changes for blocks 4-6, and why they needed blocks 0-3 first.
+     *
+     * Blocks 0-3 asked what he *can see*. These three ask what he *wants*, which is a different kind
+     * of question and needs a different kind of trial. Three rules follow, and the first sitting's
+     * four-trial fade block broke all three:
+     *
+     *  - `truth = PREFERENCE`, never scored. There is no right answer. That sitting scored "picked
+     *    the dithered fade" as correct, which reported a taste as an accuracy.
+     *  - Consistency repeats. A pair is asked twice, with the arms re-randomised between intervals.
+     *    If he does not agree with himself the block has measured nothing, and that has to be
+     *    visible in the reading rather than averaged away.
+     *  - Transitivity. Preferring A to B and B to C but C to A means the arms are not on one axis,
+     *    usually because the comparison is confounded by something the design did not mean to vary.
+     *    `LabAnalysis.preferenceReading` counts those violations.
+     *
+     * And the stimuli are spaced in visible steps ([VisibleScale]), not bytes. A byte near the floor
+     * is an enormous change and a byte at 128 is invisible, so "the same jump size" in bytes is not
+     * the same question at two anchors.
+     */
+
+    /**
+     * The tick every taste block renders at, pinned so it is never the variable under test.
+     *
+     * 30Hz. Block 2 established that extra frames buy no smoothness — a fade's step count is set by
+     * the output levels it crosses — so this only has to be fast enough not to be the bottleneck. It
+     * is comfortably inside what the link sustains with pacing bypassed (nothing lost below 89Hz)
+     * and well short of the rate at which over-driving starts costing throughput.
+     */
+    const val TICK_MS = 33L
+
+    /** Long enough that the slowest arm on offer has arrived before the window closes. */
+    const val EASE_WINDOW_MS = 2400L
+
+    /** What ships: `AmbianceOutputInterpolator.HALF_LIFE_MS`, calibrated to the pre-2026-09-04 fade. */
+    const val SHIPPED_HALF_LIFE_MS = 50L
+
+    /**
+     * A move from [from] to [to] covering half the remaining distance every [halfLifeMs].
+     *
+     * This is the shape `AmbianceOutputInterpolator` actually produces — half the distance per 50ms
+     * tick, which is a 50ms half-life — so the arm at 50 is the shipped behaviour and the others are
+     * candidates against it. A half-life of zero is an instant cut, which is what block 5 needs.
+     *
+     * The window is the same length for every half-life on purpose. Ending each arm as soon as it
+     * settled would make duration a second difference between the intervals; a slow arm still
+     * travelling when the window closes is exactly the complaint a slow arm earns.
+     */
+    fun easedMove(
+        from: Int,
+        to: Int,
+        halfLifeMs: Long,
+        windowMs: Long = EASE_WINDOW_MS,
+        tickMs: Long = TICK_MS
+    ): Stimulus {
+        val target = to.coerceIn(0, 255)
+        if (halfLifeMs <= 0L) {
+            return Stimulus("cut_${from}_$to", listOf(StimulusStep(target, windowMs)))
+        }
+        val steps = mutableListOf<StimulusStep>()
+        var t = 0L
+        while (t < windowMs) {
+            val remaining = Math.pow(0.5, t.toDouble() / halfLifeMs)
+            val level = target + (from - target) * remaining
+            steps.add(StimulusStep(Math.round(level).toInt().coerceIn(0, 255), minOf(tickMs, windowMs - t)))
+            t += tickMs
+        }
+        // Pinned, so two half-lives never differ in where they finished as well as in how they got
+        // there — the confound `fadeAt` was written to remove in block 2.
+        steps[steps.size - 1] = StimulusStep(target, steps.last().holdMs)
+        return Stimulus("ease_${from}_${to}_${halfLifeMs}ms", steps)
+    }
+
+    /** Settle, hold, then the move under test: the probe's shape with an eased step in place of a jump. */
+    fun settleThenMove(from: Int, to: Int, halfLifeMs: Long): Stimulus {
+        val move = easedMove(from, to, halfLifeMs)
+        return Stimulus(
+            "settled_" + move.label,
+            listOf(StimulusStep(from, SETTLE_MS), StimulusStep(from, PRE_MS)) + move.steps
+        )
+    }
+
+    /**
+     * A scene, as a walk through several levels rather than one step.
+     *
+     * A single step cannot ask whether a dark scene is pleasant to *watch*, only whether one
+     * transition is. Ambiance's real output wanders, and wandering near the floor is where the
+     * steppiness complaint lives.
+     */
+    fun contentWalk(
+        levels: List<Int>,
+        context: LabContext,
+        halfLifeMs: Long = SHIPPED_HALF_LIFE_MS
+    ): Stimulus {
+        val bytes = levels.map { if (it <= 0) 0 else context.byteForLevel(it) }
+        val steps = mutableListOf(StimulusStep(bytes.first(), SETTLE_MS))
+        for ((from, to) in bytes.zipWithNext()) {
+            steps.addAll(easedMove(from, to, halfLifeMs, WALK_LEG_MS).steps)
+        }
+        return Stimulus("walk_${levels.first()}_${levels.last()}_${levels.size}", steps)
+    }
+
+    const val WALK_LEG_MS = 900L
+
+    /** The highest emitted level a brightness setting can reach: `ceil(255 x B / 100)`. */
+    fun maxLevel(context: LabContext): Int = context.levelForByte(255)
+
+    // --- block 4: settling speed ----------------------------------------------------------------------
+
+    /**
+     * Which settling speed he prefers when the picture changes, by paired comparison.
+     *
+     * ## This is the number that was got wrong on 2026-09-04
+     *
+     * The ease was retimed to a 150ms constant when the shipped behaviour was a 72ms one, making
+     * every fade about 1.8x slower, and it went out on a simulation's say-so. It was reverted and
+     * the half-life is now pinned by a test at the shipped value — but **nobody has ever asked
+     * whether the shipped value is the one he wants**. The revert restored a number; it did not
+     * justify one.
+     *
+     * ## Two anchors, matched in visible steps
+     *
+     * A dark change and a brighter one, both [JUMP_VISIBLE_STEPS] visible steps so they are the same
+     * size *to look at*. They are asked separately because the answer may well differ: block 1 says
+     * the dark one crosses about one output level per visible step with nothing in between, while
+     * the brighter one has several levels inside each step. One answer at both anchors is one
+     * number for the app; two answers means the app needs two, and this is the only way that would
+     * ever be found out.
+     */
+    fun smoothingTrials(context: LabContext, seed: Long): List<LabTrial> {
+        val random = Random(seed)
+        val scale = VisibleScale.MEASURED_2026_09_06
+        val main = mutableListOf<LabTrial>()
+        val tail = mutableListOf<LabTrial>()
+        for (anchor in smoothingAnchors(context, scale)) {
+            val toLevel = scale.levelAfterVisibleSteps(anchor, JUMP_VISIBLE_STEPS, maxLevel(context))
+            val from = context.byteForLevel(anchor)
+            val to = context.byteForLevel(toLevel)
+            val meta = mapOf(
+                "anchorLevel" to anchor,
+                "toLevel" to toLevel,
+                "visibleSteps" to Math.round(scale.stepsBetween(anchor, toLevel)).toInt()
+            )
+            val pairs = allPairs(HALF_LIVES_MS)
+            for ((a, b) in pairs) {
+                main.add(
+                    preferencePair(
+                        SMOOTHING.id, "smoothing",
+                        settleThenMove(from, to, a), a,
+                        settleThenMove(from, to, b), b,
+                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, meta
+                    )
+                )
+            }
+            // The consistency repeats sit at the end of the block on purpose. Asked back to back
+            // with the original they would measure memory of the last answer rather than agreement.
+            for ((a, b) in pairs.shuffled(random).take(CONSISTENCY_REPEATS)) {
+                tail.add(
+                    preferencePair(
+                        SMOOTHING.id, "smoothing",
+                        settleThenMove(from, to, a), a,
+                        settleThenMove(from, to, b), b,
+                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, meta + ("repeat" to 1)
+                    )
+                )
+            }
+            main.add(
+                catchPair(
+                    SMOOTHING.id, settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
+                    SMOOTHING_QUESTION, SMOOTHING_HINT, meta
+                )
+            )
+        }
+        return main.shuffled(random) + tail.shuffled(random)
+    }
+
+    /** A dark anchor just above the floor, and the brightest one a full-sized jump still fits under. */
+    fun smoothingAnchors(context: LabContext, scale: VisibleScale): List<Int> {
+        val dark = context.levelForByte(context.floorClearlyOn).coerceAtLeast(1)
+        val ceiling = maxLevel(context)
+        var bright = ceiling
+        while (bright > dark && scale.stepsBetween(bright, ceiling) < JUMP_VISIBLE_STEPS) bright -= 1
+        // Two anchors only a few levels apart are the same question asked twice, and cost a third of
+        // the sitting to find that out.
+        return if (bright - dark < MIN_ANCHOR_SEPARATION) listOf(dark) else listOf(dark, bright)
+    }
+
+    /** Half-lives in ms. 50 is what ships; 300 is roughly what 2026-09-04 shipped by mistake. */
+    val HALF_LIVES_MS = listOf(25L, 50L, 120L, 300L)
+
+    const val JUMP_VISIBLE_STEPS = 8.0
+    const val CONSISTENCY_REPEATS = 3
+    const val MIN_ANCHOR_SEPARATION = 4
+
+    private const val SMOOTHING_QUESTION = "Which change felt better?"
+    private const val SMOOTHING_HINT =
+        "The same change, arriving at two different speeds. There is no right answer here - pick " +
+            "the one you would rather have on the wall, and say \"can't tell\" if they match."
+
+    // --- block 5: cut or ease --------------------------------------------------------------------------
+
+    /**
+     * How big a change has to be before an instant cut beats an eased one.
+     *
+     * ## Why this is not obvious
+     *
+     * Easing exists to hide a jump. But block 1 says that below level 48 **every output level a fade
+     * passes through is individually visible**, so an ease down there is not a smooth transition —
+     * it is the same staircase taken more slowly. It is entirely possible that a cut is simply
+     * better in the dark, and the app currently eases everything.
+     *
+     * Sizes climb by ratio in visible steps, and the top rung doubles as the attention check: a
+     * 32-step change is unmissable, so "can't tell" there is about attention rather than taste.
+     */
+    fun jumpTrials(context: LabContext, seed: Long): List<LabTrial> {
+        val random = Random(seed)
+        val scale = VisibleScale.MEASURED_2026_09_06
+        val out = mutableListOf<LabTrial>()
+        val fromLevel = context.levelForByte(context.floorClearlyOn).coerceAtLeast(1)
+        val from = context.byteForLevel(fromLevel)
+        val ceiling = maxLevel(context)
+        val sizes = JUMP_LADDER_STEPS
+            .map { it to scale.levelAfterVisibleSteps(fromLevel, it, ceiling) }
+            // Two rungs that both ran out of range land on the same level and would be one trial
+            // asked twice under two different labels.
+            .distinctBy { it.second }
+            .filter { it.second > fromLevel }
+        for ((steps, toLevel) in sizes) {
+            val to = context.byteForLevel(toLevel)
+            val meta = mapOf(
+                "anchorLevel" to fromLevel,
+                "toLevel" to toLevel,
+                "visibleSteps" to Math.round(scale.stepsBetween(fromLevel, toLevel)).toInt(),
+                "requestedSteps" to Math.round(steps).toInt()
+            )
+            repeat(JUMP_REPEATS) {
+                out.add(
+                    preferencePair(
+                        JUMPS.id, "cut_or_ease",
+                        settleThenMove(from, to, 0L), 0L,
+                        settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
+                        JUMP_QUESTION, JUMP_HINT, random, meta
+                    )
+                )
+            }
+        }
+        sizes.take(CATCHES_PER_BLOCK).forEach { (_, toLevel) ->
+            val to = context.byteForLevel(toLevel)
+            out.add(
+                catchPair(
+                    JUMPS.id, settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
+                    JUMP_QUESTION, JUMP_HINT, mapOf("anchorLevel" to fromLevel, "toLevel" to toLevel)
+                )
+            )
+        }
+        return out.shuffled(random)
+    }
+
+    val JUMP_LADDER_STEPS = listOf(2.0, 4.0, 8.0, 16.0, 32.0)
+    const val JUMP_REPEATS = 3
+    const val CATCHES_PER_BLOCK = 3
+    private const val JUMP_QUESTION = "Which suited the change better?"
+    private const val JUMP_HINT =
+        "One arrives all at once, the other slides into place. Same start, same finish. Taste only."
+
+    // --- block 6: dark scenes ---------------------------------------------------------------------------
+
+    /**
+     * Two questions about the bottom of the range. Both are taste, and neither has ever been asked.
+     *
+     * ## The floor
+     *
+     * `AmbianceProcessor` lifts dim content to a floor of byte 14 and nobody has been asked whether
+     * that is right. Below emitted level ~5 the strip has a handful of enormous steps and then
+     * darkness, so a floor is a real choice: hold a dim glow that cannot follow the content, or let
+     * it go out.
+     *
+     * ## The lift, which is the live question
+     *
+     * Blocks 0-3 concluded that a smooth dark fade is not achievable on this hardware — the steps
+     * are visible, there is nothing between them, and nothing can be put between them. **The one
+     * remaining route to a smooth dark scene is to stop making it dark**: map dim content up into
+     * the region above level ~64, where several output levels fit inside one visible step.
+     *
+     * That is a trade, not a fix, and it has to be put as one. He rejected a superficially similar
+     * proposal on 2026-09-04 — a brightness correction for the strip curve — from the wall, on the
+     * grounds that dark scenes do not read as too bright. **This is not that proposal.** That one
+     * was arithmetic telling him what his LEDs looked like; this one shows him both and asks which
+     * he wants. The cost is exactly the thing it buys, which is why only he can answer it.
+     *
+     * ## Why the whole block runs at 100% firmware brightness
+     *
+     * The smooth region starts around level 64, and at his 25% that is the *top* of the range — the
+     * lifted arm could not be played at all. At 100% the dim arm is unaffected: emitted level 8 is
+     * the same light however it was commanded, so the faithful arm is exactly what he normally sees,
+     * and only the lifted arm becomes reachable.
+     */
+    fun nearBlackTrials(seed: Long): List<LabTrial> {
+        val random = Random(seed)
+        val context = FULL_BRIGHTNESS_CONTEXT
+        val main = mutableListOf<LabTrial>()
+        val tail = mutableListOf<LabTrial>()
+
+        val floorPairs = allPairs(FLOOR_LEVELS.map { it.toLong() })
+        for ((a, b) in floorPairs) {
+            main.add(
+                preferencePair(
+                    NEAR_BLACK.id, "floor",
+                    fadeToFloor(a.toInt(), context), a,
+                    fadeToFloor(b.toInt(), context), b,
+                    FLOOR_QUESTION, FLOOR_HINT, random, emptyMap()
+                )
+            )
+        }
+        for ((a, b) in floorPairs.shuffled(random).take(CONSISTENCY_REPEATS)) {
+            tail.add(
+                preferencePair(
+                    NEAR_BLACK.id, "floor",
+                    fadeToFloor(a.toInt(), context), a,
+                    fadeToFloor(b.toInt(), context), b,
+                    FLOOR_QUESTION, FLOOR_HINT, random, mapOf("repeat" to 1)
+                )
+            )
+        }
+
+        val liftPairs = allPairs(LIFT_TOPS.map { it.toLong() })
+        for ((a, b) in liftPairs) {
+            repeat(LIFT_REPEATS) {
+                main.add(
+                    preferencePair(
+                        NEAR_BLACK.id, "lift",
+                        dimWalkTopping(a.toInt(), context), a,
+                        dimWalkTopping(b.toInt(), context), b,
+                        LIFT_QUESTION, LIFT_HINT, random, emptyMap()
+                    )
+                )
+            }
+        }
+
+        main.add(
+            catchPair(
+                NEAR_BLACK.id, fadeToFloor(FLOOR_LEVELS[1], context), FLOOR_LEVELS[1].toLong(),
+                FLOOR_QUESTION, FLOOR_HINT, emptyMap()
+            )
+        )
+        LIFT_TOPS.take(2).forEach { top ->
+            main.add(
+                catchPair(
+                    NEAR_BLACK.id, dimWalkTopping(top, context), top.toLong(),
+                    LIFT_QUESTION, LIFT_HINT, emptyMap()
+                )
+            )
+        }
+        return main.shuffled(random) + tail.shuffled(random)
+    }
+
+    /** A scene going out: down from a modest level, stopping at [floorLevel]. Zero goes all the way. */
+    fun fadeToFloor(floorLevel: Int, context: LabContext): Stimulus =
+        contentWalk(listOf(FLOOR_FADE_FROM_LEVEL, floorLevel.coerceAtLeast(0)), context)
+
+    /**
+     * The same dim scene, scaled so its brightest moment lands on [topLevel].
+     *
+     * The *shape* is held and only the placement moves, so the two arms differ in where they sit and
+     * not in what they do. Scaling happens in emitted levels, which is where light lives — scaling
+     * in bytes would change the shape as well as the height.
+     */
+    fun dimWalkTopping(topLevel: Int, context: LabContext): Stimulus {
+        val span = DIM_WALK_SHAPE.max().toDouble()
+        val levels = DIM_WALK_SHAPE.map {
+            Math.round(it / span * topLevel).toInt().coerceAtLeast(1)
+        }
+        return Stimulus("lift_$topLevel", contentWalk(levels, context).steps)
+    }
+
+    /** Floors to compare, in emitted levels. 0 lets it go out; 10 is roughly the shipped byte 14. */
+    val FLOOR_LEVELS = listOf(0, 2, 5, 10)
+    const val FLOOR_FADE_FROM_LEVEL = 24
+
+    /**
+     * Where the dim scene's brightest moment sits: as-is, halfway up, and inside the smooth region.
+     *
+     * 20 is roughly what dim content actually produces, 44 is a compromise, and 96 is above the
+     * level-64 mark where several output levels start fitting inside one visible step.
+     */
+    val LIFT_TOPS = listOf(20, 44, 96)
+    const val LIFT_REPEATS = 2
+
+    /** A dim scene's shape, in arbitrary units, scaled to whichever top level an arm is testing. */
+    val DIM_WALK_SHAPE = listOf(4, 11, 7, 20, 9, 14, 5)
+
+    private const val FLOOR_QUESTION = "Which ending looked right?"
+    private const val FLOOR_HINT =
+        "A scene fading out. One may stop at a dim glow, the other may go dark. Taste only - " +
+            "there is no correct ending."
+    private const val LIFT_QUESTION = "Which would you rather have on the wall?"
+    private const val LIFT_HINT =
+        "The same dim scene, played at two brightnesses. The brighter one moves in " +
+            "smaller-looking steps; the dimmer one is truer to the picture. A trade, not a test."
+
     // --- construction helpers ------------------------------------------------------------------------
+
+    /** Every unordered pair, in a stable order so a seed reproduces a block exactly. */
+    fun <T> allPairs(items: List<T>): List<Pair<T, T>> {
+        val out = mutableListOf<Pair<T, T>>()
+        for (i in items.indices) for (j in i + 1 until items.size) out.add(items[i] to items[j])
+        return out
+    }
+
+    /**
+     * One taste question: two arms, in a randomised order, recorded by which arm was in which
+     * interval rather than by which won.
+     *
+     * `armFirst` and `armSecond` are what make the answer readable at all. The options are "a" and
+     * "b", which say nothing about what was being compared once the order has been shuffled, so the
+     * arm identities have to travel with the trial.
+     */
+    private fun preferencePair(
+        block: String,
+        kind: String,
+        a: Stimulus,
+        armA: Long,
+        b: Stimulus,
+        armB: Long,
+        question: String,
+        hint: String,
+        random: Random,
+        meta: Map<String, Int>
+    ): LabTrial {
+        val aIsFirst = random.nextBoolean()
+        return LabTrial(
+            block = block,
+            kind = kind,
+            intervals = if (aIsFirst) listOf(a, b) else listOf(b, a),
+            question = question,
+            hint = hint,
+            options = LabOptions.A_B_UNSURE,
+            truth = LabTruth.PREFERENCE,
+            correctOptionId = null,
+            meta = meta + mapOf(
+                "armFirst" to (if (aIsFirst) armA else armB).toInt(),
+                "armSecond" to (if (aIsFirst) armB else armA).toInt()
+            ),
+            brightnessPercent = null
+        )
+    }
+
+    /**
+     * The same arm in both intervals.
+     *
+     * On a taste block a catch is not measuring whether he can *see* a difference — it is measuring
+     * whether he will invent a preference between two identical things. A high rate here means the
+     * block's votes are habit and not taste.
+     */
+    private fun catchPair(
+        block: String,
+        stimulus: Stimulus,
+        arm: Long,
+        question: String,
+        hint: String,
+        meta: Map<String, Int>
+    ): LabTrial = LabTrial(
+        block = block,
+        kind = LabTrial.KIND_CATCH,
+        intervals = listOf(stimulus, stimulus),
+        question = question,
+        hint = hint,
+        options = LabOptions.A_B_UNSURE,
+        truth = LabTruth.KNOWN,
+        correctOptionId = "unsure",
+        meta = meta + mapOf("armFirst" to arm.toInt(), "armSecond" to arm.toInt()),
+        brightnessPercent = null
+    )
+
 
     private fun changedTrial(
         block: String,
@@ -485,12 +1000,21 @@ object LabBlocks {
         brightnessPercent = if (context.brightnessPercent == 100) 100 else null
     )
 
-    /** Builds a block's trials. [context] is ignored by [SCALE], which sets its own brightness. */
+    /**
+     * Builds a block's trials.
+     *
+     * [context] is ignored by [SCALE] and [NEAR_BLACK], which both run at 100% firmware brightness
+     * and use [FULL_BRIGHTNESS_CONTEXT] instead — [SCALE] so the whole 255-rung ladder is
+     * addressable, [NEAR_BLACK] so its lifted arm is reachable at all.
+     */
     fun trialsFor(spec: BlockSpec, context: LabContext, seed: Long): List<LabTrial> = when (spec.id) {
         FLOOR_GRID.id -> floorGridTrials(context, seed)
         SCALE.id -> scaleTrials(seed)
         RATE.id -> rateTrials(context, seed)
         DITHER.id -> ditherTrials(context, seed)
+        SMOOTHING.id -> smoothingTrials(context, seed)
+        JUMPS.id -> jumpTrials(context, seed)
+        NEAR_BLACK.id -> nearBlackTrials(seed)
         else -> emptyList()
     }
 }

@@ -168,7 +168,7 @@ private fun ColumnScope.BlockMenu(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     val note = buildString {
-                        append("~${spec.estimateMinutes} min")
+                        if (spec.isRetired) append("Retired") else append("~${spec.estimateMinutes} min")
                         if (spec.commandsBrightness) append(" · turns brightness to 100% and puts it back")
                         if (done) append(" · already run")
                         if (partial > 0) append(" · $partial answers saved")
@@ -178,13 +178,24 @@ private fun ColumnScope.BlockMenu(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    val interaction = remember { MutableInteractionSource() }
-                    Button(
-                        onClick = { onRun(spec) },
-                        modifier = Modifier.fillMaxWidth().joyfulPress(interaction),
-                        interactionSource = interaction,
-                        shape = CircleShape
-                    ) { Text(if (partial > 0) "Carry on" else if (done) "Run again" else "Run") }
+                    // A retired block is shown and not run. Hiding it would renumber the ones after
+                    // it, and running it would spend a sitting collecting answers already known to
+                    // mean nothing - which is worse than no answers, because they look like data.
+                    spec.retiredBecause?.let { why ->
+                        Text(
+                            why,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } ?: run {
+                        val interaction = remember { MutableInteractionSource() }
+                        Button(
+                            onClick = { onRun(spec) },
+                            modifier = Modifier.fillMaxWidth().joyfulPress(interaction),
+                            interactionSource = interaction,
+                            shape = CircleShape
+                        ) { Text(if (partial > 0) "Carry on" else if (done) "Run again" else "Run") }
+                    }
                 }
             }
         }
