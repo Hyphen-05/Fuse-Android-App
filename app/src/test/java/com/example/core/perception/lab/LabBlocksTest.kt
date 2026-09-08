@@ -432,8 +432,12 @@ class LabBlocksTest {
     private fun pairKey(t: LabTrial): String {
         val a = t.meta["armFirst"] ?: 0
         val b = t.meta["armSecond"] ?: 0
+        // The scope is part of the identity, and `anchorLevel` alone is not the scope: every rung
+        // of the jumps ladder starts from the floor, so keying on it alone collates five different
+        // questions into one. `LabAnalysis.PairKey` keys on both for the same reason.
         val anchor = t.meta["anchorLevel"] ?: 0
-        return "${t.kind}:$anchor:${minOf(a, b)}-${maxOf(a, b)}"
+        val to = t.meta["toLevel"] ?: 0
+        return "${t.kind}:$anchor->$to:${minOf(a, b)}-${maxOf(a, b)}"
     }
 
     @Test
@@ -683,6 +687,56 @@ class LabBlocksTest {
         assertTrue("consistency counts it as a disagreement", reading.consistency!! < 1.0)
         assertEquals("but it is not a hard flip", 0, reading.hardFlips)
         assertEquals(0.0, reading.hardFlipRate!!, 0.0001)
+    }
+
+    @Test
+    fun `every consistency repeat is the same comparison with the intervals swapped`() {
+        // Re-randomising a repeat leaves about half of them in the original order, which controls
+        // for nothing. Mirroring makes each repeat separate a preference from an order effect.
+        for (spec in tasteBlocks()) {
+            val trials = LabBlocks.trialsFor(spec, joe, 4L).filter { !it.isCatch }
+            val byPair = trials.groupBy { pairKey(it) }.filterValues { it.size > 1 }
+            assertTrue("${spec.id} repeats no pair", byPair.isNotEmpty())
+            for ((key, group) in byPair) {
+                val orders = group.map { it.meta.getValue("armFirst") }.distinct()
+                assertTrue(
+                    "${spec.id}: $key was only ever asked one way round",
+                    orders.size > 1
+                )
+                // Mirroring must swap the intervals and nothing else.
+                val a = group.first()
+                val b = group.first { it.meta.getValue("armFirst") != a.meta.getValue("armFirst") }
+                assertEquals(a.intervals.map { it.steps }, b.intervals.reversed().map { it.steps })
+            }
+        }
+    }
+
+    @Test
+    fun `an answer that follows the interval is told apart from one that follows the stimulus`() {
+        // Six of six decisive answers on catch trials across 2026-09-06/07 named the second
+        // interval, while comparisons with a real difference tracked the arm across a swap six
+        // times out of seven. He breaks ties by saying "the second one" rather than "can't tell",
+        // and a catch trial cannot tell that apart from inattention. The order flip can.
+        val trials = LabBlocks.trialsFor(LabBlocks.SMOOTHING, joe, 4L)
+
+        val alwaysSecond = trials.map { LabAnswer("b", 400) }
+        val bias = LabAnalysis.preferenceReading(trials, alwaysSecond, "smoothing")
+        assertTrue("there must be swapped pairs to read", bias.orderFlipPairs > 0)
+        assertEquals("picking the second every time is never about the arm", 0, bias.orderFlipSameArm)
+        assertEquals(bias.orderFlipPairs, bias.orderFlipSameLetter)
+        assertEquals(0.0, bias.orderRobustness!!, 0.0001)
+        assertTrue("a pure order effect must not read as trustworthy", !bias.trustworthy)
+
+        val byArm = trials.map { t ->
+            if (t.isCatch) LabAnswer("unsure", 400)
+            else LabAnswer(
+                if (t.meta.getValue("armFirst") < t.meta.getValue("armSecond")) "a" else "b", 400
+            )
+        }
+        val real = LabAnalysis.preferenceReading(trials, byArm, "smoothing")
+        assertEquals(1.0, real.orderRobustness!!, 0.0001)
+        assertEquals(0, real.orderFlipSameLetter)
+        assertTrue(real.trustworthy)
     }
 
     @Test

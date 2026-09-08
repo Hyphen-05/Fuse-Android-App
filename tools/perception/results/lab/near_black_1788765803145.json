@@ -1,0 +1,342 @@
+{
+  "kind": "lab_block",
+  "block": "near_black",
+  "generatedAtMs": 1788765803144,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 3,
+  "catchFalsePositives": 2,
+  "anchorTrials": 0,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 44,
+        "armSecond": 96
+      },
+      "answer": "unsure",
+      "responseMs": 1158
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 10,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 2442
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 5,
+        "armSecond": 10
+      },
+      "answer": "a",
+      "responseMs": 561
+    },
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 96,
+        "armSecond": 20
+      },
+      "answer": "b",
+      "responseMs": 1973
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 10,
+        "armSecond": 2
+      },
+      "answer": "a",
+      "responseMs": 2166
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 5,
+        "armSecond": 2
+      },
+      "answer": "a",
+      "responseMs": 1218
+    },
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 96,
+        "armSecond": 44
+      },
+      "answer": "a",
+      "responseMs": 814
+    },
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 20,
+        "armSecond": 44
+      },
+      "answer": "unsure",
+      "responseMs": 1206
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 5,
+        "armSecond": 0
+      },
+      "answer": "b",
+      "responseMs": 935
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 2,
+        "armSecond": 0
+      },
+      "answer": "b",
+      "responseMs": 893
+    },
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 44,
+        "armSecond": 20
+      },
+      "answer": "unsure",
+      "responseMs": 1054
+    },
+    {
+      "kind": "catch",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 2,
+        "armSecond": 2
+      },
+      "answer": "b",
+      "responseMs": 810
+    },
+    {
+      "kind": "catch",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 44,
+        "armSecond": 44
+      },
+      "answer": "unsure",
+      "responseMs": 633
+    },
+    {
+      "kind": "catch",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 20,
+        "armSecond": 20
+      },
+      "answer": "b",
+      "responseMs": 983
+    },
+    {
+      "kind": "lift",
+      "question": "Which would you rather have on the wall?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "armFirst": 96,
+        "armSecond": 20
+      },
+      "answer": "a",
+      "responseMs": 1093
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "repeat": 1,
+        "armFirst": 0,
+        "armSecond": 2
+      },
+      "answer": "a",
+      "responseMs": 1113
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "repeat": 1,
+        "armFirst": 5,
+        "armSecond": 2
+      },
+      "answer": "b",
+      "responseMs": 913
+    },
+    {
+      "kind": "floor",
+      "question": "Which ending looked right?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": 100,
+      "meta": {
+        "repeat": 1,
+        "armFirst": 10,
+        "armSecond": 5
+      },
+      "answer": "unsure",
+      "responseMs": 664
+    }
+  ]
+}

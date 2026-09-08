@@ -226,7 +226,10 @@ object LabAnalysis {
         val repeatedPairs: Int,
         val repeatedPairsAgreeing: Int,
         val transitivityViolations: Int,
-        val hardFlips: Int
+        val hardFlips: Int,
+        val orderFlipPairs: Int,
+        val orderFlipSameArm: Int,
+        val orderFlipSameLetter: Int
     ) {
         val unsureRate: Double
             get() = if (comparisons == 0) 0.0 else unsureCount.toDouble() / comparisons
@@ -256,11 +259,28 @@ object LabAnalysis {
         val ranking: List<Int>
             get() = votes.entries.sortedByDescending { it.value }.map { it.key }
 
+        /**
+         * Of the pairs asked in both orders and answered decisively both times, the share where he
+         * named the **same arm**.
+         *
+         * This is the block's real credibility number, and it is a better instrument than the catch
+         * trials for a taste question. A catch shows two identical intervals, so a decisive answer
+         * there could be inattention *or* a habit of breaking ties by picking one of them — and
+         * those call for opposite responses. The order flip separates them: an answer that survives
+         * a swap is about the stimulus, and one that follows the interval position is not.
+         *
+         * Null when no pair was asked both ways with two decisive answers.
+         */
+        val orderRobustness: Double?
+            get() = if (orderFlipPairs == 0) null
+            else orderFlipSameArm.toDouble() / orderFlipPairs
+
         val trustworthy: Boolean
             get() = comparisons > 0 &&
                 unsureRate <= MOSTLY_UNSURE &&
                 transitivityViolations == 0 &&
-                (hardFlipRate ?: 1.0) <= MAX_HARD_FLIPS
+                (hardFlipRate ?: 1.0) <= MAX_HARD_FLIPS &&
+                (orderRobustness ?: 1.0) >= ORDER_ROBUST_ENOUGH
 
         companion object {
             /** Agreeing with yourself on 3 of 4 repeats is the floor for reading a ranking at all. */
@@ -276,19 +296,19 @@ object LabAnalysis {
              */
             const val MAX_HARD_FLIPS = 0.25
 
+            /**
+             * How often a decisive answer must survive swapping the intervals.
+             *
+             * Measured on 2026-09-06/07 at 6 of 7, so this bar is where his real answers already
+             * sit rather than an aspiration.
+             */
+            const val ORDER_ROBUST_ENOUGH = 0.75
+
             /** Above this share of "can't tell", the block did not manage to ask its question. */
             const val MOSTLY_UNSURE = 0.5
         }
     }
 
-    /**
-     * Read one [kind] of comparison out of a taste block — "smoothing", "floor", "lift",
-     * "cut_or_ease".
-     *
-     * Catch trials are excluded here and read by [controls] instead: on a taste block a catch is
-     * measuring whether he invents a preference between two identical things, which is a fact about
-     * the *block* rather than a vote for either arm.
-     */
     /**
      * What makes two trials the same question: the arms, and the scope they were asked in.
      */
@@ -313,6 +333,15 @@ object LabAnalysis {
         .sorted()
         .associateWith { preferenceReading(trials, answers, kind, metaKey to it) }
 
+    /**
+     * Read one [kind] of comparison out of a taste block — "smoothing", "floor", "lift",
+     * "cut_or_ease".
+     *
+     * Catch trials are excluded here and read by [controls] instead: on a taste block a catch is
+     * measuring whether he invents a preference between two identical things, which is a fact about
+     * the *block* rather than a vote for either arm — and one that [PreferenceReading.orderRobustness]
+     * reads better.
+     */
     fun preferenceReading(
         trials: List<LabTrial>,
         answers: List<LabAnswer>,
@@ -323,8 +352,10 @@ object LabAnalysis {
             .filter { it.first.kind == kind && !it.first.isCatch }
             .filter { only == null || it.first.meta[only.first] == only.second }
         val votes = mutableMapOf<Int, Int>()
-        // Keyed by the unordered pair, so the same two arms asked in either order collate.
-        val winnerByPair = mutableMapOf<PairKey, MutableList<Int?>>()
+        // Keyed by the unordered pair, so the same two arms asked in either order collate. The
+        // presented order is kept alongside the winner, because telling a preference from an order
+        // effect needs both.
+        val byPair = mutableMapOf<PairKey, MutableList<Shown>>()
         var unsure = 0
         for ((trial, answer) in rows) {
             val first = trial.meta["armFirst"] ?: continue
@@ -343,9 +374,25 @@ object LabAnalysis {
             // two anchors in order to find.
             val arms = if (first <= second) first to second else second to first
             val key = PairKey(trial.meta["anchorLevel"], trial.meta["toLevel"], arms)
-            winnerByPair.getOrPut(key) { mutableListOf() }.add(winner)
+            byPair.getOrPut(key) { mutableListOf() }
+                .add(Shown(first = first, second = second, winner = winner, option = answer.optionId))
         }
-        val repeated = winnerByPair.filterValues { it.size > 1 }
+        val repeated = byPair.filterValues { it.size > 1 }
+        var flipPairs = 0
+        var flipSameArm = 0
+        var flipSameLetter = 0
+        for (shown in repeated.values) {
+            for (i in shown.indices) for (j in i + 1 until shown.size) {
+                val x = shown[i]
+                val y = shown[j]
+                // Only a genuine swap, answered decisively both times, can separate a preference
+                // from an order effect. Same-order repeats and unsure answers say nothing here.
+                if (x.first == y.first) continue
+                if (x.winner == null || y.winner == null) continue
+                flipPairs++
+                if (x.winner == y.winner) flipSameArm++ else if (x.option == y.option) flipSameLetter++
+            }
+        }
         return PreferenceReading(
             kind = kind,
             votes = votes.toSortedMap(),
@@ -354,11 +401,17 @@ object LabAnalysis {
             repeatedPairs = repeated.size,
             // "Can't tell" both times is agreement: he gave the same answer twice, and that answer
             // was that there is nothing to choose between them.
-            repeatedPairsAgreeing = repeated.count { (_, ws) -> ws.distinct().size == 1 },
-            transitivityViolations = transitivityViolations(winnerByPair),
-            hardFlips = repeated.count { (_, ws) -> ws.filterNotNull().distinct().size > 1 }
+            repeatedPairsAgreeing = repeated.count { (_, ws) -> ws.map { it.winner }.distinct().size == 1 },
+            transitivityViolations = transitivityViolations(byPair),
+            hardFlips = repeated.count { (_, ws) -> ws.mapNotNull { it.winner }.distinct().size > 1 },
+            orderFlipPairs = flipPairs,
+            orderFlipSameArm = flipSameArm,
+            orderFlipSameLetter = flipSameLetter
         )
     }
+
+    /** One presentation of a pair: which arm went first, and what he said. */
+    private data class Shown(val first: Int, val second: Int, val winner: Int?, val option: String)
 
     /**
      * Cycles in the preference graph: A over B, B over C, C over A.
@@ -367,12 +420,12 @@ object LabAnalysis {
      * nothing about ordering, and treating it as an edge in either direction would manufacture
      * violations out of indifference.
      */
-    private fun transitivityViolations(winnerByPair: Map<PairKey, List<Int?>>): Int {
+    private fun transitivityViolations(byPair: Map<PairKey, List<Shown>>): Int {
         val beats = mutableSetOf<Pair<Int, Int>>()
-        for ((pair, winners) in winnerByPair) {
+        for ((pair, shown) in byPair) {
             val (lo, hi) = pair.arms
-            val loWins = winners.count { it == lo }
-            val hiWins = winners.count { it == hi }
+            val loWins = shown.count { it.winner == lo }
+            val hiWins = shown.count { it.winner == hi }
             when {
                 loWins > hiWins -> beats.add(lo to hi)
                 hiWins > loWins -> beats.add(hi to lo)

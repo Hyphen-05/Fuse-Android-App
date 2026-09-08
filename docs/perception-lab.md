@@ -50,6 +50,13 @@ Every one of these was paid for by a failure.
   its index.
 - **The seed is minted once per part-finished block and kept.** Re-minting on resume would
   regenerate a different trial list and silently attach existing answers to trials he never saw.
+- **Mirrored repeats, on every taste block.** A consistency repeat is the same comparison with the
+  intervals swapped, never a fresh randomisation — half of those would land in the original order
+  and control for nothing. The swap makes each repeat a three-way diagnostic: same arm is a
+  preference, same interval letter is an order effect, neither is inconsistency. **On a taste block
+  this is a better instrument than the catch trial**, because a catch cannot tell inattention from a
+  habit of breaking ties by position, and Joe has that habit — 6 of 6 decisive catch answers named
+  the second interval while real comparisons tracked the arm 6 of 7 times across a swap.
 - **Catch trials, and anchor trials.** Catches carry no difference (the honest answer is the null
   one) and give the guessing rate. Anchors carry an unmissable difference and give the attention
   rate. Both are needed because "saw nothing all run" and "stopped watching" are otherwise the same
@@ -76,7 +83,7 @@ Every one of these was paid for by a failure.
 
 ## Four mistakes that are now tests, not comments
 
-`LabBlocksTest` (45 tests). Each of these shipped once and cost a sitting or a wrong conclusion:
+`LabBlocksTest` (47 tests). Each of these shipped once and cost a sitting or a wrong conclusion:
 
 - **Nothing is commanded below the measured floor.**
 - **Every dither pair straddles a grid boundary.** The first attempt compared bytes 5 and 6, which
@@ -116,8 +123,9 @@ Lab > Test battery**.
 | 7-9 | — | two visualiser taste blocks, then validation | no |
 
 **Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
-[taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered, block 5 suggestive but its controls
-failed, block 6 spoiled by a brightness bug and needing a re-run. They are preference measurements and
+[taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered (the shipped 50ms ease is right, and
+only in the dark does speed matter), block 5 suggestive, block 6 spoiled by a brightness bug, fixed
+and re-run on 2026-09-07 with the answer that **the lift loses**. They are preference measurements and
 differ from blocks 0-3 in three ways that are all enforced by `LabBlocksTest`:
 
 - **`truth = PREFERENCE`, never scored.** The first sitting's fade block scored "picked the dithered

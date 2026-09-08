@@ -626,15 +626,11 @@ object LabBlocks {
             }
             // The consistency repeats sit at the end of the block on purpose. Asked back to back
             // with the original they would measure memory of the last answer rather than agreement.
-            for ((a, b) in pairs.shuffled(random).take(CONSISTENCY_REPEATS)) {
-                tail.add(
-                    preferencePair(
-                        SMOOTHING.id, "smoothing",
-                        settleThenMove(from, to, a), a,
-                        settleThenMove(from, to, b), b,
-                        SMOOTHING_QUESTION, SMOOTHING_HINT, random, context, meta + ("repeat" to 1)
-                    )
-                )
+            // They mirror the original's interval order rather than re-randomising it - see
+            // [mirrored] for why that matters more than it sounds.
+            val originals = main.filter { it.block == SMOOTHING.id && it.kind == "smoothing" }
+            for (original in originals.shuffled(random).take(CONSISTENCY_REPEATS)) {
+                tail.add(mirrored(original, mapOf("repeat" to 1)))
             }
             main.add(
                 catchPair(
@@ -705,7 +701,17 @@ object LabBlocks {
                 "visibleSteps" to Math.round(scale.stepsBetween(fromLevel, toLevel)).toInt(),
                 "requestedSteps" to Math.round(steps).toInt()
             )
-            repeat(JUMP_REPEATS) {
+            // One asked each way round, plus a free one, so every rung carries its own order
+            // control rather than relying on the shuffle to provide one.
+            val first = preferencePair(
+                JUMPS.id, "cut_or_ease",
+                settleThenMove(from, to, 0L), 0L,
+                settleThenMove(from, to, SHIPPED_HALF_LIFE_MS), SHIPPED_HALF_LIFE_MS,
+                JUMP_QUESTION, JUMP_HINT, random, context, meta
+            )
+            out.add(first)
+            out.add(mirrored(first))
+            repeat(JUMP_REPEATS - 2) {
                 out.add(
                     preferencePair(
                         JUMPS.id, "cut_or_ease",
@@ -784,29 +790,23 @@ object LabBlocks {
                 )
             )
         }
-        for ((a, b) in floorPairs.shuffled(random).take(CONSISTENCY_REPEATS)) {
-            tail.add(
-                preferencePair(
-                    NEAR_BLACK.id, "floor",
-                    fadeToFloor(a.toInt(), context), a,
-                    fadeToFloor(b.toInt(), context), b,
-                    FLOOR_QUESTION, FLOOR_HINT, random, context, mapOf("repeat" to 1)
-                )
-            )
+        for (original in main.filter { it.kind == "floor" }.shuffled(random).take(CONSISTENCY_REPEATS)) {
+            tail.add(mirrored(original, mapOf("repeat" to 1)))
         }
 
         val liftPairs = allPairs(LIFT_TOPS.map { it.toLong() })
         for ((a, b) in liftPairs) {
-            repeat(LIFT_REPEATS) {
-                main.add(
-                    preferencePair(
-                        NEAR_BLACK.id, "lift",
-                        dimWalkTopping(a.toInt(), context), a,
-                        dimWalkTopping(b.toInt(), context), b,
-                        LIFT_QUESTION, LIFT_HINT, random, context, emptyMap()
-                    )
-                )
-            }
+            val first = preferencePair(
+                NEAR_BLACK.id, "lift",
+                dimWalkTopping(a.toInt(), context), a,
+                dimWalkTopping(b.toInt(), context), b,
+                LIFT_QUESTION, LIFT_HINT, random, context, emptyMap()
+            )
+            main.add(first)
+            // Every lift pair is asked in both orders. On 2026-09-07 its one decisive disagreement
+            // came from a pair that happened to be asked twice the same way round, so there was no
+            // way to tell "no preference" from "picked the second one twice".
+            main.add(mirrored(first))
         }
 
         main.add(
@@ -887,6 +887,31 @@ object LabBlocks {
      * "b", which say nothing about what was being compared once the order has been shuffled, so the
      * arm identities have to travel with the trial.
      */
+    /**
+     * The same comparison again, with the two intervals swapped.
+     *
+     * A consistency repeat is only worth its minute if it controls for *order*, and the first
+     * version re-randomised instead — so about half of them repeated the original order and told us
+     * nothing new. Mirroring makes every repeat a three-way diagnostic:
+     *
+     *  - names the **same arm** both times: a credible preference.
+     *  - names the **same interval letter** both times: an order effect, not a preference.
+     *  - names neither: genuine inconsistency.
+     *
+     * That split is not hypothetical. Across 2026-09-06/07, six of six decisive answers on catch
+     * trials — two *identical* intervals — named the second one, while comparisons with a real
+     * difference tracked the arm across a flip six times out of seven. He breaks ties by saying
+     * "the second one" rather than "can't tell", and only the mirrored repeat can see that.
+     */
+    private fun mirrored(trial: LabTrial, extraMeta: Map<String, Int> = emptyMap()): LabTrial =
+        trial.copy(
+            intervals = trial.intervals.reversed(),
+            meta = trial.meta + extraMeta + mapOf(
+                "armFirst" to trial.meta.getValue("armSecond"),
+                "armSecond" to trial.meta.getValue("armFirst")
+            )
+        )
+
     private fun preferencePair(
         block: String,
         kind: String,
@@ -898,9 +923,19 @@ object LabBlocks {
         hint: String,
         random: Random,
         context: LabContext,
-        meta: Map<String, Int>
+        meta: Map<String, Int>,
+        /**
+         * Pin which arm goes first, instead of leaving it to the seed.
+         *
+         * Consistency repeats pass `false` so a repeat always arrives in the **opposite** order to
+         * the original. That turns the repeat into a three-way diagnostic rather than a coin:
+         * naming the same arm both times is a credible preference; naming the same *interval*
+         * letter is an order effect; naming neither is genuine inconsistency. Randomising the
+         * repeat too, as the first version did, mixed all three into one number.
+         */
+        aFirst: Boolean? = null
     ): LabTrial {
-        val aIsFirst = random.nextBoolean()
+        val aIsFirst = aFirst ?: random.nextBoolean()
         return LabTrial(
             block = block,
             kind = kind,
