@@ -70,6 +70,13 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+// AmbianceVideoBench reads film frames from a directory outside the repo (they are ~150MB). Gradle
+// does not forward -D to the test JVM on its own, so hand this one through; the bench skips when it
+// is unset, which is every ordinary run.
+tasks.withType<Test>().configureEach {
+  System.getProperty("ambiance.frames")?.let { systemProperty("ambiance.frames", it) }
+}
+
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
