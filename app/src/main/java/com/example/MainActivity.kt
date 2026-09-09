@@ -483,10 +483,27 @@ fun MainScreen() {
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
 
-    val huntingDevice = if (!bluetoothEnabled && !uiState.coreControl.isDemoMode) {
+    // The indicator stops at the *first* usable strip, not the last. With two saved strips the old
+    // predicate stayed non-null until both were up, so the second strip's whole connect held the
+    // indicator over an already-working app.
+    //
+    // "Usable" is deliberately read from uiState, not from connectionManager. Those two reach
+    // CONNECTED at different moments: handleConnectionStateChange calls setConnected the instant
+    // GATT links up, while uiState only turns CONNECTED in onDuoCoCharacteristicRegistered, after
+    // MTU exchange and service discovery (see GattDiscoveryGate). HomeScreen's control deck is
+    // gated on the uiState one. Hiding the indicator on the earlier signal is what produced the
+    // reported "animation ends, empty screen for half a second, then the UI pops up" — the gap was
+    // those two clocks, not the exit animation. Both ends now read the same clock.
+    val anyDeviceReady = savedDevices.any { device ->
+        device.isAutoConnectEnabled &&
+            uiState.connectivity.deviceConnectionStates[device.macAddress] == BleConnectionState.CONNECTED
+    }
+    val huntingDevice = if ((!bluetoothEnabled && !uiState.coreControl.isDemoMode) || anyDeviceReady) {
         null
     } else {
         savedDevices.firstOrNull { device ->
+            // connectionManager still owns candidacy, because it is the only side that knows a
+            // disconnect was the user's doing and must not be hunted.
             device.isAutoConnectEnabled && when (val s = connectionStates[device.macAddress]) {
                 is com.example.domain.ConnectionState.Connected -> false
                 is com.example.domain.ConnectionState.Disconnected -> !s.isManual
