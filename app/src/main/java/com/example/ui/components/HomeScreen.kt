@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ActiveDeviceState
@@ -190,6 +191,18 @@ fun HomeScreen(
         )
     }
 
+    // Connecting used to end with the control deck simply being there on the next frame. These are
+    // the Expressive motion scheme specs (MotionScheme.expressive) handed to animateItem, so the
+    // deck fades in and everything below it slides down rather than jumping: effects spec for the
+    // alpha, spatial spec for the placement, the same split the connecting indicator's exit uses.
+    //
+    // animateItem only animates items added *after* the first composition, and it needs the item
+    // keys below to tell one item from another -- so a cold launch is untouched and it is the
+    // connect that gets the transition.
+    val motion = remember { MotionScheme.expressive() }
+    val deckFade = motion.defaultEffectsSpec<Float>()
+    val deckPlacement = motion.defaultSpatialSpec<IntOffset>()
+
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp),
@@ -198,7 +211,7 @@ fun HomeScreen(
     ) {
         // --- Permissions Alert Card (when in Real Mode & no permissions) ---
         if (!permissionsGranted && !uiState.coreControl.isDemoMode) {
-            item {
+            item(key = "permissions_card") {
                 val grantPermissionsInteractionSource = remember { MutableInteractionSource() }
                 Card(
                     colors = CardDefaults.cardColors(
@@ -206,6 +219,7 @@ fun HomeScreen(
                     ),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
                         .fillMaxWidth()
                         .border(
                             width = 1.dp,
@@ -274,9 +288,10 @@ fun HomeScreen(
         // --- Connected Device Tiles ---
         val connectedAddresses = uiState.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys.toList()
         if (connectedAddresses.isEmpty()) {
-            item {
+            item(key = "disconnected_card") {
                 Card(
                     modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
                         .fillMaxWidth()
                         .testTag("connection_status_card_empty"),
                     shape = RoundedCornerShape(24.dp),
@@ -317,10 +332,12 @@ fun HomeScreen(
                 }
             }
         } else {
-            item {
+            item(key = "device_tiles") {
                 if (connectedAddresses.size <= 2) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                            .fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         connectedAddresses.forEach { address ->
@@ -360,15 +377,20 @@ fun HomeScreen(
             val controlsInert = !uiState.coreControl.isPowerOn
 
             if (controlsInert) {
-                item {
-                    PowerOffHintCard(onTurnOn = { viewModel.setPower(true) })
+                item(key = "power_off_hint") {
+                    PowerOffHintCard(
+                        onTurnOn = { viewModel.setPower(true) },
+                        modifier = Modifier
+                            .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                    )
                 }
             }
 
             // CCT Warmth Slider Card (in place of power status card)
-            item {
+            item(key = "cct_card") {
                 Card(
                     modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("cct_control_card"),
@@ -437,9 +459,10 @@ fun HomeScreen(
                 }
             }
             // Brightness Slider Card (below power card)
-            item {
+            item(key = "brightness_card") {
                 Card(
                     modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("brightness_control_card"),
@@ -491,9 +514,10 @@ fun HomeScreen(
             }
 
             // Color Preview Card (existing colour card)
-            item {
+            item(key = "colour_card") {
                 Card(
                     modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("control_deck_card"),
@@ -594,10 +618,15 @@ fun HomeScreen(
         // --- Grid-based Quick Access Scenes ---
         val gridItems = scenes + listOf(null)
         val chunked = gridItems.chunked(2)
-        chunked.forEach { rowItems ->
-            item {
+        // Keyed and animated for the same reason as the deck above: these rows are what the deck
+        // pushes down when it appears, and an unanimated item snaps to its new position no matter
+        // how gently the thing above it fades in.
+        chunked.forEachIndexed { rowIndex, rowItems ->
+            item(key = "scene_row_" + rowIndex) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     rowItems.forEach { scene ->
@@ -904,9 +933,9 @@ fun DeviceTile(
  * that the power button in the top bar is what brings the controls back.
  */
 @Composable
-private fun PowerOffHintCard(onTurnOn: () -> Unit) {
+private fun PowerOffHintCard(onTurnOn: () -> Unit, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("power_off_hint_card"),
         shape = RoundedCornerShape(24.dp),
