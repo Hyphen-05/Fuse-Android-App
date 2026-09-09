@@ -51,8 +51,18 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      if (releaseKeystoreFile.exists()) {
-        signingConfig = signingConfigs.getByName("release")
+      signingConfig = if (releaseKeystoreFile.exists()) {
+        signingConfigs.getByName("release")
+      } else {
+        // Without the upload key a release build comes out unsigned and cannot be installed, so
+        // there was no way to put a realistic build on a phone from a dev machine -- and debug is
+        // not a fair test of anything that depends on frame timing (no R8, no baseline profile,
+        // debuggable=true). Falling back to the debug key keeps release installable for on-device
+        // checks. It is the same signer as the debug build, so `install -r` keeps app data.
+        //
+        // This APK is NOT distributable: it carries the public debug key. The real signingConfig is
+        // still used whenever the upload key is present, so CI and any signing setup are unchanged.
+        signingConfigs.getByName("debugConfig")
       }
     }
     debug {
