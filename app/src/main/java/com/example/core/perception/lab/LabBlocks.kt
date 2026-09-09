@@ -2,6 +2,8 @@ package com.example.core.perception.lab
 
 import com.example.core.perception.PerceptionTrials
 import com.example.core.perception.Stimulus
+import com.example.core.color.ColorConverter
+import com.example.core.color.StripResponse
 import com.example.core.perception.StimulusStep
 import kotlin.random.Random
 
@@ -104,6 +106,13 @@ object LabBlocks {
         estimateMinutes = 4
     )
 
+    val HUE_MOTION = BlockSpec(
+        id = "hue_motion",
+        title = "Hue motion: does it pulse",
+        purpose = "Whether a hue sweep's built-in 2x brightness swing is visible, and wanted",
+        estimateMinutes = 5
+    )
+
     /**
      * In run order, and the index here is the block number everything else refers to.
      *
@@ -111,7 +120,9 @@ object LabBlocks {
      * the results files, the docs and Joe all name these. Renumbering to close a gap would silently
      * rename block 3's data.
      */
-    val ALL = listOf(FLOOR_GRID, SCALE, RATE, DITHER, SMOOTHING, JUMPS, NEAR_BLACK, AMBIANCE_FALL)
+    val ALL = listOf(
+        FLOOR_GRID, SCALE, RATE, DITHER, SMOOTHING, JUMPS, NEAR_BLACK, AMBIANCE_FALL, HUE_MOTION
+    )
 
     /**
      * The rest of the battery, recorded so the plan survives this session.
@@ -125,9 +136,8 @@ object LabBlocks {
      * would silently rename its data, which is why [RATE] keeps its slot despite being retired.
      */
     val PLANNED: List<String> = listOf(
-        "8. Visualiser: where he sits on the measured comfort/coupling line (r=0.87, 27 tunings).",
-        "9. Visualiser: brightness-modulated against hue-modulated at matched energy. Tests a " +
-            "recorded belief that is steering every preset and has never been measured.",
+        "9. Visualiser: where he sits on the measured comfort/coupling line (r=0.87, 27 tunings). " +
+            "Needs a running visualiser to modulate, unlike block 8.",
         "10. Validation - the app states its prediction before each trial and scores itself on " +
             "held-out cases. THIS is the block that licenses tuning without his eyes."
     )
@@ -1212,6 +1222,174 @@ object LabBlocks {
     /** Not a rule under test - the anchor's motionless arm. */
     const val ARM_STILL = 2L
 
+
+    // --- block 8: does hue motion pulse -------------------------------------------------------
+
+    /**
+     * A hue sweep, with and without the brightness swing that is built into it.
+     *
+     * ## The measured fact behind this block
+     *
+     * Rotating hue at a fixed HSV value swings the emitted light by **exactly 2x**
+     * (`HuePathAnalysis`): a pure primary lights one channel and a colour between two primaries
+     * lights two, and on the measured curve that is a factor of two, at every value and at every
+     * saturation above about 0.4. A full revolution therefore contains **six brightness pulses**.
+     *
+     * That matters because of what is already known about the other axis. Across 27 tunings, felt
+     * beat coupling tracked peak brightness slew at r=0.87, and Joe rejected both ends of that line.
+     * Every preset in the app modulates brightness; the quadrant he actually asked for - flat
+     * brightness, vivid hue motion - has never been built. If a hue sweep pulses at 2x on its own,
+     * then "hue motion" has been brightness modulation all along, and building the quadrant needs
+     * this fixed first.
+     *
+     * ## What the two arms are
+     *
+     * Both rotate hue at the same rate through the same hues. `raw` is what the visualiser does
+     * today. `flat` solves, per hue, for the value that emits the rotation's **mean** light, using
+     * [StripResponse] as an invertible lookup rather than another guessed exponent.
+     *
+     * Matching the *mean* rather than the primaries is the control that makes the pair fair: a flat
+     * arm pinned to the dim end would simply be dimmer, and "which looks better" would collect a
+     * preference for brightness. Matched means, the arms differ only in whether the light moves.
+     *
+     * ## Two questions, and only one of them is taste
+     *
+     * `pump` asks whether the swing is visible at all - a fact with an answer, measured rather than
+     * scored, the same footing as a step-visibility trial. `prefer` asks which he wants. Asking the
+     * second without the first would leave "no preference" and "cannot see the difference"
+     * indistinguishable, which is the failure block 2 died of.
+     */
+    fun hueMotionTrials(context: LabContext, seed: Long): List<LabTrial> {
+        val random = Random(seed)
+        val main = mutableListOf<LabTrial>()
+        val tail = mutableListOf<LabTrial>()
+
+        val raw = hueSweep(flat = false)
+        val flat = hueSweep(flat = true)
+
+        repeat(HUE_REPEATS) {
+            main.add(
+                LabTrial(
+                    block = HUE_MOTION.id,
+                    kind = "pump",
+                    intervals = if (random.nextBoolean()) listOf(raw, flat) else listOf(flat, raw),
+                    question = "Did either one pulse in brightness as the colour moved?",
+                    hint = "Both sweep the same colours at the same speed.",
+                    options = LabOptions.A_B_UNSURE,
+                    // Whether he can see a 2x swing riding on a hue sweep is the measurement. It is
+                    // not scored: a "can't tell" here is a result, not a mistake.
+                    truth = LabTruth.UNKNOWN,
+                    correctOptionId = null,
+                    meta = mapOf("armFirst" to ARM_RAW.toInt(), "armSecond" to ARM_FLAT.toInt())
+                        + hueOrderMeta(main.size),
+                    brightnessPercent = null
+                )
+            )
+        }
+
+        val first = preferencePair(
+            HUE_MOTION.id, "prefer",
+            raw, ARM_RAW, flat, ARM_FLAT,
+            "Which colour motion did you prefer?",
+            "Same colours, same speed. One holds its brightness steady.",
+            random, context, emptyMap()
+        )
+        main.add(first)
+        main.add(mirrored(first))
+
+        // A catch on each question, so the tie-breaking habit shows up on both.
+        main.add(
+            catchPair(
+                HUE_MOTION.id, raw, ARM_RAW,
+                "Which colour motion did you prefer?",
+                "Same colours, same speed. One holds its brightness steady.",
+                context, emptyMap()
+            )
+        )
+        // The anchor: a rotation against a colour that does not move at all. Unmissable, so a run of
+        // nulls can be told apart from having stopped watching.
+        main.add(
+            anchorSteadier(
+                raw,
+                Stimulus("hue_still", raw.steps.map { it.copy(rgb = raw.steps.first().rgb) }),
+                context, random
+            )
+        )
+
+        for (original in main.filter { it.kind == "prefer" }.shuffled(random).take(2)) {
+            tail.add(mirrored(original, mapOf("repeat" to 1)))
+        }
+        return main.shuffled(random) + tail.shuffled(random)
+    }
+
+    const val ARM_RAW = 0L
+    const val ARM_FLAT = 1L
+
+    /** How many times the visibility question is asked. Each is one revolution. */
+    const val HUE_REPEATS = 3
+
+    private fun hueOrderMeta(index: Int): Map<String, Int> = mapOf("rep" to index)
+
+    /**
+     * One full revolution of hue at a constant rate, optionally light-flattened.
+     *
+     * [HUE_BASE_VALUE] sets where the rotation sits. It is not a floor and is not near one - it is
+     * chosen so the flattened arm has headroom to *raise* the primaries to the mean without
+     * clipping, which is the constraint that decides it. `LabBlocksTest` pins that it does.
+     */
+    fun hueSweep(flat: Boolean): Stimulus {
+        val steps = HUE_STEPS
+        val hues = (0 until steps).map { it * 360.0 / steps }
+        val raw = hues.map { ColorConverter.hsvToRgb(it.toFloat(), 1f, HUE_BASE_VALUE) }
+        val target = raw.sumOf { totalLight(it) } / steps
+
+        val out = hues.mapIndexed { i, hue ->
+            val rgb = if (!flat) raw[i] else valueForLight(hue.toFloat(), target)
+            StimulusStep(maxOf(rgb.first, rgb.second, rgb.third), HUE_STEP_MS, rgb)
+        }
+        return Stimulus(if (flat) "hue_flat" else "hue_raw", out)
+    }
+
+    /** Emitted light for a commanded triple, summed over channels on the measured curve. */
+    fun totalLight(rgb: Triple<Int, Int, Int>): Double =
+        StripResponse.lightForByte(rgb.first) +
+            StripResponse.lightForByte(rgb.second) +
+            StripResponse.lightForByte(rgb.third)
+
+    /**
+     * The commanded colour at [hue] whose emitted light is closest to [target].
+     *
+     * A search over the HSV value rather than a formula, for the same reason
+     * `StripResponse.byteForLight` is a search: the curve is a measured table, and inverting it by
+     * fitting an exponent is what produced the numbers this project spent a month unpicking.
+     */
+    fun valueForLight(hue: Float, target: Double): Triple<Int, Int, Int> {
+        var best = ColorConverter.hsvToRgb(hue, 1f, 1f)
+        var bestErr = Double.MAX_VALUE
+        var v = 0.05f
+        while (v <= 1.0f) {
+            val rgb = ColorConverter.hsvToRgb(hue, 1f, v)
+            val err = kotlin.math.abs(totalLight(rgb) - target)
+            if (err < bestErr) { bestErr = err; best = rgb }
+            v += 0.002f
+        }
+        return best
+    }
+
+    /** One revolution in 4s at 50ms a step - the same cadence as the ambiance recordings. */
+    const val HUE_STEPS = 80
+    const val HUE_STEP_MS = 50L
+
+    /**
+     * Where the rotation sits on the value axis.
+     *
+     * High enough that the flattened arm can raise a primary to the rotation's mean light without
+     * running out of byte, low enough that it is not sitting at the top of the range. The cubic in
+     * `ColorConverter.hsvToRgb` is still in the path for both arms, deliberately: the arms differ in
+     * flattening and in nothing else.
+     */
+    const val HUE_BASE_VALUE = 0.8f
+
     fun trialsFor(spec: BlockSpec, context: LabContext, seed: Long): List<LabTrial> = when (spec.id) {
         FLOOR_GRID.id -> floorGridTrials(context, seed)
         SCALE.id -> scaleTrials(seed)
@@ -1219,6 +1397,7 @@ object LabBlocks {
         DITHER.id -> ditherTrials(context, seed)
         SMOOTHING.id -> smoothingTrials(context, seed)
         AMBIANCE_FALL.id -> ambianceFallTrials(context, seed)
+        HUE_MOTION.id -> hueMotionTrials(context, seed)
         JUMPS.id -> jumpTrials(context, seed)
         NEAR_BLACK.id -> nearBlackTrials(seed)
         else -> emptyList()

@@ -1,5 +1,6 @@
 package com.example.core.perception.lab
 
+import com.example.core.perception.Stimulus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -837,5 +838,94 @@ class LabBlocksTest {
             val orders = trials.map { it.meta.getValue("armFirst") }.toSet()
             assertEquals("both orders present for every clip", 2, orders.size)
         }
+    }
+
+    // --- block 8: hue motion ------------------------------------------------------------------
+
+    private fun hueLights(stimulus: Stimulus): List<Double> =
+        stimulus.steps.map { LabBlocks.totalLight(it.commanded) }
+
+    @Test
+    fun `the raw hue sweep pulses and the flattened one does not`() {
+        // The measured fact the block exists to put to him: a fixed-value rotation lights one
+        // channel at a primary and two between primaries, which on the measured curve is 2x.
+        val raw = hueLights(LabBlocks.hueSweep(flat = false))
+        val flat = hueLights(LabBlocks.hueSweep(flat = true))
+        val rawRatio = raw.max() / raw.min()
+        val flatRatio = flat.max() / flat.min()
+        println("hue sweep light swing: raw %.2fx, flattened %.2fx".format(rawRatio, flatRatio))
+        assertTrue("the raw arm is expected to swing about 2x", rawRatio > 1.8)
+        assertTrue("the flattened arm has to be visibly flatter to be worth asking about", flatRatio < 1.1)
+    }
+
+    @Test
+    fun `both hue arms emit the same mean light`() {
+        // The control that makes the pair a question about movement rather than about brightness.
+        // Flattening to the dim end would have made the flat arm simply dimmer, and "which looks
+        // better" would have collected a preference for more light.
+        val raw = hueLights(LabBlocks.hueSweep(flat = false)).average()
+        val flat = hueLights(LabBlocks.hueSweep(flat = true)).average()
+        assertEquals(raw, flat, raw * 0.02)
+    }
+
+    @Test
+    fun `the flattened arm reaches its target at every hue, including the primaries`() {
+        // The primaries are where flattening has to push *up*, and where it would run out of range
+        // if the base value sat too high. That constraint is what picks HUE_BASE_VALUE, so it is
+        // pinned rather than left as a comment.
+        val target = hueLights(LabBlocks.hueSweep(flat = false)).average()
+        hueLights(LabBlocks.hueSweep(flat = true)).forEach { light ->
+            assertTrue(
+                "flattening must reach the mean at every hue, not clip near it",
+                kotlin.math.abs(light - target) < target * 0.05
+            )
+        }
+    }
+
+    @Test
+    fun `both hue arms move through the same hues at the same rate`() {
+        val raw = LabBlocks.hueSweep(flat = false)
+        val flat = LabBlocks.hueSweep(flat = true)
+        assertEquals(raw.steps.size, flat.steps.size)
+        assertEquals(raw.steps.map { it.holdMs }, flat.steps.map { it.holdMs })
+        // Same hue at each step, checked as the dominant channel rather than as a full ordering:
+        // at a pure primary the two dark channels are tied at zero and sort arbitrarily.
+        raw.steps.zip(flat.steps).forEach { (a, b) ->
+            assertEquals(dominantChannel(a.commanded), dominantChannel(b.commanded))
+        }
+
+        // The arms are not bit-identical in hue, and the reason is worth printing rather than
+        // asserting away: near a primary the minor channel is small, and the cubic in
+        // ColorConverter.hsvToRgb crushes small values to zero. The raw arm sits lower on the value
+        // axis, so it loses the minor channel where the brighter flattened arm keeps it. That is
+        // the same dead zone HuePathAnalysis measures on the brightness axis, showing up as hue
+        // coarseness - and it is an argument for replacing the cubic, not against this block.
+        val differing = raw.steps.zip(flat.steps).count { (a, b) ->
+            litChannels(a.commanded) != litChannels(b.commanded)
+        }
+        println("hue arms differ in which channels are lit on $differing of ${raw.steps.size} steps")
+        assertTrue("the arms must still be the same sweep, not two different colour paths", differing < raw.steps.size / 4)
+    }
+
+    private fun dominantChannel(rgb: Triple<Int, Int, Int>): Int =
+        listOf(rgb.first, rgb.second, rgb.third).withIndex().maxBy { it.value }.index
+
+    private fun litChannels(rgb: Triple<Int, Int, Int>): Set<Int> =
+        listOf(rgb.first, rgb.second, rgb.third)
+            .withIndex().filter { it.value > 0 }.map { it.index }.toSet()
+
+    @Test
+    fun `the pulse question is a measurement and the preference question is not`() {
+        // Asking only the preference would leave "no preference" and "cannot see it" as one answer,
+        // which is the failure block 2 died of.
+        val trials = LabBlocks.trialsFor(LabBlocks.HUE_MOTION, joe, seed = 5L)
+        val pump = trials.filter { it.kind == "pump" }
+        val prefer = trials.filter { it.kind == "prefer" }
+        assertTrue(pump.isNotEmpty())
+        assertTrue(prefer.isNotEmpty())
+        assertTrue("whether he can see the swing is measured, never scored", pump.none { it.isScorable })
+        assertTrue(pump.none { it.isPreference })
+        assertTrue(prefer.all { it.isPreference })
+        assertTrue("hue motion plays at his own brightness", trials.all { it.brightnessPercent == null })
     }
 }

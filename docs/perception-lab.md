@@ -121,7 +121,8 @@ Lab > Test battery**.
 | 5 | `jumps` | how big a change has to be before a cut beats an ease | yes |
 | 6 | `near_black` | where the floor sits, and whether dim scenes should be lifted into the smooth region | yes |
 | 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes |
-| 8-10 | — | two visualiser taste blocks, then validation | no |
+| 8 | `hue_motion` | whether a hue sweep's built-in 2x brightness swing is visible, and wanted | yes |
+| 9-10 | — | one visualiser taste block, then validation | no |
 
 **Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
 [taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered (the shipped 50ms ease is right, and
@@ -175,13 +176,40 @@ It also introduced colour to the stimulus vocabulary — `StimulusStep.rgb`, nul
 dark scene wobbles in hue as well as in level, and grey would have thrown away half of what is being
 judged. The grey `byte` still carries the brightest channel so the floor guard reads something real.
 
-**Blocks 8-10 remain unbuilt.** 8 and 9 need a running visualiser to modulate, which is more wiring
-than the steady-level stimuli everything so far has used. 10 scores the model blocks 4-7 produce, so
-there is nothing for it to predict until they have run. They shifted up by one when block 7 was
-added, which is free only because none of them has ever run — renumbering a block with results would
-silently rename its data, which is why block 2 keeps its slot despite being retired.
+**Block 8 needed no visualiser wiring at all**, which is why it exists before block 9. A hue
+rotation is a pure function of time, so both its arms can be built directly — the audio path is only
+needed for questions about how the visualiser *responds*, not about what its colour motion emits.
 
-**Blocks 8-9 (visualiser taste) were explicitly licensed by Joe on 2026-09-06**, against CLAUDE.md's
+Its premise is a measured fact rather than a hunch (`HuePathAnalysis`, 2026-09-09): **rotating hue at
+a fixed HSV value swings the emitted light by exactly 2x**, because a primary lights one channel and
+a colour between two primaries lights two. A full revolution therefore contains six brightness
+pulses. That matters because brightness is the axis that measured as uncomfortable (r=0.87 between
+felt coupling and peak brightness slew, 27 tunings), and Joe's stated taste is the other quadrant —
+flat brightness, vivid hue motion. If a hue sweep pulses on its own, that quadrant has never
+actually been available, which would explain why hue work kept landing back on the axis he rejected.
+
+The flattened arm solves per hue for the value that emits the rotation's **mean** light, using
+`StripResponse` as an invertible lookup rather than a guessed exponent. Matching the mean rather
+than the dim end is the control that makes it a question about movement instead of about brightness.
+Measured swing: raw 2.00x, flattened 1.01x, means equal to within 2%.
+
+It asks two questions, and only one is taste. `pump` asks whether the swing is visible at all —
+`UNKNOWN` truth, measured and never scored. `prefer` asks which he wants. Asking only the second
+would leave "no preference" and "cannot see it" as one answer, which is what block 2 died of.
+
+One thing the block surfaced rather than hid: the two arms light different channels on 4 of 80
+steps. Near a primary the minor channel is small, and the cubic in `ColorConverter.hsvToRgb` crushes
+small values to zero — so the dimmer raw arm loses it where the brighter flattened arm keeps it.
+That is the same dead zone the analysis measures on the brightness axis (**requested values 0-40
+emit nothing at all, and 1% of full light is not reached until 69**) showing up as hue coarseness.
+
+**Blocks 9-10 remain unbuilt.** 9 needs a running visualiser to modulate. 10 scores the model blocks
+4-8 produce, so there is nothing for it to predict until they have run. The numbering shifted as
+blocks 7 and 8 were added, which is free only because none of the unbuilt ones has ever run —
+renumbering a block with results would silently rename its data, which is why block 2 keeps its slot
+despite being retired.
+
+**The visualiser taste blocks were explicitly licensed by Joe on 2026-09-06**, against CLAUDE.md's
 standing "do not restart the visualiser work". The licence is for measuring taste, not for
 re-opening beat detection.
 
