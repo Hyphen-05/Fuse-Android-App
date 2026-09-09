@@ -21,6 +21,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,11 +106,23 @@ fun ConnectionStatusSurface(
     val showError = errorMessage != null
     val showHunt = !showError && huntingDeviceName != null && !huntTimedOut
 
+    // The hunt exit runs on the Expressive motion scheme rather than flat tweens, so the indicator
+    // reads as leaving rather than as being switched off. These are the library specs
+    // (MotionScheme.expressive), not hand-tuned springs: fastSpatialSpec carries the scale and has
+    // the scheme bounce, fastEffectsSpec carries the alpha and deliberately does not.
+    //
+    // Scoped here rather than provided to the app MaterialTheme, which takes a motionScheme and
+    // would retime every M3 component at once. That is a one-line change if it is ever wanted, but
+    // it is a different decision from this one. The enter is left on its tweens: the brief was the
+    // ending.
+    val expressiveMotion = remember { MotionScheme.expressive() }
+
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         AnimatedVisibility(
             visible = showHunt,
             enter = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.8f),
-            exit = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.85f)
+            exit = fadeOut(expressiveMotion.fastEffectsSpec()) +
+                scaleOut(expressiveMotion.fastSpatialSpec(), targetScale = 0.85f)
         ) {
             // The real Material 3 Expressive indicator (material3 1.5.0-alpha25): a morph through
             // the MaterialShapes sequence. Was hand-rolled on androidx.graphics:graphics-shapes
