@@ -754,4 +754,88 @@ class LabBlocksTest {
         assertTrue(reading.repeatedPairs > 0)
         assertTrue("alternating answers must not read as consistent", reading.consistency!! < 1.0)
     }
+
+    // --- block 7: the ambiance recordings -----------------------------------------------------
+
+    private fun ambiance() = LabBlocks.trialsFor(LabBlocks.AMBIANCE_FALL, joe, seed = 11L)
+
+    @Test
+    fun `the two ambiance arms send the same writes at the same moments`() {
+        // The point of precomputing both arms from the same frames. If they differed in write count
+        // or timing, the steadier one could be picked out by its cadence rather than by looking - the
+        // same confound the dither block had to design around.
+        AmbianceTraces.ALL.forEach { pair ->
+            assertEquals(pair.shipped.size, pair.symmetricFall.size)
+        }
+        ambiance().filter { it.kind == "fall" }.forEach { trial ->
+            val (first, second) = trial.intervals
+            assertEquals(first.steps.size, second.steps.size)
+            assertEquals(first.steps.map { it.holdMs }, second.steps.map { it.holdMs })
+            assertEquals(first.durationMs, second.durationMs)
+        }
+    }
+
+    @Test
+    fun `the two ambiance arms are actually different light`() {
+        // A generated file that silently emitted the same trace twice would produce a block of
+        // catch trials wearing a preference label, and the reading would call it "no preference".
+        ambiance().filter { it.kind == "fall" }.forEach { trial ->
+            val (first, second) = trial.intervals
+            assertNotEquals(
+                "the arms of a preference pair must differ",
+                first.steps.map { it.commanded },
+                second.steps.map { it.commanded }
+            )
+        }
+    }
+
+    @Test
+    fun `ambiance recordings play at his own brightness, not at full`() {
+        // The traces are commanded bytes computed with no brightness assumption, and the complaint
+        // is about his normal viewing - so this block must pin nothing. The mirror of block 6's bug,
+        // which pinned nothing when it needed 100.
+        assertTrue(ambiance().all { it.brightnessPercent == null })
+        assertTrue(!LabBlocks.AMBIANCE_FALL.commandsBrightness)
+    }
+
+    @Test
+    fun `ambiance stimuli command colour rather than grey`() {
+        // A dark scene wobbles in hue as well as level, and grey would throw away half of what is
+        // being judged. The grey `byte` still carries the brightest channel so the floor guard reads
+        // something sensible.
+        ambiance().flatMap { it.intervals }.forEach { stimulus ->
+            assertTrue(stimulus.steps.all { it.rgb != null })
+            assertTrue(stimulus.steps.all { step ->
+                val (r, g, b) = step.commanded
+                step.byte == maxOf(r, g, b)
+            })
+        }
+    }
+
+    @Test
+    fun `the ambiance anchor holds one arm perfectly still`() {
+        // Without an unmissable trial, a run of "can't tell" cannot be told from having stopped
+        // watching - and "can't tell" is a plausible honest answer to every real pair in this block.
+        val anchor = ambiance().single { it.isAnchor }
+        assertTrue(anchor.isScorable)
+        val still = anchor.intervals.single { s -> s.steps.map { it.commanded }.distinct().size == 1 }
+        val moving = anchor.intervals.single { it !== still }
+        assertTrue(moving.steps.map { it.commanded }.distinct().size > 1)
+        assertEquals(still.steps.size, moving.steps.size)
+        val stillIsFirst = anchor.intervals.first() === still
+        assertEquals(if (stillIsFirst) "a" else "b", anchor.correctOptionId)
+    }
+
+    @Test
+    fun `every ambiance pair is asked in both orders`() {
+        // Block 6's one decisive disagreement came from a pair asked twice the same way round, so
+        // "no preference" and "named the second one twice" were indistinguishable.
+        val byClip = ambiance().filter { it.kind == "fall" && !it.meta.containsKey("repeat") }
+            .groupBy { it.meta.getValue("clip") }
+        assertTrue(byClip.isNotEmpty())
+        byClip.forEach { (_, trials) ->
+            val orders = trials.map { it.meta.getValue("armFirst") }.toSet()
+            assertEquals("both orders present for every clip", 2, orders.size)
+        }
+    }
 }

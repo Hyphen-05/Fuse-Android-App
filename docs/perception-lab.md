@@ -20,7 +20,7 @@ Joe's brief on 2026-09-06 set the target: build the tests needed to fill the dat
 taste, **so that tuning can stop needing his eyes on the strip for every change**. That means the
 goal is not numbers but a **model that predicts his answers**. The quantisation probe is the
 standard — a rule that got all 74 individual trials right rather than an average fitted to a cloud.
-Block 9 (validation) is what would license tuning without him; **until it passes, the honest answer
+Block 10 (validation) is what would license tuning without him; **until it passes, the honest answer
 to "can you tune this without me looking" is no**.
 
 He approved running stimuli on his real strips on 2026-09-04: *"playing different staircases or
@@ -120,7 +120,8 @@ Lab > Test battery**.
 | 4 | `smoothing` | preferred settling speed when the picture changes — the 2026-09-04 number | yes |
 | 5 | `jumps` | how big a change has to be before a cut beats an ease | yes |
 | 6 | `near_black` | where the floor sits, and whether dim scenes should be lifted into the smooth region | yes |
-| 7-9 | — | two visualiser taste blocks, then validation | no |
+| 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes |
+| 8-10 | — | two visualiser taste blocks, then validation | no |
 
 **Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
 [taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered (the shipped 50ms ease is right, and
@@ -153,11 +154,34 @@ one was arithmetic telling him what his LEDs looked like, and this one shows him
 whole block runs at 100% firmware brightness because at his 25% the lifted arm is unreachable; the
 faithful arm is unaffected, since emitted level 8 is the same light however it was commanded.
 
-**Blocks 7-9 remain unbuilt.** 7 and 8 need a running visualiser to modulate, which is more wiring
-than the steady-level stimuli everything so far has used. 9 scores the model blocks 4-6 produce, so
-there is nothing for it to predict until they have run.
+**Block 7 replays recorded ambiance output rather than constructing a stimulus** (built
+2026-09-09), and is the first block whose two arms are a *rule* difference rather than a parameter
+difference. `AmbianceVideoBench` runs the shipped `AmbianceFrameAnalyser` over real film frames and
+emits `AmbianceTraces.kt`; the block plays the two traces back to back and asks which was steadier.
 
-**Blocks 7-8 (visualiser taste) were explicitly licensed by Joe on 2026-09-06**, against CLAUDE.md's
+Three things about it are load-bearing:
+
+- **Both arms come from the same frames**, so they are the same scene rendered two ways, carry the
+  same number of writes at the same moments, and cannot be told apart by cadence. That control had
+  to be designed into blocks 3 and 4 and here it is free by construction.
+- **The excerpts are the worst four seconds under the shipped rule**, chosen by counting emitted
+  level reversals. Picking the stretch where the complaint lives is the point; picking it by eye
+  would have been picking the answer.
+- **It pins no brightness**, because the traces are commanded bytes computed with no brightness
+  assumption and the complaint is about ordinary viewing. It is the mirror of block 6's bug: that
+  one needed 100 and pinned nothing.
+
+It also introduced colour to the stimulus vocabulary — `StimulusStep.rgb`, null everywhere else. A
+dark scene wobbles in hue as well as in level, and grey would have thrown away half of what is being
+judged. The grey `byte` still carries the brightest channel so the floor guard reads something real.
+
+**Blocks 8-10 remain unbuilt.** 8 and 9 need a running visualiser to modulate, which is more wiring
+than the steady-level stimuli everything so far has used. 10 scores the model blocks 4-7 produce, so
+there is nothing for it to predict until they have run. They shifted up by one when block 7 was
+added, which is free only because none of them has ever run — renumbering a block with results would
+silently rename its data, which is why block 2 keeps its slot despite being retired.
+
+**Blocks 8-9 (visualiser taste) were explicitly licensed by Joe on 2026-09-06**, against CLAUDE.md's
 standing "do not restart the visualiser work". The licence is for measuring taste, not for
 re-opening beat detection.
 

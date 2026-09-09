@@ -65,6 +65,8 @@ class AmbianceVideoBench {
         val frames: Int,
         /** Emitted levels per frame, one triple per accepted frame. */
         val levels: List<Triple<Int, Int, Int>>,
+        /** What would be commanded, which is what a lab stimulus has to carry. */
+        val bytes: List<Triple<Int, Int, Int>>,
         val rois: List<AmbianceFrameAnalyser.Roi>
     )
 
@@ -99,6 +101,7 @@ class AmbianceVideoBench {
         var curLinR = 0.0; var curLinG = 0.0; var curLinB = 0.0
         var hasTarget = false
         val levels = ArrayList<Triple<Int, Int, Int>>(files.size)
+        val bytes = ArrayList<Triple<Int, Int, Int>>(files.size)
         val rois = ArrayList<AmbianceFrameAnalyser.Roi>(files.size)
 
         var heldRoi: AmbianceFrameAnalyser.Roi? = null
@@ -170,15 +173,17 @@ class AmbianceVideoBench {
                 curLinB += a * (tB - curLinB)
             }
 
+            val outByte = Triple(
+                com.example.core.color.ColorConverter.linearToSrgb(curLinR),
+                com.example.core.color.ColorConverter.linearToSrgb(curLinG),
+                com.example.core.color.ColorConverter.linearToSrgb(curLinB)
+            )
+            bytes.add(outByte)
             levels.add(
-                Triple(
-                    emitted(com.example.core.color.ColorConverter.linearToSrgb(curLinR)),
-                    emitted(com.example.core.color.ColorConverter.linearToSrgb(curLinG)),
-                    emitted(com.example.core.color.ColorConverter.linearToSrgb(curLinB))
-                )
+                Triple(emitted(outByte.first), emitted(outByte.second), emitted(outByte.third))
             )
         }
-        return Trace(clipDir.name, files.size, levels, rois)
+        return Trace(clipDir.name, files.size, levels, bytes, rois)
     }
 
     private data class Score(
@@ -302,4 +307,151 @@ class AmbianceVideoBench {
             )
         }
     }
+
+    // ---------------------------------------------------------------- generating the lab stimulus
+
+    /** How long one interval of a lab trial runs. Two of these plus a gap is one question. */
+    private val excerptMs = 4000L
+
+    /** Reversals inside a window, which is how the worst stretch of a clip is chosen. */
+    private fun reversalsIn(levels: List<Triple<Int, Int, Int>>, from: Int, to: Int): Int {
+        var reversals = 0
+        val lastDir = intArrayOf(0, 0, 0)
+        for (i in (from + 1) until to) {
+            val p = levels[i - 1]; val c = levels[i]
+            val d = intArrayOf(c.first - p.first, c.second - p.second, c.third - p.third)
+            for (ch in 0 until 3) {
+                if (d[ch] == 0) continue
+                val dir = if (d[ch] > 0) 1 else -1
+                if (lastDir[ch] != 0 && dir != lastDir[ch]) reversals++
+                lastDir[ch] = dir
+            }
+        }
+        return reversals
+    }
+
+    /**
+     * Writes the trace pairs the Perception Lab plays, as a generated Kotlin source file.
+     *
+     * Same arrangement as `StripResponse`: the numbers are derived by a tool and committed as code
+     * rather than transcribed, so what Joe is shown is exactly what the bench measured. Both arms
+     * come from the *same* frames, so they differ only in the rule under test - and both carry the
+     * same number of writes at the same moments, which is the write-cadence control blocks 3 and 4
+     * already needed.
+     *
+     * Run with `-Dambiance.traces=<path to AmbianceTraces.kt>` alongside `-Dambiance.frames`.
+     */
+    @Test
+    fun `emit lab traces`() {
+        val root = framesRoot()
+        val outPath = System.getProperty("ambiance.traces")
+        Assume.assumeTrue("set -Dambiance.frames and -Dambiance.traces to regenerate", root != null && outPath != null)
+
+        val perExcerpt = (excerptMs / frameMs).toInt()
+        val shippedAblation = AmbianceAblation()
+        val symmetricAblation = AmbianceAblation(asymmetricFall = false)
+
+        val sb = StringBuilder()
+        sb.append(HEADER)
+
+        val clips = root!!.listFiles { f -> f.isDirectory }!!
+            .filter { it.name.startsWith("dark") }.sortedBy { it.name }
+
+        for (clip in clips) {
+            val shipped = run(clip, ease = true, roiMode = RoiMode.PER_FRAME, ablation = shippedAblation)
+            val symmetric = run(clip, ease = true, roiMode = RoiMode.PER_FRAME, ablation = symmetricAblation)
+
+            // The window where the complaint lives: the worst four seconds under what ships. Picked
+            // by the metric rather than by eye, so the choice is reproducible and not flattering.
+            var bestStart = 0
+            var bestScore = -1
+            for (start in 0..(shipped.levels.size - perExcerpt)) {
+                val s = reversalsIn(shipped.levels, start, start + perExcerpt)
+                if (s > bestScore) { bestScore = s; bestStart = start }
+            }
+
+            val a = shipped.bytes.subList(bestStart, bestStart + perExcerpt)
+            val b = symmetric.bytes.subList(bestStart, bestStart + perExcerpt)
+            val aRev = reversalsIn(shipped.levels, bestStart, bestStart + perExcerpt)
+            val bRev = reversalsIn(symmetric.levels, bestStart, bestStart + perExcerpt)
+
+            sb.append("    /**\n")
+            sb.append("     * ${clip.name}: the worst ${excerptMs}ms of the clip under the shipped rule.\n")
+            sb.append("     *\n")
+            sb.append("     * Emitted-level reversals across this window at 22% brightness:\n")
+            sb.append("     * shipped $aRev, symmetric $bRev.\n")
+            sb.append("     */\n")
+            sb.append("    val ${clip.name.uppercase()} = AmbianceTracePair(\n")
+            sb.append("        id = \"${clip.name}\",\n")
+            sb.append("        stepMs = ${frameMs}L,\n")
+            sb.append("        shipped = listOf(\n")
+            sb.append(encode(a))
+            sb.append("        ),\n")
+            sb.append("        symmetricFall = listOf(\n")
+            sb.append(encode(b))
+            sb.append("        )\n")
+            sb.append("    )\n\n")
+            println("${clip.name}: window ${bestStart * frameMs}ms, reversals shipped=$aRev symmetric=$bRev")
+        }
+
+        sb.append("    /** Every pair, in the order a block should offer them. */\n")
+        sb.append("    val ALL = listOf(" + clips.joinToString(", ") { it.name.uppercase() } + ")\n")
+        sb.append("}\n")
+
+        File(outPath!!).writeText(sb.toString())
+        println("wrote $outPath")
+    }
+
+    private fun encode(trace: List<Triple<Int, Int, Int>>): String {
+        val sb = StringBuilder()
+        trace.chunked(6).forEach { row ->
+            sb.append("            ")
+            sb.append(row.joinToString(" ") { "${it.first}, ${it.second}, ${it.third}," })
+            sb.append("\n")
+        }
+        return sb.toString()
+    }
+
+    private val HEADER = """
+        |package com.example.core.perception.lab
+        |
+        |/**
+        | * What ambiance would have commanded, for one stretch of film, under two rules.
+        | *
+        | * GENERATED by `AmbianceVideoBench.emit lab traces` - do not hand-edit. Regenerate with:
+        | *
+        | * ```
+        | * python tools/ambiance-bench/fetch.py --out <dir>
+        | * ./gradlew :app:testDebugUnitTest --tests '*AmbianceVideoBench*' \\
+        | *     -Dambiance.frames=<dir> -Dambiance.traces=<path to this file>
+        | * ```
+        | *
+        | * ## What the two arms are
+        | *
+        | * `shipped` is the pipeline as it stands. `symmetricFall` differs in exactly one line: the
+        | * smoother stops using a larger alpha when the picture gets darker than the strip currently
+        | * is. At the shipped settings that asymmetry makes falls about 1.8x faster than rises, which
+        | * on noisy dark content rectifies noise into a sawtooth - the bench measures 36% more
+        | * emitted-level reversals with it than without, and multi-level jumps on 13% of transitions
+        | * against 1%.
+        | *
+        | * Both arms are computed from the **same frames**, so they carry the same number of writes at
+        | * the same moments and cannot be told apart by cadence - the control blocks 3 and 4 needed.
+        | *
+        | * ## What these are not
+        | *
+        | * They are a recording, not a live capture. Nothing here decides whether the change is
+        | * better; that is what asking Joe is for. The bench only says the two differ, and where.
+        | */
+        |object AmbianceTraces {
+        |
+        |    /** One excerpt, the same moment rendered by both rules. Values are commanded RGB bytes. */
+        |    data class AmbianceTracePair(
+        |        val id: String,
+        |        val stepMs: Long,
+        |        val shipped: List<Int>,
+        |        val symmetricFall: List<Int>
+        |    )
+        |
+        |""".trimMargin() + "\n"
 }

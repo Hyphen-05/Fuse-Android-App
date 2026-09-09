@@ -35,8 +35,22 @@ package com.example.core.perception
  *    attention on differences that are obvious or invisible.
  */
 
-/** One commanded level, held for a while. A stimulus is a list of these, played in order. */
-data class StimulusStep(val byte: Int, val holdMs: Long)
+/**
+ * One commanded level, held for a while. A stimulus is a list of these, played in order.
+ *
+ * [rgb] is null for every block up to and including 6, which measure light and not colour: those
+ * command [byte] on all three channels, and saying so once here is cheaper than carrying a grey
+ * triple through each of them. A block replaying recorded ambiance output sets it, because a
+ * screen's colour is half of what makes that output wobble.
+ */
+data class StimulusStep(
+    val byte: Int,
+    val holdMs: Long,
+    val rgb: Triple<Int, Int, Int>? = null
+) {
+    /** What actually goes on the wire: the colour if there is one, otherwise grey at [byte]. */
+    val commanded: Triple<Int, Int, Int> get() = rgb ?: Triple(byte, byte, byte)
+}
 
 /** One thing shown in one interval of a trial. */
 data class Stimulus(val label: String, val steps: List<StimulusStep>) {

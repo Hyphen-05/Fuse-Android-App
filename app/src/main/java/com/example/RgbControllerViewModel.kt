@@ -2045,7 +2045,8 @@ class RgbControllerViewModel(
         // Same filter as perceptionTargetCount, so what the screen counted is what gets written to.
         val targets = getCurrentlyControlledDeviceAddresses().filter { bleGattTransport.isConnected(it) }
         for (step in stimulus.steps) {
-            val command = DuoCoProtocol.createColorCommand(step.byte, step.byte, step.byte)
+            val (r, g, b) = step.commanded
+            val command = DuoCoProtocol.createColorCommand(r, g, b)
             targets.forEach { address ->
                 bleGattTransport.writeCommand(address, command, bypassPacing = true)
             }

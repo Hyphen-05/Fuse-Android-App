@@ -74,7 +74,9 @@ android {
 // does not forward -D to the test JVM on its own, so hand this one through; the bench skips when it
 // is unset, which is every ordinary run.
 tasks.withType<Test>().configureEach {
-  System.getProperty("ambiance.frames")?.let { systemProperty("ambiance.frames", it) }
+  listOf("ambiance.frames", "ambiance.traces").forEach { key ->
+    System.getProperty(key)?.let { systemProperty(key, it) }
+  }
 }
 
 // Some unused dependencies are commented out below instead of being removed.
