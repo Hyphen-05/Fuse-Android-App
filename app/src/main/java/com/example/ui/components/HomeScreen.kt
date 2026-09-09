@@ -28,7 +28,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ActiveDeviceState
@@ -191,17 +190,21 @@ fun HomeScreen(
         )
     }
 
-    // Connecting used to end with the control deck simply being there on the next frame. These are
-    // the Expressive motion scheme specs (MotionScheme.expressive) handed to animateItem, so the
-    // deck fades in and everything below it slides down rather than jumping: effects spec for the
-    // alpha, spatial spec for the placement, the same split the connecting indicator's exit uses.
+    // Connecting used to end with the control deck simply being there on the next frame. It now
+    // fades in on the Expressive motion scheme's effects spec (MotionScheme.expressive), the same
+    // spec the connecting indicator's exit uses for its alpha.
+    //
+    // Placement is deliberately NOT animated. The deck inserts about a screenful of height at once,
+    // so animating placement sends everything below it -- the scene rows especially -- travelling
+    // ~1000px, and a spring over that distance has no good speed: fast reads as a glitch, slow
+    // reads as broken. Letting the layout settle in one frame underneath a fade is calmer than any
+    // speed of slide. Small-distance moves would be fine; there are none here.
     //
     // animateItem only animates items added *after* the first composition, and it needs the item
     // keys below to tell one item from another -- so a cold launch is untouched and it is the
     // connect that gets the transition.
     val motion = remember { MotionScheme.expressive() }
     val deckFade = motion.defaultEffectsSpec<Float>()
-    val deckPlacement = motion.defaultSpatialSpec<IntOffset>()
 
     LazyColumn(
         modifier = modifier,
@@ -219,7 +222,7 @@ fun HomeScreen(
                     ),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .border(
                             width = 1.dp,
@@ -291,7 +294,7 @@ fun HomeScreen(
             item(key = "disconnected_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .testTag("connection_status_card_empty"),
                     shape = RoundedCornerShape(24.dp),
@@ -336,7 +339,7 @@ fun HomeScreen(
                 if (connectedAddresses.size <= 2) {
                     Row(
                         modifier = Modifier
-                            .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                            .animateItem(fadeInSpec = deckFade, placementSpec = null)
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -381,7 +384,7 @@ fun HomeScreen(
                     PowerOffHintCard(
                         onTurnOn = { viewModel.setPower(true) },
                         modifier = Modifier
-                            .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                            .animateItem(fadeInSpec = deckFade, placementSpec = null)
                     )
                 }
             }
@@ -390,7 +393,7 @@ fun HomeScreen(
             item(key = "cct_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("cct_control_card"),
@@ -462,7 +465,7 @@ fun HomeScreen(
             item(key = "brightness_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("brightness_control_card"),
@@ -517,7 +520,7 @@ fun HomeScreen(
             item(key = "colour_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("control_deck_card"),
@@ -618,14 +621,13 @@ fun HomeScreen(
         // --- Grid-based Quick Access Scenes ---
         val gridItems = scenes + listOf(null)
         val chunked = gridItems.chunked(2)
-        // Keyed and animated for the same reason as the deck above: these rows are what the deck
-        // pushes down when it appears, and an unanimated item snaps to its new position no matter
-        // how gently the thing above it fades in.
+        // Keyed so the list can track them across the deck appearing above. They fade rather than
+        // slide -- see the placement note above; these are the rows that were doing the sliding.
         chunked.forEachIndexed { rowIndex, rowItems ->
             item(key = "scene_row_" + rowIndex) {
                 Row(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = deckPlacement)
+                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
