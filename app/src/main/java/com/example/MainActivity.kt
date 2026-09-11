@@ -646,6 +646,16 @@ fun MainScreen() {
             } else if (selectedTab == 0) {
                 HomeScreen(
                     viewModel = viewModel,
+                    // Linked but still discovering: the tiles row reserves these a slot so the
+                    // second strip landing does not resize the first mid-reveal.
+                    linkingAddresses = savedDevices
+                        .filter { device ->
+                            device.isAutoConnectEnabled &&
+                                connectionStates[device.macAddress] is com.example.domain.ConnectionState.Connected &&
+                                !isUsable(device)
+                        }
+                        .map { it.macAddress }
+                        .toSet(),
                     permissionsGranted = permissionsGranted,
                     permissionsBlocked = permissionsBlocked,
                     onGrantPermissions = {

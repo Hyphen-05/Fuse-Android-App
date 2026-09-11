@@ -52,7 +52,10 @@ fun HomeScreen(
     permissionsBlocked: Boolean,
     onGrantPermissions: () -> Unit,
     onStartAmbianceCapture: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Strips with a radio link that are still discovering services -- a second or so from usable.
+    // Only connectionManager knows this, so the caller works it out. See the tiles row below.
+    linkingAddresses: Set<String> = emptySet()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
@@ -340,22 +343,49 @@ fun HomeScreen(
             }
         } else {
             item(key = "device_tiles") {
-                if (connectedAddresses.size <= 2) {
+                // A strip that is already linked holds its slot before it is usable. Two strips
+                // rarely land together -- 224ms apart on the recorded connect -- and without the
+                // reserved slot the first tile arrived at full width and halved in one frame as the
+                // second popped in beside it: a layout jump in the middle of the reveal. Linking
+                // lasts about a second, so the empty slot is never on screen for long, and a strip
+                // that is merely *trying* to connect gets no slot at all, so a strip that is switched
+                // off cannot leave a hole next to a working one.
+                //
+                // Map order, not arrival order, so a tile never changes side when its partner lands.
+                val slotAddresses = uiState.connectivity.deviceConnectionStates.keys.filter { address ->
+                    uiState.connectivity.deviceConnectionStates[address] == BleConnectionState.CONNECTED ||
+                        address in linkingAddresses
+                }
+                if (slotAddresses.size <= 2) {
                     Row(
-                        modifier = Modifier
-                            .connectReveal(revealAt, 0)
-                            .fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        connectedAddresses.forEach { address ->
-                            DeviceTile(
-                                address = address,
-                                viewModel = viewModel,
-                                uiState = uiState,
-                                savedDevices = savedDevices,
-                                activeComposeColor = activeComposeColor,
-                                modifier = Modifier.weight(1f)
-                            )
+                        slotAddresses.forEach { address ->
+                            key(address) {
+                                val isConnected = uiState.connectivity.deviceConnectionStates[address] ==
+                                    BleConnectionState.CONNECTED
+                                // Each tile reveals on its own arrival, so the second strip fades
+                                // into its slot instead of popping. Same first-composition rule as
+                                // revealAt: tiles already connected when Home appears draw at rest.
+                                val arrivedAt = remember(isConnected) {
+                                    if (isConnected && composedOnce[0]) SystemClock.uptimeMillis() else null
+                                }
+                                if (isConnected) {
+                                    DeviceTile(
+                                        address = address,
+                                        viewModel = viewModel,
+                                        uiState = uiState,
+                                        savedDevices = savedDevices,
+                                        activeComposeColor = activeComposeColor,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .connectReveal(arrivedAt, 0)
+                                    )
+                                } else {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 } else {
