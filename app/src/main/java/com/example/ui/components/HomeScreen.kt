@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,9 +23,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +41,8 @@ import com.example.RgbUiState
 import com.example.ambiance.AmbianceCaptureState
 import com.example.db.SavedDevice
 import com.example.domain.model.AppScene
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -190,21 +196,21 @@ fun HomeScreen(
         )
     }
 
-    // Connecting used to end with the control deck simply being there on the next frame. It now
-    // fades in on the Expressive motion scheme's effects spec (MotionScheme.expressive), the same
-    // spec the connecting indicator's exit uses for its alpha.
+    // The connect used to end with the control deck simply being there on the next frame. It is
+    // now choreographed in *drawing* only -- see connectReveal at the bottom of this file. Layout
+    // lands in one frame; each piece then fades and rises into its own place, one beat after the
+    // piece above it.
     //
-    // Placement is deliberately NOT animated. The deck inserts about a screenful of height at once,
-    // so animating placement sends everything below it -- the scene rows especially -- travelling
-    // ~1000px, and a spring over that distance has no good speed: fast reads as a glitch, slow
-    // reads as broken. Letting the layout settle in one frame underneath a fade is calmer than any
-    // speed of slide. Small-distance moves would be fine; there are none here.
-    //
-    // animateItem only animates items added *after* the first composition, and it needs the item
-    // keys below to tell one item from another -- so a cold launch is untouched and it is the
-    // connect that gets the transition.
-    val motion = remember { MotionScheme.expressive() }
-    val deckFade = motion.defaultEffectsSpec<Float>()
+    // revealAt marks a connect that happened while this screen was already on show. It is null on
+    // the first composition, so a cold launch, a tab switch back to Home, or a ViewModel that was
+    // already connected all draw the page at rest. composedOnce is a plain array rather than state
+    // on purpose: writing state from SideEffect would cost a recomposition for nothing.
+    val connected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED
+    val composedOnce = remember { booleanArrayOf(false) }
+    SideEffect { composedOnce[0] = true }
+    val revealAt = remember(connected) {
+        if (connected && composedOnce[0]) SystemClock.uptimeMillis() else null
+    }
 
     LazyColumn(
         modifier = modifier,
@@ -222,7 +228,6 @@ fun HomeScreen(
                     ),
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .border(
                             width = 1.dp,
@@ -294,7 +299,6 @@ fun HomeScreen(
             item(key = "disconnected_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
                         .fillMaxWidth()
                         .testTag("connection_status_card_empty"),
                     shape = RoundedCornerShape(24.dp),
@@ -339,7 +343,7 @@ fun HomeScreen(
                 if (connectedAddresses.size <= 2) {
                     Row(
                         modifier = Modifier
-                            .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                            .connectReveal(revealAt, 0)
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -384,7 +388,7 @@ fun HomeScreen(
                     PowerOffHintCard(
                         onTurnOn = { viewModel.setPower(true) },
                         modifier = Modifier
-                            .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                            .connectReveal(revealAt, 1)
                     )
                 }
             }
@@ -393,7 +397,7 @@ fun HomeScreen(
             item(key = "cct_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                        .connectReveal(revealAt, 2)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("cct_control_card"),
@@ -465,7 +469,7 @@ fun HomeScreen(
             item(key = "brightness_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                        .connectReveal(revealAt, 3)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("brightness_control_card"),
@@ -520,7 +524,7 @@ fun HomeScreen(
             item(key = "colour_card") {
                 Card(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                        .connectReveal(revealAt, 4)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("control_deck_card"),
@@ -621,13 +625,13 @@ fun HomeScreen(
         // --- Grid-based Quick Access Scenes ---
         val gridItems = scenes + listOf(null)
         val chunked = gridItems.chunked(2)
-        // Keyed so the list can track them across the deck appearing above. They fade rather than
-        // slide -- see the placement note above; these are the rows that were doing the sliding.
+        // The last beats of the connect reveal. The deck pushes these ~1000px down, so they re-enter
+        // at their new position rather than travelling to it -- the travel was what looked wrong.
         chunked.forEachIndexed { rowIndex, rowItems ->
             item(key = "scene_row_" + rowIndex) {
                 Row(
                     modifier = Modifier
-                        .animateItem(fadeInSpec = deckFade, placementSpec = null)
+                        .connectReveal(revealAt, 5 + rowIndex)
                         .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -979,5 +983,51 @@ private fun PowerOffHintCard(onTurnOn: () -> Unit, modifier: Modifier = Modifier
                 Text("Turn on")
             }
         }
+    }
+}
+
+/** How far behind the piece above it each piece of the connect reveal starts. */
+private const val REVEAL_STAGGER_MS = 50L
+
+/**
+ * A piece that first composes this long after the connect draws at rest. Lazy items compose as they
+ * scroll in, and without this a card first reached a minute later would play an entrance for nobody.
+ */
+private const val REVEAL_WINDOW_MS = 1_000L
+
+/** Small on purpose: a settle into place, not travel. Long moves are what looked wrong before. */
+private val REVEAL_RISE = 24.dp
+
+/**
+ * One beat of the connect reveal: fade in and rise [REVEAL_RISE] into place, [index] beats after the
+ * connect, on the Expressive motion scheme's springs (MotionScheme.expressive) -- effects spec for
+ * the fade, which has no bounce because a bouncing opacity reads as flicker, and spatial spec for the
+ * rise, whose bounce is the settle.
+ *
+ * All of it happens in graphicsLayer, and that is the point. The card is full-size in layout from the
+ * first frame, so nothing below it is pushed while it animates. Both earlier attempts failed on
+ * layout moving -- once as a jump, once as a 1000px slide.
+ */
+@Composable
+private fun Modifier.connectReveal(revealAt: Long?, index: Int): Modifier {
+    val motion = remember { MotionScheme.expressive() }
+    val risePx = with(LocalDensity.current) { REVEAL_RISE.toPx() }
+    val startDelayMs = remember(revealAt) {
+        revealAt?.let { at ->
+            val elapsed = SystemClock.uptimeMillis() - at
+            if (elapsed > REVEAL_WINDOW_MS) null else (index * REVEAL_STAGGER_MS - elapsed).coerceAtLeast(0L)
+        }
+    }
+    val fade = remember(revealAt) { Animatable(if (startDelayMs == null) 1f else 0f) }
+    val lift = remember(revealAt) { Animatable(if (startDelayMs == null) 0f else 1f) }
+    LaunchedEffect(revealAt) {
+        if (startDelayMs == null) return@LaunchedEffect
+        delay(startDelayMs)
+        launch { fade.animateTo(1f, motion.defaultEffectsSpec()) }
+        lift.animateTo(0f, motion.defaultSpatialSpec())
+    }
+    return this.graphicsLayer {
+        alpha = fade.value
+        translationY = lift.value * risePx
     }
 }
