@@ -41,6 +41,7 @@ Thumbs.db
 # Local dev notes (not for public repo)
 CLAUDE.md
 HISTORY.md
+notes/
 IMPROVEMENT_PLAN.md
 # Session handoffs: internal notes, deliberately not published (restored 2026-08-29,
 # the 2026-08-15 rollback had reverted this line and re-tracked HANDOFF-2026-08-13.md)
