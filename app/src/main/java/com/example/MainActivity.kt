@@ -504,7 +504,44 @@ fun MainScreen() {
     // stayed non-null until both were up, so the second strip's whole connect held the indicator
     // over an app that was already working.
     val anyDeviceReady = savedDevices.any { it.isAutoConnectEnabled && isUsable(it) }
-    val huntingDevice = if ((!bluetoothEnabled && !uiState.coreControl.isDemoMode) || anyDeviceReady) {
+
+    // Strips that are linked but still discovering. When the first strip becomes usable while
+    // another is already this far along, the page waits for it -- capped at partnerWaitMs -- so both
+    // tiles arrive together instead of one landing beside an empty slot. A strip that is only
+    // *trying* to connect is not waited for: that can take many seconds, or never finish. If the
+    // cap runs out, HomeScreen's tiles row handles the late arrival (full width, then a split).
+    val partnerWaitMs = 1_000L
+    val linkingDevices = savedDevices.filter { device ->
+        device.isAutoConnectEnabled &&
+            connectionStates[device.macAddress] is com.example.domain.ConnectionState.Connected &&
+            !isUsable(device)
+    }
+    // Timestamps rather than booleans, so a second connect in the same session starts a fresh wait
+    // synchronously instead of reading the previous wait's expiry for a frame.
+    val readyAt = remember(anyDeviceReady) {
+        if (anyDeviceReady) android.os.SystemClock.uptimeMillis() else null
+    }
+    var partnerWaitExpiredFor by remember { mutableStateOf<Long?>(null) }
+    androidx.compose.runtime.LaunchedEffect(readyAt) {
+        if (readyAt != null) {
+            kotlinx.coroutines.delay(partnerWaitMs)
+            partnerWaitExpiredFor = readyAt
+        }
+    }
+    // Latched: once the page has been revealed for this connect, a strip that links afterwards must
+    // not pull it back under the indicator. A plain array, not state -- it only records a decision
+    // this composition already made.
+    val revealedFor = remember { longArrayOf(-1L) }
+    val waitingForPartner = readyAt != null && linkingDevices.isNotEmpty() &&
+        partnerWaitExpiredFor != readyAt && revealedFor[0] != readyAt
+    if (readyAt != null && !waitingForPartner) revealedFor[0] = readyAt
+    val huntingDevice = if (!bluetoothEnabled && !uiState.coreControl.isDemoMode) {
+        null
+    } else if (waitingForPartner) {
+        // Keeps the indicator up over the hold. Naming the partner restarts the surface's own
+        // timeout, which is harmless: the hold is capped far below it.
+        linkingDevices.first()
+    } else if (anyDeviceReady) {
         null
     } else {
         savedDevices.firstOrNull { device ->
@@ -646,16 +683,9 @@ fun MainScreen() {
             } else if (selectedTab == 0) {
                 HomeScreen(
                     viewModel = viewModel,
-                    // Linked but still discovering: the tiles row reserves these a slot so the
-                    // second strip landing does not resize the first mid-reveal.
-                    linkingAddresses = savedDevices
-                        .filter { device ->
-                            device.isAutoConnectEnabled &&
-                                connectionStates[device.macAddress] is com.example.domain.ConnectionState.Connected &&
-                                !isUsable(device)
-                        }
-                        .map { it.macAddress }
-                        .toSet(),
+                    // Holds Home in its disconnected state while a second, already-linked strip
+                    // finishes, so both tiles are revealed together. See waitingForPartner.
+                    holdReveal = waitingForPartner,
                     permissionsGranted = permissionsGranted,
                     permissionsBlocked = permissionsBlocked,
                     onGrantPermissions = {
