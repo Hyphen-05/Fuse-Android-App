@@ -1268,11 +1268,18 @@ object LabBlocks {
         val flat = hueSweep(flat = true)
 
         repeat(HUE_REPEATS) {
+            // The order is drawn once and both the intervals and the meta are derived from it. The
+            // first version drew it inside `intervals` and wrote the arms as a constant pair, so
+            // every pump trial claimed raw-then-flat whichever way it actually played. That is not
+            // a cosmetic slip: the answers name an interval letter, and without an honest arm order
+            // beside them there is no way back to which arm he pointed at. It cost the whole
+            // visibility question on the 2026-09-11 sitting - three answers that cannot be read.
+            val rawFirst = random.nextBoolean()
             main.add(
                 LabTrial(
                     block = HUE_MOTION.id,
                     kind = "pump",
-                    intervals = if (random.nextBoolean()) listOf(raw, flat) else listOf(flat, raw),
+                    intervals = if (rawFirst) listOf(raw, flat) else listOf(flat, raw),
                     question = "Did either one pulse in brightness as the colour moved?",
                     hint = "Both sweep the same colours at the same speed.",
                     options = LabOptions.A_B_UNSURE,
@@ -1280,8 +1287,10 @@ object LabBlocks {
                     // not scored: a "can't tell" here is a result, not a mistake.
                     truth = LabTruth.UNKNOWN,
                     correctOptionId = null,
-                    meta = mapOf("armFirst" to ARM_RAW.toInt(), "armSecond" to ARM_FLAT.toInt())
-                        + hueOrderMeta(main.size),
+                    meta = mapOf(
+                        "armFirst" to (if (rawFirst) ARM_RAW else ARM_FLAT).toInt(),
+                        "armSecond" to (if (rawFirst) ARM_FLAT else ARM_RAW).toInt()
+                    ) + hueOrderMeta(main.size),
                     brightnessPercent = null
                 )
             )

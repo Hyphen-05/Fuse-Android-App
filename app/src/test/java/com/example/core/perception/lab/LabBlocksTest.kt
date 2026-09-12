@@ -928,4 +928,42 @@ class LabBlocksTest {
         assertTrue(prefer.all { it.isPreference })
         assertTrue("hue motion plays at his own brightness", trials.all { it.brightnessPercent == null })
     }
+
+    @Test
+    fun `the recorded arm order is the order that plays`() {
+        // An answer names an interval letter and nothing else, so `armFirst`/`armSecond` are the
+        // only route back to which arm he pointed at. Block 8's pump trials once shuffled their
+        // intervals and wrote the arms as a constant pair, and three answers from the 2026-09-11
+        // sitting are unreadable because of it.
+        //
+        // The invariant is checked without knowing what any arm means: within one block and kind,
+        // an arm id must always name the same stimulus. The bug breaks that - arm 0 came back as
+        // both `hue_raw` and `hue_flat`.
+        for (spec in LabBlocks.ALL) {
+            for (seed in listOf(3L, 4L, 5L)) {
+                val named = mutableMapOf<String, String>()
+                for (t in LabBlocks.trialsFor(spec, joe, seed)) {
+                    if (t.intervals.size != 2) continue
+                    val first = t.meta["armFirst"] ?: continue
+                    val second = t.meta["armSecond"] ?: continue
+                    for ((arm, stimulus) in listOf(first to t.intervals[0], second to t.intervals[1])) {
+                        // Scoped the way `LabAnalysis.PairKey` is scoped: the same arm asked at a
+                        // different anchor, rung or clip is a different question and plays a
+                        // different stimulus. Block 4's arms are ease durations and each one runs
+                        // at both anchors, so an unscoped key would fail it for being correct.
+                        val scope = listOf("anchorLevel", "toLevel", "clip")
+                            .joinToString("/") { t.meta[it]?.toString() ?: "-" }
+                        val key = "${spec.id}/${t.kind}/$scope/$arm"
+                        val seen = named.putIfAbsent(key, stimulus.label)
+                        if (seen != null) {
+                            assertEquals(
+                                "$key names two different stimuli",
+                                seen, stimulus.label
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
