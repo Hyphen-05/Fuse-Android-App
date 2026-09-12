@@ -1,0 +1,182 @@
+{
+  "kind": "lab_block",
+  "block": "hue_motion",
+  "generatedAtMs": 1789169875698,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 1,
+  "catchFalsePositives": 1,
+  "anchorTrials": 1,
+  "anchorsMissed": 1,
+  "trials": [
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness as the colour moved?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 1
+      },
+      "answer": "a",
+      "responseMs": 1978
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness as the colour moved?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 2
+      },
+      "answer": "b",
+      "responseMs": 4238
+    },
+    {
+      "kind": "anchor",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 2
+      },
+      "answer": "a",
+      "responseMs": 835
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness as the colour moved?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 0
+      },
+      "answer": "a",
+      "responseMs": 2082
+    },
+    {
+      "kind": "prefer",
+      "question": "Which colour motion did you prefer?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1
+      },
+      "answer": "b",
+      "responseMs": 1112
+    },
+    {
+      "kind": "prefer",
+      "question": "Which colour motion did you prefer?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 0
+      },
+      "answer": "unsure",
+      "responseMs": 1271
+    },
+    {
+      "kind": "catch",
+      "question": "Which colour motion did you prefer?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 0
+      },
+      "answer": "b",
+      "responseMs": 1297
+    },
+    {
+      "kind": "prefer",
+      "question": "Which colour motion did you prefer?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "repeat": 1
+      },
+      "answer": "b",
+      "responseMs": 1776
+    },
+    {
+      "kind": "prefer",
+      "question": "Which colour motion did you prefer?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 0,
+        "repeat": 1
+      },
+      "answer": "unsure",
+      "responseMs": 1854
+    }
+  ]
+}

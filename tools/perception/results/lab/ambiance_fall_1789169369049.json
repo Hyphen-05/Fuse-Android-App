@@ -1,0 +1,207 @@
+{
+  "kind": "lab_block",
+  "block": "ambiance_fall",
+  "generatedAtMs": 1789169369048,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 2,
+  "catchFalsePositives": 0,
+  "anchorTrials": 1,
+  "anchorsMissed": 0,
+  "trials": [
+    {
+      "kind": "catch",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 1,
+        "armFirst": 0,
+        "armSecond": 0
+      },
+      "answer": "unsure",
+      "responseMs": 797
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 1,
+        "armFirst": 0,
+        "armSecond": 1
+      },
+      "answer": "b",
+      "responseMs": 1536
+    },
+    {
+      "kind": "anchor",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "b",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 2
+      },
+      "answer": "b",
+      "responseMs": 1298
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 1,
+        "armFirst": 1,
+        "armSecond": 0
+      },
+      "answer": "a",
+      "responseMs": 7071
+    },
+    {
+      "kind": "catch",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 0,
+        "armFirst": 0,
+        "armSecond": 0
+      },
+      "answer": "unsure",
+      "responseMs": 1227
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 0,
+        "armFirst": 1,
+        "armSecond": 0
+      },
+      "answer": "unsure",
+      "responseMs": 1163
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 0,
+        "armFirst": 0,
+        "armSecond": 1
+      },
+      "answer": "unsure",
+      "responseMs": 2689
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 0,
+        "armFirst": 0,
+        "armSecond": 1,
+        "repeat": 1
+      },
+      "answer": "b",
+      "responseMs": 2025
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 1,
+        "armFirst": 1,
+        "armSecond": 0,
+        "repeat": 1
+      },
+      "answer": "a",
+      "responseMs": 1713
+    },
+    {
+      "kind": "fall",
+      "question": "Which one was steadier?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": true,
+      "brightnessPercent": null,
+      "meta": {
+        "clip": 1,
+        "armFirst": 0,
+        "armSecond": 1,
+        "repeat": 1
+      },
+      "answer": "b",
+      "responseMs": 1037
+    }
+  ]
+}

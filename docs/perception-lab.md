@@ -6,7 +6,8 @@ Read this before changing anything under `core/perception/`, `core/perception/la
 Results and what they concluded live elsewhere: [perception-2026-09-05.md](perception-2026-09-05.md)
 (first sitting), [quantisation-2026-09-05.md](quantisation-2026-09-05.md) (the grid rule),
 [battery-2026-09-06.md](battery-2026-09-06.md) (blocks 0-3),
-[taste-2026-09-06.md](taste-2026-09-06.md) (blocks 4-6).
+[taste-2026-09-06.md](taste-2026-09-06.md) (blocks 4-6),
+[battery-2026-09-11.md](battery-2026-09-11.md) (blocks 7-8).
 
 ## What it is for
 
@@ -120,8 +121,8 @@ Lab > Test battery**.
 | 4 | `smoothing` | preferred settling speed when the picture changes — the 2026-09-04 number | yes |
 | 5 | `jumps` | how big a change has to be before a cut beats an ease | yes |
 | 6 | `near_black` | where the floor sits, and whether dim scenes should be lifted into the smooth region | yes |
-| 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes |
-| 8 | `hue_motion` | whether a hue sweep's built-in 2x brightness swing is visible, and wanted | yes |
+| 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes, **answered** |
+| 8 | `hue_motion` | whether a hue sweep's built-in 2x brightness swing is visible, and wanted | yes, run **void** |
 | 9-10 | — | one visualiser taste block, then validation | no |
 
 **Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
@@ -228,3 +229,26 @@ a reference event to be judged against: on a strip alone there is nothing to be 
 The obvious source is the phone itself — flash the screen at the moment the write goes out and ask
 whether the strip lagged it — which is a new stimulus shape rather than a new ladder, and is why
 this was not simply rewritten alongside blocks 4-6.
+
+## What the 2026-09-11 sitting changed about the lab itself
+
+Block 7 answered and block 8 came back void — full reading in
+[battery-2026-09-11.md](battery-2026-09-11.md). Two of its lessons belong here rather than there,
+because they are about how blocks are built:
+
+- **A trial's recorded arm order must be derived from the same draw as its interval order.** Block
+  8's `pump` trials shuffled the intervals and wrote the arms as a constant pair, so three answers
+  are unattributable and unrecoverable — the seed that would replay them lives only in the progress
+  file, which is deleted on completion. `LabBlocksTest` now pins the general invariant: within one
+  block, kind and scope, an arm id always names the same stimulus. It is scoped by
+  `anchorLevel`/`toLevel`/`clip` the way `LabAnalysis.PairKey` is, because block 4's ease-duration
+  arms legitimately run at two anchors.
+- **An anchor has to be asked in its own block's vocabulary.** Block 8 inherited block 7's "which
+  one was steadier?" into a block whose every other trial asks about pulsing or preference, and Joe
+  named the moving arm in 835ms. That is the right answer to the question the block had been putting
+  to him for the previous three trials. Block 7's identical wording, in a block that asks it
+  throughout, was answered correctly — so this is the surrounding questions, not the anchor.
+
+`PreferenceReading.trustworthy` also needs reading beside `controls()` rather than alone: a null
+`orderRobustness` defaults to passing, so block 8's four confounded preference answers score
+`trustworthy = true` on their own.
