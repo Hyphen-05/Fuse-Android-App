@@ -3,6 +3,7 @@ package com.example.core.perception.lab
 import com.example.core.perception.Stimulus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -915,18 +916,128 @@ class LabBlocksTest {
             .withIndex().filter { it.value > 0 }.map { it.index }.toSet()
 
     @Test
-    fun `the pulse question is a measurement and the preference question is not`() {
-        // Asking only the preference would leave "no preference" and "cannot see it" as one answer,
-        // which is the failure block 2 died of.
+    fun `hue motion asks one question, and it is a measurement rather than a taste`() {
+        // The preference question was dropped after 2026-09-11: it collected position, not taste,
+        // and there is nothing to prefer between two motions until one of them is known to be
+        // visible. If the swing turns out to be invisible the whole idea dies here, which is
+        // cheaper than asking both.
         val trials = LabBlocks.trialsFor(LabBlocks.HUE_MOTION, joe, seed = 5L)
+        assertTrue("no taste question until the swing is known to be visible", trials.none { it.isPreference })
         val pump = trials.filter { it.kind == "pump" }
-        val prefer = trials.filter { it.kind == "prefer" }
-        assertTrue(pump.isNotEmpty())
-        assertTrue(prefer.isNotEmpty())
+        assertEquals(LabBlocks.HUE_REPEATS, pump.size)
         assertTrue("whether he can see the swing is measured, never scored", pump.none { it.isScorable })
-        assertTrue(pump.none { it.isPreference })
-        assertTrue(prefer.all { it.isPreference })
         assertTrue("hue motion plays at his own brightness", trials.all { it.brightnessPercent == null })
+        assertTrue("the null answer must read as 'neither', not as defeat",
+            trials.all { t -> t.options.first { it.id == "unsure" }.label == "Neither" })
+    }
+
+    @Test
+    fun `the two interval orders are balanced rather than drawn`() {
+        // He breaks ties by naming the second interval. With the orders balanced that habit scores
+        // an even split and reads as "nothing seen", which is the truth; drawn at random it can
+        // produce a lopsided result that looks like a finding.
+        for (seed in listOf(1L, 2L, 3L, 9L)) {
+            val pump = LabBlocks.trialsFor(LabBlocks.HUE_MOTION, joe, seed).filter { it.kind == "pump" }
+            val rawFirst = pump.count { it.meta["armFirst"] == LabBlocks.ARM_RAW.toInt() }
+            assertEquals("seed $seed: orders not balanced", pump.size - rawFirst, rawFirst)
+        }
+    }
+
+    @Test
+    fun `the hue anchor is asked in the block's own words`() {
+        // Block 8's 2026-09-11 anchor inherited block 7's "which one was steadier?" into a block
+        // that asks about pulsing either side of it, and Joe named the moving arm in 835ms - the
+        // right answer to the question he had just been asked three times. An anchor is the block's
+        // own question with an unmissable answer, never a different question borrowed from a
+        // neighbour.
+        val trials = LabBlocks.trialsFor(LabBlocks.HUE_MOTION, joe, seed = 5L)
+        val asked = trials.filter { it.kind == "pump" }.map { it.question }.distinct()
+        assertEquals(1, asked.size)
+        val anchor = trials.single { it.kind == LabTrial.KIND_ANCHOR }
+        assertEquals("the anchor asks something else", asked.single(), anchor.question)
+        assertNotNull("an anchor has a right answer", anchor.correctOptionId)
+
+        // And it has to be unmissable: far more swing than the 2x under measurement, so a run of
+        // "neither" can be told apart from having stopped watching.
+        val pumped = LabBlocks.hueSweepPumped()
+        val light = pumped.steps.map { LabBlocks.totalLight(it.commanded) }
+        assertTrue(
+            "the anchor swings ${light.max() / light.min()}x, which is not unmissable",
+            light.max() / light.min() > 2.5
+        )
+        val flat = LabBlocks.hueSweep(flat = true).steps.map { LabBlocks.totalLight(it.commanded) }
+        assertTrue("the flat arm should not move", flat.max() / flat.min() < 1.1)
+    }
+
+    @Test
+    fun `the hue catch compares the steady sweep with itself`() {
+        // A catch built on the raw sweep would show him the thing under measurement twice and call a
+        // decisive answer a false positive. The honest null answer has to be the true one.
+        val catch = LabBlocks.trialsFor(LabBlocks.HUE_MOTION, joe, seed = 5L)
+            .single { it.kind == LabTrial.KIND_CATCH }
+        assertEquals("unsure", catch.correctOptionId)
+        assertEquals(catch.intervals[0].label, catch.intervals[1].label)
+        assertEquals("hue_flat", catch.intervals[0].label)
+    }
+
+    @Test
+    fun `every ambiance trial plays the film, and the same film in both intervals`() {
+        // Joe's objection to the 2026-09-11 sitting: with a blank screen he was judging the lights
+        // with no context, which is not a situation ambiance is ever in. The film is the fix - and
+        // it has to be the SAME film in both intervals, or it becomes a way to tell the arms apart
+        // that has nothing to do with the rule under test.
+        val trials = LabBlocks.trialsFor(LabBlocks.AMBIANCE_FALL, joe, seed = 5L)
+        assertTrue(trials.isNotEmpty())
+        for (t in trials) {
+            val clips = t.intervals.map { it.clip }
+            assertTrue("${t.kind}: an ambiance interval with no film", clips.none { it == null })
+            assertEquals("${t.kind}: the two intervals play different films", 1, clips.distinct().size)
+        }
+    }
+
+    @Test
+    fun `every film a trial names is actually shipped`() {
+        // A trace id that has no clip cut for it fails silently at runtime - `getIdentifier`
+        // returns 0 and the block plays its lights against a black rectangle, which is the state
+        // the film exists to replace. Regenerate with `tools/ambiance-bench/cut.py`.
+        val named = LabBlocks.ALL
+            .filterNot { it.isRetired }
+            .flatMap { LabBlocks.trialsFor(it, joe, 5L) }
+            .flatMap { t -> t.intervals.mapNotNull { it.clip } }
+            .distinct()
+        assertTrue("no block names a film at all", named.isNotEmpty())
+        for (clip in named) {
+            val f = java.io.File("src/main/res/raw/$clip.mp4")
+            assertTrue("res/raw/$clip.mp4 is missing - run tools/ambiance-bench/cut.py", f.isFile)
+        }
+    }
+
+    @Test
+    fun `the film's licence is attributed where it is seen`() {
+        // Tears of Steel is CC-BY, which is what makes shipping it in the APK fine - and CC-BY
+        // wants the attribution to reach whoever sees the clip, not just the repo.
+        assertTrue(
+            "block 7 shows a CC-BY film and must credit it",
+            LabBlocks.AMBIANCE_FALL.briefing.any {
+                it.contains("Tears of Steel") && it.contains("Blender Foundation")
+            }
+        )
+    }
+
+    @Test
+    fun `a block whose question needs explaining carries a briefing`() {
+        // One line under the question is read while he is already trying to answer it. Block 8 is
+        // the case: on 2026-09-11 it asked about pulsing, about steadiness and about preference in
+        // one sitting, and the answers say the question was never separated from the colour motion.
+        assertTrue(LabBlocks.HUE_MOTION.briefing.size >= 3)
+        assertTrue(
+            "the briefing must say what the question is not about",
+            LabBlocks.HUE_MOTION.briefing.any { it.contains("colour", ignoreCase = true) }
+        )
+        assertTrue(
+            "the briefing must license the null answer",
+            LabBlocks.HUE_MOTION.briefing.any { it.contains("Neither") }
+        )
     }
 
     @Test

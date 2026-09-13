@@ -53,7 +53,21 @@ data class StimulusStep(
 }
 
 /** One thing shown in one interval of a trial. */
-data class Stimulus(val label: String, val steps: List<StimulusStep>) {
+data class Stimulus(
+    val label: String,
+    val steps: List<StimulusStep>,
+    /**
+     * A video to play on the phone while this stimulus runs, named as a `res/raw` resource.
+     *
+     * Null for everything that is a light on its own. Block 7 is the exception and the reason this
+     * exists: it asks which of two ambiance rules looks steadier, and Joe's objection to the first
+     * sitting was that with a blank screen he was judging the lights with no context - which is
+     * not a situation ambiance is ever in. The clip is cut from exactly the frames the trace was
+     * computed from (`tools/ambiance-bench/cut.py`), so the picture and the light are the same
+     * moment by construction rather than by being lined up.
+     */
+    val clip: String? = null
+) {
     val durationMs: Long get() = steps.sumOf { it.holdMs }
 }
 

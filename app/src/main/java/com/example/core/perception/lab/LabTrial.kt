@@ -147,4 +147,19 @@ object LabOptions {
         LabOption("b", "B"),
         LabOption("unsure", "Can't tell")
     )
+
+    /**
+     * The same three answers where the honest null one is "neither", not "can't tell".
+     *
+     * The id stays `unsure`, because every reading treats that id as the null answer and a second
+     * spelling would quietly divide the null answers in two. Only the label changes - and it has to,
+     * because "can't tell" invites a guess where "neither" is a thing he might positively mean. On
+     * block 8 "neither of them pulsed" is a real and likely outcome, and it must not read as
+     * admitting defeat.
+     */
+    val A_B_NEITHER = listOf(
+        LabOption("a", "A"),
+        LabOption("b", "B"),
+        LabOption("unsure", "Neither")
+    )
 }

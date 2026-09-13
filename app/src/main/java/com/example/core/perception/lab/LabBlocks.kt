@@ -37,7 +37,17 @@ object LabBlocks {
          * already known to mean nothing — which is worse than deleting it, because the answers would
          * look like data.
          */
-        val retiredBecause: String? = null
+        val retiredBecause: String? = null,
+        /**
+         * What to read before the first trial: what the question means, and how to tell.
+         *
+         * The runner shows these as a screen he taps through, once per sitting. A one-line hint
+         * under the question is the wrong place to explain a question - it is read while he is
+         * trying to answer, and block 8's 2026-09-11 run shows what happens when the question is
+         * not understood before the strip starts moving. Empty for blocks whose question needs no
+         * explaining.
+         */
+        val briefing: List<String> = emptyList()
     ) {
         val isRetired: Boolean get() = retiredBecause != null
     }
@@ -103,14 +113,43 @@ object LabBlocks {
         id = "ambiance_fall",
         title = "Ambiance: dark scenes",
         purpose = "Whether removing the smoother's downward bias makes a dark scene steadier",
-        estimateMinutes = 4
+        estimateMinutes = 5,
+        briefing = listOf(
+            "This plays a few seconds of a film on the phone, twice - A, then B - with the strip " +
+                "lit from it exactly as ambiance would light it.",
+            "It is the same few seconds of film both times, and the same moment of it. What " +
+                "differs is only the rule deciding how fast the lights follow the picture down " +
+                "when a scene gets darker.",
+            "Watch the film. Let the strip sit at the edge of your vision, the way it does when " +
+                "you are actually watching something - that is the whole point of the picture " +
+                "being there.",
+            "Then say which one held steadier: which was less twitchy, less inclined to jitter " +
+                "or flicker as the scene moved. Not which was brighter, and not which you liked " +
+                "the colour of.",
+            "If they looked the same, say Can't tell. On some of these there is genuinely nothing " +
+                "in it.",
+            "Clips are from Tears of Steel, (CC) Blender Foundation, mango.blender.org."
+        )
     )
 
     val HUE_MOTION = BlockSpec(
         id = "hue_motion",
         title = "Hue motion: does it pulse",
-        purpose = "Whether a hue sweep's built-in 2x brightness swing is visible, and wanted",
-        estimateMinutes = 5
+        purpose = "Whether the brightness swing built into a hue sweep is visible to you",
+        estimateMinutes = 4,
+        briefing = listOf(
+            "You will see the strip cycle through every colour twice - first A, then B. Both take " +
+                "the same four seconds and go through the same colours at the same speed.",
+            "The question is only about BRIGHTNESS. The colour changes in both of them, all the " +
+                "way round, and that is not what is being asked about.",
+            "One of them may get brighter and dimmer as it goes round - a throb, several times " +
+                "per lap, riding on top of the colour change. The other may hold a steady level " +
+                "throughout.",
+            "So: did either one pulse? If neither seemed to change brightness, say Neither - that " +
+                "is a real answer and quite possibly the right one. Do not go looking for a " +
+                "difference that is not there.",
+            "Watch the strip, not the phone. Some laps have no difference in them at all."
+        )
     )
 
     /**
@@ -1118,8 +1157,11 @@ object LabBlocks {
         val tail = mutableListOf<LabTrial>()
 
         AmbianceTraces.ALL.forEachIndexed { index, pair ->
-            val shipped = traceStimulus("${pair.id}_shipped", pair.stepMs, pair.shipped)
-            val symmetric = traceStimulus("${pair.id}_symmetric", pair.stepMs, pair.symmetricFall)
+            // Both arms play the same film, which is what makes them the same scene rendered two
+            // ways rather than two scenes. It also means the picture cannot be used to tell them
+            // apart - the same control the matched write cadence gives on the strip.
+            val shipped = traceStimulus("${pair.id}_shipped", pair.stepMs, pair.shipped, pair.id)
+            val symmetric = traceStimulus("${pair.id}_symmetric", pair.stepMs, pair.symmetricFall, pair.id)
             val first = preferencePair(
                 AMBIANCE_FALL.id, "fall",
                 shipped, ARM_SHIPPED,
@@ -1148,8 +1190,8 @@ object LabBlocks {
         val pair = AmbianceTraces.ALL.first()
         main.add(
             anchorSteadier(
-                traceStimulus("${pair.id}_shipped", pair.stepMs, pair.shipped),
-                flatOf("${pair.id}_flat", pair.stepMs, pair.shipped),
+                traceStimulus("${pair.id}_shipped", pair.stepMs, pair.shipped, pair.id),
+                flatOf("${pair.id}_flat", pair.stepMs, pair.shipped, pair.id),
                 context, random
             )
         )
@@ -1166,10 +1208,10 @@ object LabBlocks {
 
     private const val FALL_QUESTION = "Which one was steadier?"
     private const val FALL_HINT =
-        "Both are the same few seconds of a dark scene. Watch for jitter rather than brightness."
+        "Same seconds of film both times. Which strip held steadier - less twitchy, less jitter?"
 
-    /** A recorded trace as a stimulus: flat RGB triples at a fixed step. */
-    fun traceStimulus(label: String, stepMs: Long, flat: List<Int>): Stimulus {
+    /** A recorded trace as a stimulus: flat RGB triples at a fixed step, beside its own film. */
+    fun traceStimulus(label: String, stepMs: Long, flat: List<Int>, clip: String? = null): Stimulus {
         require(flat.size % 3 == 0) { "a trace is whole RGB triples" }
         val steps = ArrayList<StimulusStep>(flat.size / 3)
         for (i in flat.indices step 3) {
@@ -1178,11 +1220,11 @@ object LabBlocks {
             // guard among them - still sees a sensible level rather than zero.
             steps.add(StimulusStep(maxOf(rgb.first, rgb.second, rgb.third), stepMs, rgb))
         }
-        return Stimulus(label, steps)
+        return Stimulus(label, steps, clip)
     }
 
     /** The same trace's mean colour, held still for the same duration with the same write count. */
-    fun flatOf(label: String, stepMs: Long, flat: List<Int>): Stimulus {
+    fun flatOf(label: String, stepMs: Long, flat: List<Int>, clip: String? = null): Stimulus {
         val n = flat.size / 3
         val mean = Triple(
             (0 until n).sumOf { flat[it * 3] } / n,
@@ -1192,7 +1234,7 @@ object LabBlocks {
         val steps = (0 until n).map {
             StimulusStep(maxOf(mean.first, mean.second, mean.third), stepMs, mean)
         }
-        return Stimulus(label, steps)
+        return Stimulus(label, steps, clip)
     }
 
     private fun anchorSteadier(
@@ -1261,81 +1303,102 @@ object LabBlocks {
      */
     fun hueMotionTrials(context: LabContext, seed: Long): List<LabTrial> {
         val random = Random(seed)
-        val main = mutableListOf<LabTrial>()
-        val tail = mutableListOf<LabTrial>()
 
         val raw = hueSweep(flat = false)
         val flat = hueSweep(flat = true)
 
-        repeat(HUE_REPEATS) {
-            // The order is drawn once and both the intervals and the meta are derived from it. The
-            // first version drew it inside `intervals` and wrote the arms as a constant pair, so
-            // every pump trial claimed raw-then-flat whichever way it actually played. That is not
-            // a cosmetic slip: the answers name an interval letter, and without an honest arm order
-            // beside them there is no way back to which arm he pointed at. It cost the whole
-            // visibility question on the 2026-09-11 sitting - three answers that cannot be read.
-            val rawFirst = random.nextBoolean()
-            main.add(
-                LabTrial(
-                    block = HUE_MOTION.id,
-                    kind = "pump",
-                    intervals = if (rawFirst) listOf(raw, flat) else listOf(flat, raw),
-                    question = "Did either one pulse in brightness as the colour moved?",
-                    hint = "Both sweep the same colours at the same speed.",
-                    options = LabOptions.A_B_UNSURE,
-                    // Whether he can see a 2x swing riding on a hue sweep is the measurement. It is
-                    // not scored: a "can't tell" here is a result, not a mistake.
-                    truth = LabTruth.UNKNOWN,
-                    correctOptionId = null,
-                    meta = mapOf(
-                        "armFirst" to (if (rawFirst) ARM_RAW else ARM_FLAT).toInt(),
-                        "armSecond" to (if (rawFirst) ARM_FLAT else ARM_RAW).toInt()
-                    ) + hueOrderMeta(main.size),
-                    brightnessPercent = null
-                )
+        // Balanced by construction rather than by coin. Three of each order means that if he
+        // answers by position - and the 2026-09-11 run says he does when a question is hard - the
+        // votes come out 3-3 and read as "nothing seen", which is the truth. Drawing each order at
+        // random would let the same habit produce a lopsided score that looks like a finding.
+        val orders = List(HUE_REPEATS / 2) { true } + List(HUE_REPEATS / 2) { false }
+        val main = orders.shuffled(random).mapIndexed { i, rawFirst ->
+            LabTrial(
+                block = HUE_MOTION.id,
+                kind = "pump",
+                intervals = if (rawFirst) listOf(raw, flat) else listOf(flat, raw),
+                question = PUMP_QUESTION,
+                hint = PUMP_HINT,
+                options = LabOptions.A_B_NEITHER,
+                // Whether he can see a 2x swing riding on a hue sweep is the measurement. It is
+                // not scored: a "neither" here is a result, not a mistake.
+                truth = LabTruth.UNKNOWN,
+                correctOptionId = null,
+                // Drawn once, with both the intervals and the meta derived from it. The first
+                // version drew the order inside `intervals` and wrote the arms as a constant pair,
+                // so every trial claimed raw-then-flat whichever way it played - and the three
+                // answers from 2026-09-11 cannot be read because of it.
+                meta = mapOf(
+                    "armFirst" to (if (rawFirst) ARM_RAW else ARM_FLAT).toInt(),
+                    "armSecond" to (if (rawFirst) ARM_FLAT else ARM_RAW).toInt()
+                ) + hueOrderMeta(i),
+                brightnessPercent = null
             )
-        }
+        }.toMutableList()
 
-        val first = preferencePair(
-            HUE_MOTION.id, "prefer",
-            raw, ARM_RAW, flat, ARM_FLAT,
-            "Which colour motion did you prefer?",
-            "Same colours, same speed. One holds its brightness steady.",
-            random, context, emptyMap()
-        )
-        main.add(first)
-        main.add(mirrored(first))
-
-        // A catch on each question, so the tie-breaking habit shows up on both.
+        // The catch: the flattened sweep against itself. A decisive answer here is a pulse invented
+        // between two identical things, which is the habit rather than a difference seen.
         main.add(
-            catchPair(
-                HUE_MOTION.id, raw, ARM_RAW,
-                "Which colour motion did you prefer?",
-                "Same colours, same speed. One holds its brightness steady.",
-                context, emptyMap()
-            )
-        )
-        // The anchor: a rotation against a colour that does not move at all. Unmissable, so a run of
-        // nulls can be told apart from having stopped watching.
-        main.add(
-            anchorSteadier(
-                raw,
-                Stimulus("hue_still", raw.steps.map { it.copy(rgb = raw.steps.first().rgb) }),
-                context, random
+            LabTrial(
+                block = HUE_MOTION.id,
+                kind = LabTrial.KIND_CATCH,
+                intervals = listOf(flat, flat),
+                question = PUMP_QUESTION,
+                hint = PUMP_HINT,
+                options = LabOptions.A_B_NEITHER,
+                truth = LabTruth.KNOWN,
+                correctOptionId = "unsure",
+                meta = mapOf("armFirst" to ARM_FLAT.toInt(), "armSecond" to ARM_FLAT.toInt()),
+                brightnessPercent = null
             )
         )
 
-        for (original in main.filter { it.kind == "prefer" }.shuffled(random).take(2)) {
-            tail.add(mirrored(original, mapOf("repeat" to 1)))
-        }
-        return main.shuffled(random) + tail.shuffled(random)
+        // The anchor, and it is asked in this block's own words. The 2026-09-11 run inherited block
+        // 7's "which one was steadier?" into a block that asks about pulsing either side of it, and
+        // he named the moving arm in 835ms - which is the right answer to the question the block had
+        // been putting to him for the previous three trials. An anchor has to be the block's own
+        // question with an unmissable answer, not a different question borrowed from elsewhere.
+        val pumpedFirst = random.nextBoolean()
+        val pumped = hueSweepPumped()
+        main.add(
+            LabTrial(
+                block = HUE_MOTION.id,
+                kind = LabTrial.KIND_ANCHOR,
+                intervals = if (pumpedFirst) listOf(pumped, flat) else listOf(flat, pumped),
+                question = PUMP_QUESTION,
+                hint = PUMP_HINT,
+                options = LabOptions.A_B_NEITHER,
+                truth = LabTruth.KNOWN,
+                correctOptionId = if (pumpedFirst) "a" else "b",
+                meta = mapOf(
+                    "armFirst" to (if (pumpedFirst) ARM_PUMPED else ARM_FLAT).toInt(),
+                    "armSecond" to (if (pumpedFirst) ARM_FLAT else ARM_PUMPED).toInt()
+                ),
+                brightnessPercent = null
+            )
+        )
+
+        return main.shuffled(random)
     }
 
     const val ARM_RAW = 0L
     const val ARM_FLAT = 1L
 
-    /** How many times the visibility question is asked. Each is one revolution. */
-    const val HUE_REPEATS = 3
+    /** The anchor's deliberately over-pumped sweep. Never an answer to anything, only a check. */
+    const val ARM_PUMPED = 2L
+
+    private const val PUMP_QUESTION = "Did either one pulse in brightness?"
+    private const val PUMP_HINT =
+        "Not the colour changing - the colour changes in both. Whether the light gets " +
+            "brighter and dimmer as it goes round."
+
+    /**
+     * How many times the visibility question is asked. Half in each order, so [HUE_REPEATS] is even.
+     *
+     * Six rather than the original three because this is now the block's only question, and because
+     * three could not be split evenly between the two orders.
+     */
+    const val HUE_REPEATS = 6
 
     private fun hueOrderMeta(index: Int): Map<String, Int> = mapOf("rep" to index)
 
@@ -1358,6 +1421,35 @@ object LabBlocks {
         }
         return Stimulus(if (flat) "hue_flat" else "hue_raw", out)
     }
+
+    /**
+     * The anchor's sweep: flattened, then deliberately swung far past what the raw sweep does.
+     *
+     * Built on the flat arm rather than the raw one so the pulse is the *only* thing in it - the
+     * raw sweep's own 2x swing is tied to hue and would add a second, differently-timed movement
+     * on top. [ANCHOR_SWING] cycles the target light between roughly a third and full over the
+     * revolution, which is far larger and far slower than the 2x-at-six-per-revolution being
+     * measured. Missing this means not watching.
+     */
+    fun hueSweepPumped(): Stimulus {
+        val steps = HUE_STEPS
+        val hues = (0 until steps).map { it * 360.0 / steps }
+        val mean = hues.map { ColorConverter.hsvToRgb(it.toFloat(), 1f, HUE_BASE_VALUE) }
+            .sumOf { totalLight(it) } / steps
+        val out = hues.mapIndexed { i, hue ->
+            val phase = 2.0 * Math.PI * ANCHOR_CYCLES * i / steps
+            val scale = 1.0 - ANCHOR_SWING * (1.0 - kotlin.math.cos(phase)) / 2.0
+            val rgb = valueForLight(hue.toFloat(), mean * scale)
+            StimulusStep(maxOf(rgb.first, rgb.second, rgb.third), HUE_STEP_MS, rgb)
+        }
+        return Stimulus("hue_pumped", out)
+    }
+
+    /** How far down the anchor's light swings, as a fraction of the rotation's mean. */
+    const val ANCHOR_SWING = 0.65
+
+    /** How many brightness cycles the anchor fits into one revolution. Slow enough to be obvious. */
+    const val ANCHOR_CYCLES = 2
 
     /** Emitted light for a commanded triple, summed over channels on the measured curve. */
     fun totalLight(rgb: Triple<Int, Int, Int>): Double =

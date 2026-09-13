@@ -39,6 +39,22 @@ FPS = 20
 CLIP_SECONDS = 30
 
 
+def download(url, dest):
+    """Fetch to `dest`, with a browser User-Agent.
+
+    download.blender.org sits behind Cloudflare and answers urllib's default `Python-urllib/x.y`
+    with a 403. Nothing about the file is gated - it is CC-BY and served to anyone - so the only
+    thing needed is a User-Agent that is not the default.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req) as r, open(dest, "wb") as f:
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            f.write(chunk)
+
+
 def srgb_to_linear(a):
     a = a / 255.0
     return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
@@ -84,7 +100,7 @@ def main():
         video = os.path.join(args.out, "tears_of_steel_720p.mov")
         if not os.path.exists(video):
             print(f"downloading {SOURCE} (355MB)")
-            urllib.request.urlretrieve(SOURCE, video)
+            download(SOURCE, video)
 
     print("measuring luminance across the film")
     lum, fps = luminance_profile(ff, video)

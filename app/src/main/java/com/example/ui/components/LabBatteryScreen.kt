@@ -12,6 +12,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import android.widget.VideoView
+import androidx.core.net.toUri
+import kotlinx.coroutines.suspendCancellableCoroutine
 import com.example.RgbControllerViewModel
 import com.example.core.perception.FloorFinder
 import com.example.core.perception.Stimulus
@@ -238,11 +246,23 @@ private fun ColumnScope.BlockRunner(
     var replay by remember { mutableIntStateOf(0) }
     var shownAt by remember { mutableLongStateOf(0L) }
     var commanded by remember { mutableIntStateOf(joeBrightness) }
+    // Read before anything moves, and dismissed by hand. A question explained underneath itself is
+    // explained while he is already trying to answer it.
+    var briefed by remember(spec.id) { mutableStateOf(spec.briefing.isEmpty()) }
+    // Block 7 plays the film the trace was recorded from. Everything else is a light on its own and
+    // shows nothing here.
+    val usesFilm = remember(spec.id) { trials.any { t -> t.intervals.any { it.clip != null } } }
+    var videoView by remember(spec.id) { mutableStateOf<VideoView?>(null) }
 
     val index = answers.size
     val trial = trials.getOrNull(index)
 
-    LaunchedEffect(spec.id, index, replay) {
+    LaunchedEffect(spec.id, index, replay, briefed, videoView) {
+        if (!briefed) return@LaunchedEffect
+        // A film block must not start its first trial before the surface exists, or that trial
+        // plays its lights against a black rectangle - which is the exact complaint the film is
+        // here to answer, reintroduced on the one trial nobody would think to check.
+        if (usesFilm && videoView == null) return@LaunchedEffect
         val t = trials.getOrNull(index) ?: return@LaunchedEffect
         awaiting = false
         val want = t.brightnessPercent ?: joeBrightness
@@ -255,6 +275,11 @@ private fun ColumnScope.BlockRunner(
         }
         t.intervals.forEachIndexed { i, stimulus ->
             phase = if (t.intervals.size == 1) "Watch" else if (i == 0) "Showing A" else "Showing B"
+            // Prepared first and started immediately before the stimulus, so the picture and the
+            // light start together. They stay together on their own after that: the clip was
+            // encoded from exactly the frames the trace was computed from, at the trace's own step
+            // rate, so there is no drift to correct - only a common start to get right.
+            stimulus.clip?.let { clip -> videoView?.playFromStart(context, clip) }
             viewModel.playPerceptionStimulus(stimulus)
             if (i < t.intervals.lastIndex) {
                 phase = "…"
@@ -276,6 +301,32 @@ private fun ColumnScope.BlockRunner(
         if (next.size >= trials.size) onFinish(trials, next)
     }
 
+    if (!briefed) {
+        Text(
+            spec.title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "Before you start",
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        spec.briefing.forEach { paragraph ->
+            Text(
+                paragraph,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        AnswerButton("Start", Modifier.fillMaxWidth()) { briefed = true }
+        TextButton(onClick = onAbandon, modifier = Modifier.fillMaxWidth()) { Text("Not now") }
+        return
+    }
+
     val progress = if (trials.isEmpty()) 1.0 else index.toDouble() / trials.size
     Text(
         "${spec.title} · ${index + 1} of ${trials.size}",
@@ -290,12 +341,32 @@ private fun ColumnScope.BlockRunner(
         modifier = Modifier.fillMaxWidth()
     )
     Text(
-        text = if (awaiting) trial?.hint.orEmpty() else "Watch the strip, not the phone.",
+        text = when {
+            awaiting -> trial?.hint.orEmpty()
+            usesFilm -> "Watch the film. Let the strip sit at the edge of your vision."
+            else -> "Watch the strip, not the phone."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth()
     )
+
+    if (usesFilm) {
+        Spacer(Modifier.height(12.dp))
+        AndroidView(
+            factory = { ctx ->
+                // No media controller: a scrub bar invites him to drive the clip, and a clip
+                // driven by hand is no longer the moment the trace was recorded from.
+                VideoView(ctx).also { videoView = it }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(FILM_ASPECT)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black)
+        )
+    }
 
     Spacer(Modifier.weight(1f))
 
@@ -338,6 +409,33 @@ private fun ColumnScope.BlockRunner(
 }
 
 private const val INTER_STIMULUS_MS = 600L
+
+/** The capture frame the clips are cut at (374x168), which is what ambiance actually samples. */
+private const val FILM_ASPECT = 374f / 168f
+
+/**
+ * Start [clip] from its first frame and return once it is running.
+ *
+ * Preparing and starting are separate because a `VideoView` that is merely told to start plays
+ * whenever it happens to be ready, and block 7's whole claim is that the picture and the light are
+ * the same moment. Waiting for prepared first puts the uncertainty before the stimulus rather than
+ * inside it.
+ */
+private suspend fun VideoView.playFromStart(context: android.content.Context, clip: String) {
+    val id = context.resources.getIdentifier(clip, "raw", context.packageName)
+    if (id == 0) return
+    val uri = "android.resource://${context.packageName}/$id".toUri()
+    suspendCancellableCoroutine { cont ->
+        setOnPreparedListener { player ->
+            player.setVolume(0f, 0f)
+            player.isLooping = false
+            if (cont.isActive) cont.resume(Unit) {}
+        }
+        setVideoURI(uri)
+    }
+    seekTo(0)
+    start()
+}
 
 // --- persistence ----------------------------------------------------------------------------------
 

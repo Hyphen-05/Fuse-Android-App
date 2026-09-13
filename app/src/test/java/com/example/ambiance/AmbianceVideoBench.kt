@@ -353,6 +353,10 @@ class AmbianceVideoBench {
 
         val sb = StringBuilder()
         sb.append(HEADER)
+        // Where each excerpt sits in its clip, so `tools/ambiance-bench/cut.py` can encode exactly
+        // the frames the trace was computed from. Block 7 plays the film beside the strip, and the
+        // two have to be the same moment - derived from one source rather than lined up by hand.
+        val excerpts = StringBuilder("[\n")
 
         val clips = root!!.listFiles { f -> f.isDirectory }!!
             .filter { it.name.startsWith("dark") }.sortedBy { it.name }
@@ -392,14 +396,22 @@ class AmbianceVideoBench {
             sb.append("        )\n")
             sb.append("    )\n\n")
             println("${clip.name}: window ${bestStart * frameMs}ms, reversals shipped=$aRev symmetric=$bRev")
+            if (excerpts.length > 2) excerpts.append("," + "\n")
+            excerpts.append(
+                """  {"id": "${clip.name}", "startFrame": $bestStart, "frames": $perExcerpt, """ +
+                    """"fps": ${1000 / frameMs}}"""
+            )
         }
+        excerpts.append("\n]\n")
 
         sb.append("    /** Every pair, in the order a block should offer them. */\n")
         sb.append("    val ALL = listOf(" + clips.joinToString(", ") { it.name.uppercase() } + ")\n")
         sb.append("}\n")
 
         File(outPath!!).writeText(sb.toString())
-        println("wrote $outPath")
+        val sidecar = File(File(outPath).parentFile, "excerpts.json")
+        sidecar.writeText(excerpts.toString())
+        println("wrote $outPath and ${sidecar.path}")
     }
 
     private fun encode(trace: List<Triple<Int, Int, Int>>): String {
