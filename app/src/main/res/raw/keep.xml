@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Block 7's film clips are looked up by name (Resources.getIdentifier), which resource shrinking
+  cannot see. Without this, turning on isShrinkResources would strip them from release builds and
+  block 7 would play its lights against a black rectangle, with no error anywhere.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@raw/dark_*" />
