@@ -56,23 +56,20 @@ import kotlinx.coroutines.launch
  * The top bar's power switch, built to feel like a physical switch rather than a tinted icon.
  *
  * Joe, 2026-09-14: *"the power on/off button and animation and haptics need an overhaul they could be
- * so much nicer and more satisfying."* What it replaced was an `IconButton` whose background
- * crossfaded over 300ms and which gave the same `LongPress` buzz as every other button in the app, on
- * touch-down, whichever way it was switching. So on and off felt identical, and neither felt like
- * anything had been switched.
+ * so much nicer and more satisfying."* History and his verdicts on each round are in
+ * `docs/power-button.md`.
  *
- * Three things carry the feel, and each is split into a press and a commit, the way a real switch is
- * travel and then a snap:
+ * Round 2, from his verdict on round 1: **both resting states are a plain circle**, and the expressive
+ * `MaterialShapes` appear only *during* a switch. The outline morphs out into a shape while it spins,
+ * then settles back into the circle. Round 1 rested on a cookie, and he said on "looks wrong".
  *
- * - **Touch-down**: the button squashes and gives a faint low tick. That is travel, not action.
- * - **On**: the shape blooms from a circle into a cookie and twists, colour floods outward from the
- *   centre, a ring flies off the edge, and the haptic rises and then clicks.
- * - **Off**: the flood drains back into the centre, the cookie relaxes into a circle, there is no
- *   ring, and the haptic falls away into a soft tick. Off is deliberately the smaller gesture.
- *
- * Haptics use `VibrationEffect.Composition` primitives where the handset has them (Pixels do). A
- * handset without them gets the nearest `HapticFeedbackConstants`, which is coarser but still
- * different for on and off.
+ * - **Touch-down**: the button squashes. No haptic here, because the switch is one click, not a tick
+ *   followed by a click.
+ * - **On**: spins clockwise through a soft burst, colour floods out from the centre, a ring flies off
+ *   the edge, and there is one full-strength click.
+ * - **Off**: spins back the other way through a pinched clover, colour drains into the centre, a ring
+ *   collapses *inward* onto the button, and the click is lighter. Round 1's off was "still too boring",
+ *   so it now has its own gesture instead of replaying on more quietly.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -90,18 +87,10 @@ fun PowerButton(
     val onIcon = MaterialTheme.colorScheme.onPrimary
     val offIcon = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // How "on" the button looks. A spring with a little overshoot, so the bloom lands and settles
-    // rather than stopping dead - the shape morph clamps it, the rotation does not.
-    val progress by animateFloatAsState(
-        targetValue = if (isOn) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 420f),
-        label = "powerProgress"
-    )
-    // The colour flood is its own, quicker curve: it should read as the result of the snap, not
-    // ride the same wobble as the shape.
+    // The flood should read as the result of the snap, so it is quick and does not wobble.
     val flood by animateFloatAsState(
         targetValue = if (isOn) 1f else 0f,
-        animationSpec = if (isOn) spring(dampingRatio = 1f, stiffness = 900f) else tween(220),
+        animationSpec = if (isOn) spring(dampingRatio = 1f, stiffness = 900f) else tween(260),
         label = "powerFlood"
     )
 
@@ -112,25 +101,43 @@ fun PowerButton(
         label = "powerPress"
     )
     val kick = remember { Animatable(1f) }
+    // 1 means no ring. On flies it outward and off pulls it in.
     val ring = remember { Animatable(1f) }
+    // How far the outline has left the circle: 0 is the resting circle, 1 is the full expressive
+    // shape. It only leaves 0 while switching.
+    val shapeAmount = remember { Animatable(0f) }
+    // Accumulates instead of resetting, so a tap mid-switch never makes the shape jump.
+    val spin = remember { Animatable(0f) }
+    // Which gesture is playing. It decides the shape and the ring's direction.
+    var switchingOn by remember { mutableStateOf(isOn) }
 
     // The first composition shows the state it finds without playing a switch that nobody pressed.
     var settled by remember { mutableStateOf(false) }
     LaunchedEffect(isOn) {
         if (!settled) { settled = true; return@LaunchedEffect }
-        if (isOn) {
-            launch {
-                ring.snapTo(0f)
-                ring.animateTo(1f, tween(420))
-            }
-            kick.snapTo(1.14f)
-        } else {
-            kick.snapTo(0.93f)
+        switchingOn = isOn
+        launch {
+            ring.snapTo(0f)
+            ring.animateTo(1f, tween(if (isOn) 420 else 360))
         }
+        launch {
+            spin.animateTo(
+                spin.value + if (isOn) 180f else -135f,
+                spring(dampingRatio = 0.75f, stiffness = 180f)
+            )
+        }
+        launch {
+            // Out fast, then back with a little bounce. The bounce is clamped out of the morph, so
+            // the shape it lands on stays a circle.
+            shapeAmount.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 1600f))
+            shapeAmount.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 260f))
+        }
+        kick.snapTo(if (isOn) 1.14f else 0.88f)
         kick.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 500f))
     }
 
-    val morph = remember { Morph(MaterialShapes.Circle, MaterialShapes.Cookie9Sided) }
+    val onMorph = remember { Morph(MaterialShapes.Circle, MaterialShapes.SoftBurst) }
+    val offMorph = remember { Morph(MaterialShapes.Circle, MaterialShapes.Clover4Leaf) }
     val path = remember { Path() }
     val matrix = remember { Matrix() }
 
@@ -156,7 +163,6 @@ fun PowerButton(
                 detectTapGestures(
                     onPress = {
                         pressed = true
-                        haptics.press()
                         val released = tryAwaitRelease()
                         pressed = false
                         if (released) {
@@ -178,15 +184,14 @@ fun PowerButton(
                     scaleY = s
                 }
                 .drawBehind {
-                    val shapeProgress = progress.coerceIn(0f, 1f)
                     path.rewind()
-                    morph.toPath(shapeProgress, path)
+                    val morph = if (switchingOn) onMorph else offMorph
+                    morph.toPath(shapeAmount.value.coerceIn(0f, 1f), path)
                     // MaterialShapes polygons are normalised into the unit square. Place them in
-                    // this box, twisting about the centre by an angle that follows the unclamped
-                    // spring, so the twist overshoots even where the morph cannot.
+                    // this box, spinning about the centre.
                     matrix.reset()
                     matrix.translate(this.size.width / 2f, this.size.height / 2f)
-                    matrix.rotateZ(progress * 40f)
+                    matrix.rotateZ(spin.value)
                     matrix.scale(this.size.width, this.size.height)
                     matrix.translate(-0.5f, -0.5f)
                     path.transform(matrix)
@@ -201,9 +206,21 @@ fun PowerButton(
 
                     val r = ring.value
                     if (r < 1f) {
+                        val half = this.size.minDimension / 2f
+                        val radius: Float
+                        val alpha: Float
+                        if (switchingOn) {
+                            radius = half * (1f + 0.7f * r)
+                            alpha = 0.55f * (1f - r)
+                        } else {
+                            // Starts wide and invisible, peaks halfway in, and is gone by the time
+                            // it reaches the edge.
+                            radius = half * (1.8f - 0.8f * r)
+                            alpha = 1.2f * r * (1f - r)
+                        }
                         drawCircle(
-                            color = onColor.copy(alpha = 0.55f * (1f - r)),
-                            radius = this.size.minDimension / 2f * (1f + 0.7f * r),
+                            color = onColor.copy(alpha = alpha.coerceIn(0f, 1f)),
+                            radius = radius,
                             center = centre,
                             style = Stroke(width = (2.5f * (1f - r) + 0.5f).dp.toPx())
                         )
@@ -221,10 +238,14 @@ fun PowerButton(
 }
 
 /**
- * The switch's three haptic moments.
+ * The switch's haptic, which is one click each way.
  *
- * Kept apart from the composable so the choice of primitive sits in one place and can be tuned by
- * ear - or rather by thumb - without touching the drawing.
+ * Joe on round 1's rise-then-click and fall-then-tick: *"isnt quite right for a switch, it should be
+ * more like a click or something."* The ramps felt like swells. Each direction is now a single
+ * `PRIMITIVE_CLICK`, full strength for on and lighter for off, like one switch clicking both ways.
+ *
+ * It is kept apart from the composable so the primitive can be tuned by thumb without touching the
+ * drawing.
  */
 private class PowerHaptics(private val view: View) {
 
@@ -255,57 +276,22 @@ private class PowerHaptics(private val view: View) {
         }
     }
 
-    private fun supports(vararg primitives: Int): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+    private fun click(scale: Float, fallback: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             vibrator?.hasVibrator() == true &&
-            vibrator.areAllPrimitivesSupported(*primitives)
-
-    /** Travel: barely there. */
-    fun press() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            supports(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)
+            vibrator.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK)
         ) {
             play({
                 VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, 0.5f)
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, scale)
                     .compose()
-            }, HapticFeedbackConstants.KEYBOARD_TAP)
+            }, fallback)
         } else {
-            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            view.performHapticFeedback(fallback)
         }
     }
 
-    /** A rise that snaps: charge, then click. */
-    fun on() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            supports(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, VibrationEffect.Composition.PRIMITIVE_CLICK)
-        ) {
-            play({
-                VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, 0.45f)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 1f, 10)
-                    .compose()
-            }, HapticFeedbackConstants.VIRTUAL_KEY)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-        } else {
-            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-        }
-    }
+    fun on() = click(1f, HapticFeedbackConstants.VIRTUAL_KEY)
 
-    /** Power draining away: a fall into a soft tick. Smaller than on, on purpose. */
-    fun off() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            supports(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, VibrationEffect.Composition.PRIMITIVE_TICK)
-        ) {
-            play({
-                VibrationEffect.startComposition()
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, 0.5f)
-                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.4f, 20)
-                    .compose()
-            }, HapticFeedbackConstants.CLOCK_TICK)
-        } else {
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        }
-    }
+    fun off() = click(0.6f, HapticFeedbackConstants.KEYBOARD_TAP)
 }

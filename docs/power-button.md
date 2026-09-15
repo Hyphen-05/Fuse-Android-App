@@ -24,7 +24,21 @@ Joe, 2026-09-15, on his Pixel:
   static states."** So both resting states should be plain (circle, presumably), and the expressive
   shapes should appear *only while switching* — morph through them and settle back.
 
-Not yet changed in code. The static-cookie on-state is what is installed on his Pixel.
+## Second version (2026-09-15) — built for that verdict, not yet felt by Joe
+
+- **Both states rest on a plain circle.** The outline leaves the circle only while switching: it
+  springs out into the shape, spins, and bounces back. The spin accumulates, so a tap in the middle
+  of a switch doesn't make it jump.
+- **On**: clockwise 180° through `MaterialShapes.SoftBurst`, colour floods out, ring flies outward,
+  kick up to 1.14.
+- **Off**: its own gesture. Anticlockwise 135° through `Clover4Leaf`, colour drains in, a ring
+  *collapses inward* onto the button, kick down to 0.88.
+- **Haptic: a single `PRIMITIVE_CLICK`**, 1.0 for on and 0.6 for off. The press tick is gone, so it is
+  one click per switch. Fallbacks are `VIRTUAL_KEY` for on and `KEYBOARD_TAP` for off.
+
+On the moto (debug build) it drew in the right place, rested on circles both ways, and played the off
+morph and the inward ring, with no crash. Motion and haptics still need Joe on the Pixel. The shapes,
+angles and click strengths are one-line constants, ready for his next verdict.
 
 ## Traps
 
