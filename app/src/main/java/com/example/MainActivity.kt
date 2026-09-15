@@ -332,6 +332,10 @@ fun MainScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) checkPermissions()
+            // A process frozen in the background for hours can miss a disconnect and wake up
+            // showing strips that are gone. ON_START rather than ON_RESUME so it runs before the
+            // home screen decides what to draw, and once per return rather than per dialog.
+            if (event == Lifecycle.Event.ON_START) viewModel.reconcileConnections("returning to the app")
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.hardware.ble.ConnectionReconciler
 import com.example.core.protocol.DuoCoProtocol
 import com.example.core.color.ColorConverter
 import com.example.core.calibration.CalibrationMatrixSolver
@@ -171,6 +172,13 @@ class RgbControllerViewModel(
         // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
         // connectionScope) moved to com.example.hardware.ble.AndroidBleGattTransport (Phase 6).
         val activeExcludedMacs = ConcurrentHashMap.newKeySet<String>()
+
+        /**
+         * The status passed when a disconnect is synthesised by [reconcileConnections] rather than
+         * delivered by the stack. Negative, so it can never collide with a real GATT status, and it
+         * shows up in the diagnostics log's `handleConnectionStateChange` line.
+         */
+        const val STATUS_RECONCILED = -1
     }
 
         private val deviceStateStore = DeviceStateStore(application)
@@ -1749,6 +1757,36 @@ class RgbControllerViewModel(
     // since the transport is a singleton that always calls the currently-registered VM. The
     // exponential-backoff/retry decision logic and all _uiState updates stay here.
 
+    /**
+     * Correct any connection the app believes in that the Bluetooth stack says is gone.
+     *
+     * Called whenever the app returns to the foreground. After hours in the background Android
+     * freezes the process, and a disconnect that lands while it is frozen can fail to reach it - so
+     * the app wakes up showing strips as connected that are not. See [ConnectionReconciler].
+     *
+     * A stale connection is run through the ordinary disconnect path as an unexpected drop, so it
+     * gets exactly what a delivered callback would have given it: the client closed, the state
+     * cleared, and auto-connect's retries if the device has auto-connect on.
+     */
+    fun reconcileConnections(reason: String) {
+        if (_uiState.value.coreControl.isDemoMode) return
+        val believed = connectionManager.connectionStates.value
+            .filterValues { it is com.example.domain.ConnectionState.Connected }.keys
+            .intersect(bleGattTransport.activeConnectionAddresses())
+        if (believed.isEmpty()) return
+        val stale = ConnectionReconciler.stale(believed) { bleGattTransport.systemLinkState(it) }
+        val summary = "reconcileConnections($reason): believed=${believed.size} stale=${stale.size} " +
+            believed.joinToString { "$it=${bleGattTransport.systemLinkState(it)}" }
+        com.example.DiagnosticLogger.log("BLE", summary)
+        // Also to logcat: the healthy case (stale=0) is the one worth being able to see on a phone,
+        // since the risk in this check is dropping strips that are really there.
+        Log.d(TAG, summary)
+        for (address in stale) {
+            addLog("$address was no longer connected after $reason. Treating it as a drop.")
+            handleConnectionStateChange(address, STATUS_RECONCILED, BluetoothProfile.STATE_DISCONNECTED)
+        }
+    }
+
     fun handleConnectionStateChange(address: String, status: Int, newState: Int) {
         com.example.DiagnosticLogger.log(
             "BLE",
@@ -1766,7 +1804,16 @@ class RgbControllerViewModel(
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             addLog("Disconnected from GATT ($address).")
             val wasActive = bleGattTransport.isConnected(address)
-            bleGattTransport.removeConnection(address)
+            // Close the client, not just forget it. Every connectGatt() registers a client with the
+            // Bluetooth stack and only close() gives it back; this path used to drop the reference
+            // without closing, so each unexpected disconnect leaked one registration. Enough of
+            // those and the stack stops answering the process - the "finds no devices until a
+            // force-stop" failure that a stranded CONNECTING once caused the same way.
+            try {
+                bleGattTransport.removeConnection(address)?.close()
+            } catch (e: SecurityException) {
+                addLog("SecurityException closing GATT client for $address.")
+            }
 
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 

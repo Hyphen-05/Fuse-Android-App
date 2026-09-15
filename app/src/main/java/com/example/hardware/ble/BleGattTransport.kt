@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import com.example.core.protocol.DuoCoProtocol
 import java.util.UUID
@@ -124,6 +125,13 @@ interface BleGattTransport {
     fun rawDisconnectAndClose(gatt: BluetoothGatt?)
 
     fun isConnected(address: String): Boolean
+
+    /**
+     * The Bluetooth stack's own view of the GATT link to [address], as a `BluetoothProfile.STATE_*`,
+     * or null when it cannot be asked. Unlike [isConnected] this is not the app's bookkeeping - see
+     * [ConnectionReconciler] for why the two can disagree.
+     */
+    fun systemLinkState(address: String): Int?
     fun activeConnectionAddresses(): Set<String>
     fun deviceWriteManagerAddresses(): Set<String>
 
@@ -410,6 +418,17 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun isConnected(address: String): Boolean = activeConnections.containsKey(address)
+
+    override fun systemLinkState(address: String): Int? = try {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = manager?.adapter
+        if (manager == null || adapter == null || !adapter.isEnabled) null
+        else manager.getConnectionState(adapter.getRemoteDevice(address), BluetoothProfile.GATT)
+    } catch (e: SecurityException) {
+        null
+    } catch (e: IllegalArgumentException) {
+        null
+    }
 
     override fun activeConnectionAddresses(): Set<String> = activeConnections.keys.toSet()
 
