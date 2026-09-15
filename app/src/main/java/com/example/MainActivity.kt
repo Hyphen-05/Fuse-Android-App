@@ -91,6 +91,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.GraphicEq
+import com.example.ui.components.PowerButton
 import com.example.ui.components.ModesScreen
 import com.example.ui.components.MusicScreen
 import com.example.ui.components.HomeScreen
@@ -426,17 +427,6 @@ fun MainScreen() {
         label = "topBarSubtitleColor"
     )
 
-    val powerButtonBgColor by animateColorAsState(
-        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        animationSpec = tween(durationMillis = 300),
-        label = "powerButtonBgColor"
-    )
-
-    val powerButtonIconTint by animateColorAsState(
-        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = tween(durationMillis = 300),
-        label = "powerButtonIconTint"
-    )
 
     // Scan/connect failures are written to coreControl.errorMessage by the ViewModel; this is the
     // only place that reads it. Without this the "Scan for Devices" button just silently no-ops
@@ -601,21 +591,10 @@ fun MainScreen() {
                             .padding(end = 8.dp)
                             .offset(y = (-6).dp)
                     ) {
-                        val powerInteractionSource = remember { MutableInteractionSource() }
-                        IconButton(
-                            onClick = { viewModel.setPower(!uiState.coreControl.isPowerOn) },
-                            interactionSource = powerInteractionSource,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(powerButtonBgColor)
-                                .joyfulPress(powerInteractionSource)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PowerSettingsNew,
-                                contentDescription = "Toggle Power",
-                                tint = powerButtonIconTint
-                            )
-                        }
+                        PowerButton(
+                            isOn = uiState.coreControl.isPowerOn,
+                            onToggle = { viewModel.setPower(it) }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
