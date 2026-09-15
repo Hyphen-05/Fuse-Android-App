@@ -34,7 +34,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Matrix
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -53,7 +52,8 @@ import androidx.graphics.shapes.Morph
 import kotlinx.coroutines.launch
 
 /**
- * The top bar's power switch, built to feel like a physical switch rather than a tinted icon.
+ * The power switch, built to feel like a physical switch rather than a tinted icon. The top bar has one
+ * for every strip at once, and each device tile on Home has one for its own strip.
  *
  * Joe, 2026-09-14: *"the power on/off button and animation and haptics need an overhaul they could be
  * so much nicer and more satisfying."* History and his verdicts on each round are in
@@ -65,11 +65,14 @@ import kotlinx.coroutines.launch
  *
  * - **Touch-down**: the button squashes. No haptic here, because the switch is one click, not a tick
  *   followed by a click.
- * - **On**: spins clockwise through a soft burst, colour floods out from the centre, a ring flies off
- *   the edge, and there is one full-strength click.
- * - **Off**: spins back the other way through a pinched clover, colour drains into the centre, a ring
- *   collapses *inward* onto the button, and the click is lighter. Round 1's off was "still too boring",
- *   so it now has its own gesture instead of replaying on more quietly.
+ * - **On**: spins clockwise through a soft burst, colour floods out from the centre, and there is one
+ *   full-strength click.
+ * - **Off**: spins back the other way through a pinched clover, colour drains into the centre, and the
+ *   click is lighter. Round 1's off was "still too boring", so it has its own shape and direction
+ *   instead of replaying on more quietly.
+ *
+ * Round 2 also drew a ring flying off (on) or collapsing in (off). Joe asked for it to go: the
+ * transition should be the shape morph and nothing else.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -77,7 +80,9 @@ fun PowerButton(
     isOn: Boolean,
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    size: Dp = 44.dp
+    size: Dp = 44.dp,
+    testTag: String = "power_button",
+    label: String = "Power"
 ) {
     val view = LocalView.current
     val haptics = remember(view) { PowerHaptics(view) }
@@ -101,14 +106,12 @@ fun PowerButton(
         label = "powerPress"
     )
     val kick = remember { Animatable(1f) }
-    // 1 means no ring. On flies it outward and off pulls it in.
-    val ring = remember { Animatable(1f) }
     // How far the outline has left the circle: 0 is the resting circle, 1 is the full expressive
     // shape. It only leaves 0 while switching.
     val shapeAmount = remember { Animatable(0f) }
     // Accumulates instead of resetting, so a tap mid-switch never makes the shape jump.
     val spin = remember { Animatable(0f) }
-    // Which gesture is playing. It decides the shape and the ring's direction.
+    // Which gesture is playing, which decides the shape.
     var switchingOn by remember { mutableStateOf(isOn) }
 
     // The first composition shows the state it finds without playing a switch that nobody pressed.
@@ -116,10 +119,6 @@ fun PowerButton(
     LaunchedEffect(isOn) {
         if (!settled) { settled = true; return@LaunchedEffect }
         switchingOn = isOn
-        launch {
-            ring.snapTo(0f)
-            ring.animateTo(1f, tween(if (isOn) 420 else 360))
-        }
         launch {
             spin.animateTo(
                 spin.value + if (isOn) 180f else -135f,
@@ -145,10 +144,10 @@ fun PowerButton(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(48.dp)
-            .testTag("power_button")
+            .testTag(testTag)
             .semantics {
                 role = Role.Switch
-                contentDescription = "Power"
+                contentDescription = label
                 stateDescription = if (isOn) "On" else "Off"
                 // The tap handler below is raw pointer input, which accessibility services cannot
                 // see. Without this action TalkBack would announce a switch it cannot flip.
@@ -202,28 +201,6 @@ fun PowerButton(
                     clipPath(path) {
                         drawRect(offColor)
                         if (flood > 0.001f) drawCircle(onColor, radius = reach * flood, center = centre)
-                    }
-
-                    val r = ring.value
-                    if (r < 1f) {
-                        val half = this.size.minDimension / 2f
-                        val radius: Float
-                        val alpha: Float
-                        if (switchingOn) {
-                            radius = half * (1f + 0.7f * r)
-                            alpha = 0.55f * (1f - r)
-                        } else {
-                            // Starts wide and invisible, peaks halfway in, and is gone by the time
-                            // it reaches the edge.
-                            radius = half * (1.8f - 0.8f * r)
-                            alpha = 1.2f * r * (1f - r)
-                        }
-                        drawCircle(
-                            color = onColor.copy(alpha = alpha.coerceIn(0f, 1f)),
-                            radius = radius,
-                            center = centre,
-                            style = Stroke(width = (2.5f * (1f - r) + 0.5f).dp.toPx())
-                        )
                     }
                 }
         ) {

@@ -21,16 +21,28 @@ sealed interface CoreSideEffect {
     data class SavePrefInt(val key: String, val value: Int) : CoreSideEffect
     data class SavePrefString(val key: String, val value: String) : CoreSideEffect
     data class Log(val message: String) : CoreSideEffect
-    data class BroadcastCommand(val command: ByteArray, val logMessage: String, val cancelRunningScenes: Boolean = true) : CoreSideEffect {
+    /**
+     * Sent to every controlled strip, except strips switched off on their own tile - unless
+     * [includePoweredOff], which only the global power switch sets, because it is the one broadcast
+     * that has to reach a strip that is off.
+     */
+    data class BroadcastCommand(
+        val command: ByteArray,
+        val logMessage: String,
+        val cancelRunningScenes: Boolean = true,
+        val includePoweredOff: Boolean = false
+    ) : CoreSideEffect {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is BroadcastCommand) return false
-            return command.contentEquals(other.command) && logMessage == other.logMessage && cancelRunningScenes == other.cancelRunningScenes
+            return command.contentEquals(other.command) && logMessage == other.logMessage &&
+                cancelRunningScenes == other.cancelRunningScenes && includePoweredOff == other.includePoweredOff
         }
         override fun hashCode(): Int {
             var result = command.contentHashCode()
             result = 31 * result + logMessage.hashCode()
             result = 31 * result + cancelRunningScenes.hashCode()
+            result = 31 * result + includePoweredOff.hashCode()
             return result
         }
     }
@@ -51,6 +63,7 @@ sealed interface CoreSideEffect {
     data class StopMusicSync(val restoreState: Boolean) : CoreSideEffect
     data class StopAmbiance(val restoreState: Boolean) : CoreSideEffect
     object CancelSceneChain : CoreSideEffect
+    data class CancelSceneRunner(val address: String) : CoreSideEffect
     object ClearExclusionsIfNotApplyingScene : CoreSideEffect
     object StartBleScan : CoreSideEffect
     object StopBleScan : CoreSideEffect
@@ -65,6 +78,9 @@ sealed interface CoreSideEffect {
     data class SaveDeviceAlias(val address: String, val customName: String) : CoreSideEffect
     data class DeleteDeviceAlias(val address: String) : CoreSideEffect
 }
+
+/** Where one strip's own power is persisted, so a strip switched off on its tile stays off across launches. */
+fun devicePowerPrefKey(address: String) = "power_on_$address"
 
 // Mirrors RgbControllerViewModel.updateControlledDevicesInMap() (lines 3000-3039): for every
 // target address, create a default ActiveDeviceState from the (already-updated) coreControl
@@ -141,12 +157,117 @@ fun coreControlsReducer(
                 CoreSideEffect.CancelSceneChain,
                 CoreSideEffect.SavePrefBoolean("power_on", intent.isOn)
             )
+            targetAddresses.forEach { effects.add(CoreSideEffect.SavePrefBoolean(devicePowerPrefKey(it), intent.isOn)) }
             if (!intent.isOn) {
                 effects.add(CoreSideEffect.StopMusicSync(restoreState = true))
                 effects.add(CoreSideEffect.StopAmbiance(restoreState = true))
             }
-            effects.add(CoreSideEffect.BroadcastCommand(DuoCoProtocol.createPowerCommand(intent.isOn), "Power ${intent.isOn}"))
+            effects.add(
+                CoreSideEffect.BroadcastCommand(
+                    DuoCoProtocol.createPowerCommand(intent.isOn),
+                    "Power ${intent.isOn}",
+                    includePoweredOff = true
+                )
+            )
             newState to effects
+        }
+
+        is RgbIntent.SetDevicePower -> {
+            // One strip's own switch. The global switch still means "every controlled strip", so
+            // it is kept honest here: it reads off only once every controlled strip is off, and
+            // the strip that brings the first one back turns it on without touching the others.
+            val address = intent.address
+            val core = state.coreControl
+            fun fromCore() = ActiveDeviceState(
+                activeFeatureName = core.activeFeatureName,
+                red = core.red,
+                green = core.green,
+                blue = core.blue,
+                warmth = core.warmth,
+                modeIndex = core.modeIndex,
+                brightness = core.brightness,
+                isPowerOn = core.isPowerOn
+            )
+            // Give every controlled strip an entry first. A strip without one reads the global
+            // flag, so flipping that flag below would otherwise silently flip strips nobody touched.
+            val newMap = state.connectivity.deviceStatesMap.toMutableMap()
+            targetAddresses.forEach { if (newMap[it] == null) newMap[it] = fromCore() }
+
+            val controlled = address in targetAddresses
+            val musicActive = state.audioSettings.musicMode != null
+            val automationFeature = when {
+                !controlled -> null
+                musicActive -> core.activeFeatureName
+                isAmbianceActive -> "Ambiance - ${state.ambianceSettings.ambiancePreset}"
+                else -> null
+            }
+            val existing = newMap[address] ?: fromCore()
+            val devState = existing.copy(
+                isPowerOn = intent.isOn,
+                activeFeatureName = if (intent.isOn && automationFeature != null) automationFeature else existing.activeFeatureName
+            )
+            newMap[address] = devState
+
+            val effects = mutableListOf<CoreSideEffect>(
+                CoreSideEffect.SavePrefBoolean(devicePowerPrefKey(address), intent.isOn),
+                CoreSideEffect.CancelSceneRunner(address)
+            )
+            if (intent.isOn) {
+                effects.add(CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createPowerCommand(true)))
+                if (automationFeature != null) {
+                    // Rejoining music or ambiance: snapshot what it remembered so stopping puts it
+                    // back, and let the running automation paint it from the next frame.
+                    effects.add(
+                        CoreSideEffect.SaveDeviceState(
+                            address,
+                            if (musicActive) RgbControllerViewModel.AutomationType.AUDIO else RgbControllerViewModel.AutomationType.AMBIANCE
+                        )
+                    )
+                } else {
+                    // Anything changed while it was off was remembered, not sent, so send it now.
+                    effects.add(CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createBrightnessCommand(devState.brightness)))
+                    when {
+                        devState.activeFeatureName == "Colour" -> effects.add(
+                            CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createColorCommand(devState.red, devState.green, devState.blue))
+                        )
+                        devState.activeFeatureName == "CCT" -> {
+                            val rgb = ColorUtils.convertKelvinToRgb(ColorUtils.warmthToKelvin(devState.warmth))
+                            effects.add(CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createColorCommand(rgb[0], rgb[1], rgb[2])))
+                        }
+                        devState.activeFeatureName.startsWith("Audio") || devState.activeFeatureName.startsWith("Ambiance") -> {}
+                        else -> effects.add(CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createModeCommand(devState.modeIndex)))
+                    }
+                }
+            } else {
+                val owner = deviceAutomationMode[address]
+                if (owner != null) {
+                    // Dropping out of music or ambiance. The restore sees the strip is off, so it
+                    // hands back the remembered colour and finishes with power off.
+                    effects.add(CoreSideEffect.RestoreDeviceState(address, owner))
+                } else {
+                    effects.add(CoreSideEffect.SendCommandToDeviceDirect(address, DuoCoProtocol.createPowerCommand(false)))
+                }
+            }
+
+            var newCore = core
+            if (controlled) {
+                val anyOn = targetAddresses.any { newMap[it]?.isPowerOn ?: core.isPowerOn }
+                if (!anyOn && core.isPowerOn) {
+                    newCore = core.copy(isPowerOn = false)
+                    effects.add(CoreSideEffect.SavePrefBoolean("power_on", false))
+                    effects.add(CoreSideEffect.CancelSceneChain)
+                    effects.add(CoreSideEffect.StopMusicSync(restoreState = true))
+                    effects.add(CoreSideEffect.StopAmbiance(restoreState = true))
+                } else if (anyOn && !core.isPowerOn) {
+                    newCore = core.copy(isPowerOn = true)
+                    effects.add(CoreSideEffect.SavePrefBoolean("power_on", true))
+                }
+            }
+
+            state.copy(
+                coreControl = newCore,
+                connectivity = state.connectivity.copy(deviceStatesMap = newMap)
+            ) to effects
         }
 
         is RgbIntent.SetColor -> {

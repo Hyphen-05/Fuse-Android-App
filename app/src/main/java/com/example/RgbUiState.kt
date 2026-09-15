@@ -252,6 +252,8 @@ sealed interface RgbIntent {
 
     // --- Core Controls ---
     data class SetPower(val isOn: Boolean) : RgbIntent
+    /** One strip's own power, from the switch on its device tile. [SetPower] is every controlled strip. */
+    data class SetDevicePower(val address: String, val isOn: Boolean) : RgbIntent
     data class SetColor(val r: Int, val g: Int, val b: Int) : RgbIntent
     data class SetBrightness(val percent: Int) : RgbIntent
     data class SetMode(val modeIndex: Int) : RgbIntent

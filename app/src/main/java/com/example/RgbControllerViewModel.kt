@@ -482,7 +482,11 @@ class RgbControllerViewModel(
             is com.example.presentation.CoreSideEffect.SavePrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
             is com.example.presentation.CoreSideEffect.SavePrefString -> prefsRepo.putAppStatePrefString(effect.key, effect.value)
             is com.example.presentation.CoreSideEffect.Log -> addLog(effect.message)
-            is com.example.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes)
+            is com.example.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes, effect.includePoweredOff)
+            is com.example.presentation.CoreSideEffect.CancelSceneRunner -> {
+                sceneRunners[effect.address]?.release()
+                sceneRunners.remove(effect.address)
+            }
             is com.example.presentation.CoreSideEffect.SendCommandToDeviceDirect -> sendCommandToDeviceDirect(effect.address, effect.command)
             is com.example.presentation.CoreSideEffect.ConnectDevice -> connectDeviceHardware(effect.address)
             is com.example.presentation.CoreSideEffect.DisconnectDevice -> {
@@ -802,15 +806,25 @@ class RgbControllerViewModel(
             deviceAutomationMode.remove(macAddress)
             deviceSnapshotTaken.remove(macAddress)
             viewModelScope.launch(Dispatchers.IO) {
+                // A strip that is switched off by now - dropped out on its tile, or everything
+                // turned off - gets its colour back but stays off. Power goes last, so nothing
+                // after it can wake the strip, and the snapshot's own power (usually on) is ignored.
+                val stayOff = isSwitchedOff(macAddress)
                 val state = deviceStateStore.getState(macAddress)
                 if (state != null) {
-                    val powerCmd = DuoCoProtocol.createPowerCommand(state.power)
+                    val powerCmd = DuoCoProtocol.createPowerCommand(state.power && !stayOff)
                     val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.brightness)
                     val colorCmd = DuoCoProtocol.createColorCommand(state.red, state.green, state.blue)
                     
-                    sendCommandToDeviceDirect(macAddress, powerCmd)
-                    sendCommandToDeviceDirect(macAddress, brightnessCmd)
-                    sendCommandToDeviceDirect(macAddress, colorCmd)
+                    if (stayOff) {
+                        sendCommandToDeviceDirect(macAddress, brightnessCmd)
+                        sendCommandToDeviceDirect(macAddress, colorCmd)
+                        sendCommandToDeviceDirect(macAddress, powerCmd)
+                    } else {
+                        sendCommandToDeviceDirect(macAddress, powerCmd)
+                        sendCommandToDeviceDirect(macAddress, brightnessCmd)
+                        sendCommandToDeviceDirect(macAddress, colorCmd)
+                    }
                     
                     val memoryFeatureName = deviceRestoredFeatureName.remove(macAddress)
                     val restoredFeatureName = if (memoryFeatureName != null) {
@@ -832,10 +846,12 @@ class RgbControllerViewModel(
                             blue = state.blue,
                             warmth = state.warmth,
                             brightness = state.brightness,
-                            isPowerOn = state.power
+                            isPowerOn = existing.isPowerOn && state.power
                         )
                         current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
                     }
+                } else if (stayOff) {
+                    sendCommandToDeviceDirect(macAddress, DuoCoProtocol.createPowerCommand(false))
                 }
                 // Only once the restore has actually been sent, so a crash between the two leaves
                 // the marker in place and the next launch tries again.
@@ -1918,9 +1934,32 @@ class RgbControllerViewModel(
             restoreDeviceState(address, AutomationType.AUDIO)
         }
 
+        // A strip switched off on its own tile stays off across launches. Until something touches
+        // it there is no deviceStatesMap entry, and without one it would read the global switch.
+        val savedOwnPower = prefsRepo.getAppStatePrefBoolean(
+            com.example.presentation.devicePowerPrefKey(address),
+            _uiState.value.coreControl.isPowerOn
+        )
+
         _uiState.update { state ->
+            val core = state.coreControl
+            val statesMap = if (state.connectivity.deviceStatesMap[address] == null && savedOwnPower != core.isPowerOn) {
+                state.connectivity.deviceStatesMap + (address to ActiveDeviceState(
+                    activeFeatureName = core.activeFeatureName,
+                    red = core.red,
+                    green = core.green,
+                    blue = core.blue,
+                    warmth = core.warmth,
+                    modeIndex = core.modeIndex,
+                    brightness = core.brightness,
+                    isPowerOn = savedOwnPower
+                ))
+            } else {
+                state.connectivity.deviceStatesMap
+            }
             state.copy(
                 connectivity = state.connectivity.copy(
+                    deviceStatesMap = statesMap,
                     deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
                     connectionState = BleConnectionState.CONNECTED,
                     connectedDeviceAddress = address,
@@ -2025,7 +2064,9 @@ class RgbControllerViewModel(
     }
 
     private fun broadcastAudioResultDirect(result: com.example.core.audio.AudioDspResult) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
+        // A strip switched off on its tile drops out of the visualiser, roles and all, so the
+        // alternating and band-split groups re-form around the strips still lit.
+        val targetAddresses = getCurrentlyControlledDeviceAddresses().filterNot { isSwitchedOff(it) }
         // visualizer-review-2026-07-22.md A2: used to increment on result.isBeat, which since P1
         // fires ~180ms+flashTimingOffsetMs after the frame that actually rendered the flash peak --
         // device A would show the flash's rising/peak envelope, then mid-decay the target would
@@ -2191,7 +2232,7 @@ class RgbControllerViewModel(
     }
 
     private fun broadcastCommandDirect(command: ByteArray) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
+        val targetAddresses = getCurrentlyControlledDeviceAddresses().filterNot { isSwitchedOff(it) }
         targetAddresses.forEach { address ->
             sceneRunners[address]?.release()
             sceneRunners.remove(address)
@@ -2209,6 +2250,15 @@ class RgbControllerViewModel(
         }
     }
 
+    /**
+     * True for a strip that is off, whether by its own tile or by the global switch. Colour,
+     * brightness, music and ambiance all skip it: what changes while it is off is remembered in
+     * `deviceStatesMap` and sent when it comes back on. Perception and calibration tooling do not
+     * check this, because they write to what they counted.
+     */
+    private fun isSwitchedOff(address: String): Boolean =
+        _uiState.value.connectivity.deviceStatesMap[address]?.isPowerOn == false
+
     fun getCurrentlyControlledDeviceAddresses(): List<String> {
         return savedDevices.value
             .filter { it.isActiveControlEnabled }
@@ -2222,8 +2272,9 @@ class RgbControllerViewModel(
     }
 
 
-    fun broadcastCommand(command: ByteArray, cancelRunningScenes: Boolean = true) {
+    fun broadcastCommand(command: ByteArray, cancelRunningScenes: Boolean = true, includePoweredOff: Boolean = false) {
         val targetAddresses = getCurrentlyControlledDeviceAddresses()
+            .filter { includePoweredOff || !isSwitchedOff(it) }
         
         targetAddresses.forEach { address ->
             if (cancelRunningScenes) {
@@ -2270,10 +2321,10 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
-    private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true) {
+    private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true, includePoweredOff: Boolean = false) {
         val hexStr = command.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
         addLog("Send Command ($debugName): $hexStr")
-        broadcastCommand(command, cancelRunningScenes)
+        broadcastCommand(command, cancelRunningScenes, includePoweredOff)
     }
 
     private fun syncPhysicalBulb() {
@@ -2441,6 +2492,10 @@ class RgbControllerViewModel(
 
     fun setPower(isOn: Boolean) {
         dispatch(RgbIntent.SetPower(isOn))
+    }
+
+    fun setDevicePower(address: String, isOn: Boolean) {
+        dispatch(RgbIntent.SetDevicePower(address, isOn))
     }
 
     fun setColor(r: Int, g: Int, b: Int) {
