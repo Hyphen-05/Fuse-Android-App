@@ -15,6 +15,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- PowerButton plays VibrationEffect compositions through Vibrator directly, which needs this.
+         View.performHapticFeedback does not, which is why nothing needed it before 2026-09-15 and
+         why the moto (no composition primitives, so it takes the performHapticFeedback fallback)
+         never showed the crash Joe's Pixel did. Normal permission: granted at install, no prompt. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>

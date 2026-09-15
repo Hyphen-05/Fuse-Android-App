@@ -238,6 +238,23 @@ private class PowerHaptics(private val view: View) {
         }
     }
 
+    /**
+     * Play [effect], or fall back to [fallback] if the vibrator refuses.
+     *
+     * A haptic must never be able to take the app down. The first version called `vibrate` bare, the
+     * manifest lacked `VIBRATE`, and touching the power button crashed on Joe's Pixel - the one
+     * handset where the composition path actually runs.
+     */
+    private fun play(effect: () -> VibrationEffect, fallback: Int) {
+        try {
+            vibrator?.vibrate(effect())
+        } catch (e: SecurityException) {
+            view.performHapticFeedback(fallback)
+        } catch (e: IllegalArgumentException) {
+            view.performHapticFeedback(fallback)
+        }
+    }
+
     private fun supports(vararg primitives: Int): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             vibrator?.hasVibrator() == true &&
@@ -248,11 +265,11 @@ private class PowerHaptics(private val view: View) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             supports(VibrationEffect.Composition.PRIMITIVE_LOW_TICK)
         ) {
-            vibrator?.vibrate(
+            play({
                 VibrationEffect.startComposition()
                     .addPrimitive(VibrationEffect.Composition.PRIMITIVE_LOW_TICK, 0.5f)
                     .compose()
-            )
+            }, HapticFeedbackConstants.KEYBOARD_TAP)
         } else {
             view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
         }
@@ -263,12 +280,12 @@ private class PowerHaptics(private val view: View) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             supports(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, VibrationEffect.Composition.PRIMITIVE_CLICK)
         ) {
-            vibrator?.vibrate(
+            play({
                 VibrationEffect.startComposition()
                     .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_RISE, 0.45f)
                     .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 1f, 10)
                     .compose()
-            )
+            }, HapticFeedbackConstants.VIRTUAL_KEY)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         } else {
@@ -281,12 +298,12 @@ private class PowerHaptics(private val view: View) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             supports(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, VibrationEffect.Composition.PRIMITIVE_TICK)
         ) {
-            vibrator?.vibrate(
+            play({
                 VibrationEffect.startComposition()
                     .addPrimitive(VibrationEffect.Composition.PRIMITIVE_QUICK_FALL, 0.5f)
                     .addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.4f, 20)
                     .compose()
-            )
+            }, HapticFeedbackConstants.CLOCK_TICK)
         } else {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         }
