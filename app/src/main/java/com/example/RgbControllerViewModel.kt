@@ -1238,8 +1238,25 @@ class RgbControllerViewModel(
             }
         }
 
-        // Sync initial UI state with existing active BLE connections
-        val activeAddresses = bleGattTransport.activeConnectionAddresses()
+        // Sync initial UI state with existing active BLE connections.
+        //
+        // The transport outlives this ViewModel (it is process-scoped, so connections survive the
+        // Activity being recreated), and this used to copy every address it held straight into the
+        // UI as CONNECTED. After hours in the background that set can hold connections that are gone,
+        // and the home screen then loaded straight into tiles for strips that were not there - Joe's
+        // 2026-09-14 report. Confirm each one with the Bluetooth stack first, and close what it
+        // disowns rather than showing it.
+        val heldAddresses = bleGattTransport.activeConnectionAddresses()
+        val disowned = ConnectionReconciler.stale(heldAddresses) { bleGattTransport.systemLinkState(it) }
+        disowned.forEach { address ->
+            com.example.DiagnosticLogger.log("BLE", "Startup: $address held by the transport but not linked; closing it.")
+            try {
+                bleGattTransport.removeConnection(address)?.close()
+            } catch (e: SecurityException) {
+                addLog("SecurityException closing stale GATT client for $address.")
+            }
+        }
+        val activeAddresses = heldAddresses - disowned
         if (activeAddresses.isNotEmpty()) {
             val initialStates = activeAddresses.associateWith { BleConnectionState.CONNECTED }
             val firstConnectedAddress = activeAddresses.first()
@@ -1770,12 +1787,21 @@ class RgbControllerViewModel(
      */
     fun reconcileConnections(reason: String) {
         if (_uiState.value.coreControl.isDemoMode) return
-        val believed = connectionManager.connectionStates.value
+        val held = bleGattTransport.activeConnectionAddresses()
+        // Two places can claim a device is connected, and the home screen draws from the second:
+        // the connection manager, and the UI state itself. Check both. A device the UI shows as
+        // connected that the transport holds nothing for is stale on the face of it - there is no
+        // link to ask the stack about.
+        val shownConnected = _uiState.value.connectivity.deviceConnectionStates
+            .filterValues { it == BleConnectionState.CONNECTED }.keys
+        val managerConnected = connectionManager.connectionStates.value
             .filterValues { it is com.example.domain.ConnectionState.Connected }.keys
-            .intersect(bleGattTransport.activeConnectionAddresses())
-        if (believed.isEmpty()) return
-        val stale = ConnectionReconciler.stale(believed) { bleGattTransport.systemLinkState(it) }
-        val summary = "reconcileConnections($reason): believed=${believed.size} stale=${stale.size} " +
+        val believed = (shownConnected + managerConnected).intersect(held)
+        val orphaned = shownConnected - held
+        if (believed.isEmpty() && orphaned.isEmpty()) return
+        val stale = ConnectionReconciler.stale(believed) { bleGattTransport.systemLinkState(it) } + orphaned
+        val summary = "reconcileConnections($reason): believed=${believed.size} orphaned=${orphaned.size} " +
+            "stale=${stale.size} " +
             believed.joinToString { "$it=${bleGattTransport.systemLinkState(it)}" }
         com.example.DiagnosticLogger.log("BLE", summary)
         // Also to logcat: the healthy case (stale=0) is the one worth being able to see on a phone,
