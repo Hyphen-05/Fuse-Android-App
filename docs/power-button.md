@@ -52,3 +52,33 @@ angles and click strengths are one-line constants, ready for his next verdict.
 - The tap is raw `pointerInput`, so the semantics block carries `role = Switch` and an explicit `onClick`
   action; keep both or TalkBack cannot flip it.
 - First composition must not animate (the `settled` flag), or every launch plays a switch nobody pressed.
+
+## Round 3 (2026-09-15) — a switch on every device tile, and no ring
+
+Joe on round 2: "much better", but he disliked the resting look. Five resting-state mockups and five
+Material 3 Expressive components (Switch, toggleable icon button, ToggleButton,
+ToggleFloatingActionButton, ContainedLoadingIndicator, all present in alpha25) were shown, and he
+rejected them. What he asked for instead:
+
+- **Keep the button, and put one on each device tile as well.** The top-bar button stays as it is and
+  switches every strip.
+- **Remove the ring** from the transition. It is the shape morph and nothing else.
+
+His answers on behaviour (2026-09-15):
+
+- **A strip that is off ignores Home's colour and brightness changes, but remembers them**, and gets
+  them when it comes back on. Home's controls grey out only when every strip is off.
+- **Turning one strip off during music or ambiance drops just that strip.** The automation stops
+  only when the last controlled strip goes off.
+
+How it is wired: `RgbIntent.SetDevicePower` in `CoreControlsReducer`. Each strip's power is saved at
+`devicePowerPrefKey(address)` and loaded into `deviceStatesMap` when the strip registers. The global
+flag follows the tiles: it turns off when no controlled strip is on, and on when one comes back.
+Broadcasts skip a strip whose `isPowerOn` is false (`isSwitchedOff`), except the global switch's own
+power command (`BroadcastCommand.includePoweredOff`). A strip dropping out of an automation goes through
+`restoreDeviceState`, which, for a strip that is off, sends the remembered colour and then power off
+**last**.
+
+**Not seen on hardware.** Watch for a strip dropping out of music: does it flash its old colour for an
+instant before going dark? The restore's colour-then-off order is a guess about firmware that nobody
+has checked.
