@@ -1,0 +1,165 @@
+{
+  "kind": "lab_block",
+  "block": "hue_motion",
+  "generatedAtMs": 1790483942380,
+  "floorFirstVisible": 5,
+  "floorClearlyOn": 5,
+  "brightnessPercent": 25,
+  "gridSpacing": 4,
+  "catchTrials": 1,
+  "catchFalsePositives": 0,
+  "anchorTrials": 1,
+  "anchorsMissed": 1,
+  "trials": [
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 2
+      },
+      "answer": "unsure",
+      "responseMs": 5970
+    },
+    {
+      "kind": "catch",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "unsure",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 1
+      },
+      "answer": "unsure",
+      "responseMs": 1412
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 0,
+        "rep": 0
+      },
+      "answer": "unsure",
+      "responseMs": 1134
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 3
+      },
+      "answer": "a",
+      "responseMs": 2028
+    },
+    {
+      "kind": "anchor",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": "a",
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 2,
+        "armSecond": 1
+      },
+      "answer": "unsure",
+      "responseMs": 1169
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 0,
+        "rep": 5
+      },
+      "answer": "unsure",
+      "responseMs": 3426
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 1,
+        "armSecond": 0,
+        "rep": 4
+      },
+      "answer": "unsure",
+      "responseMs": 1201
+    },
+    {
+      "kind": "pump",
+      "question": "Did either one pulse in brightness?",
+      "optionIds": [
+        "a",
+        "b",
+        "unsure"
+      ],
+      "correctOptionId": null,
+      "isPreference": false,
+      "brightnessPercent": null,
+      "meta": {
+        "armFirst": 0,
+        "armSecond": 1,
+        "rep": 1
+      },
+      "answer": "unsure",
+      "responseMs": 962
+    }
+  ]
+}
