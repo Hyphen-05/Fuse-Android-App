@@ -564,7 +564,11 @@ class LabBlocksTest {
         // mean nothing.
         assertEquals(LabBlocks.RATE, LabBlocks.ALL[2])
         assertTrue(LabBlocks.RATE.isRetired)
-        assertTrue(LabBlocks.ALL.filter { it != LabBlocks.RATE }.none { it.isRetired })
+        // Block 8 joined it on 2026-09-27: its steady arm was steady in the wrong unit.
+        assertEquals(LabBlocks.HUE_MOTION, LabBlocks.ALL[8])
+        assertTrue(LabBlocks.HUE_MOTION.isRetired)
+        val retired = setOf(LabBlocks.RATE, LabBlocks.HUE_MOTION)
+        assertTrue(LabBlocks.ALL.filter { it !in retired }.none { it.isRetired })
     }
 
     @Test

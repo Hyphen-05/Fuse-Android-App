@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -68,9 +69,36 @@ fun ColumnScope.LabBatteryPanel(
     var running by remember { mutableStateOf<LabBlocks.BlockSpec?>(null) }
     var floorFor by remember { mutableStateOf<LabBlocks.BlockSpec?>(null) }
     var lastSaved by remember { mutableStateOf<String?>(null) }
+    // A sitting is a queue of blocks run back to back. `between` is the block waiting on the pause
+    // screen: he starts each one himself, so a sitting never runs on while he is not watching.
+    var queue by remember { mutableStateOf<List<LabBlocks.BlockSpec>>(emptyList()) }
+    var between by remember { mutableStateOf<LabBlocks.BlockSpec?>(null) }
+    var sittingSize by remember { mutableIntStateOf(0) }
+
+    fun start(chosen: LabBlocks.BlockSpec) {
+        // Block 0 measures the floor as part of itself; the others need one already on record,
+        // because a stimulus placed relative to a guessed floor measures nothing.
+        if (chosen.id == LabBlocks.FLOOR_GRID.id || labContext == null) floorFor = chosen
+        else running = chosen
+    }
+
+    fun blockEnded() {
+        running = null
+        between = queue.firstOrNull()
+        queue = queue.drop(1)
+    }
 
     val spec = running
+    val waiting = between
     when {
+        waiting != null -> SittingPause(
+            next = waiting,
+            position = sittingSize - queue.size,
+            of = sittingSize,
+            onStart = { between = null; start(waiting) },
+            onStop = { between = null; queue = emptyList() }
+        )
+
         floorFor != null -> FloorPanel(
             onLevel = { viewModel.holdPerceptionByte(it) },
             onDone = { found ->
@@ -99,12 +127,15 @@ fun ColumnScope.LabBatteryPanel(
                         clearBlockProgress(context, spec)
                         viewModel.setPerceptionBrightness(joeBrightness)
                         viewModel.holdPerceptionByte(0)
-                        running = null
+                        blockEnded()
                     },
                     onAbandon = {
                         viewModel.setPerceptionBrightness(joeBrightness)
                         viewModel.holdPerceptionByte(0)
+                        // Leaving a block leaves the sitting. Its answers so far are saved, and the
+                        // block resumes where it stopped next time.
                         running = null
+                        queue = emptyList()
                     }
                 )
             }
@@ -115,13 +146,14 @@ fun ColumnScope.LabBatteryPanel(
             lastSaved = lastSaved,
             onRun = { chosen ->
                 lastSaved = null
-                // Block 0 measures the floor as part of itself; the others need one already on
-                // record, because a stimulus placed relative to a guessed floor measures nothing.
-                if (chosen.id == LabBlocks.FLOOR_GRID.id || labContext == null) {
-                    floorFor = chosen
-                } else {
-                    running = chosen
-                }
+                queue = emptyList()
+                start(chosen)
+            },
+            onRunSitting = {
+                lastSaved = null
+                sittingSize = LabBlocks.SITTING.size
+                queue = LabBlocks.SITTING.drop(1)
+                start(LabBlocks.SITTING.first())
             },
             onExit = onExit
         )
@@ -135,6 +167,7 @@ private fun ColumnScope.BlockMenu(
     labContext: LabContext?,
     lastSaved: String?,
     onRun: (LabBlocks.BlockSpec) -> Unit,
+    onRunSitting: () -> Unit,
     onExit: () -> Unit
 ) {
     val context = LocalContext.current
@@ -142,6 +175,33 @@ private fun ColumnScope.BlockMenu(
         modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Tonight's sitting",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    LabBlocks.SITTING.joinToString(" → ") { "${LabBlocks.ALL.indexOf(it)}. ${it.title}" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "About ${LabBlocks.SITTING.sumOf { it.estimateMinutes }} min, one after another. " +
+                        "There is a pause between blocks, and you can stop at any pause.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val interaction = remember { MutableInteractionSource() }
+                Button(
+                    onClick = onRunSitting,
+                    modifier = Modifier.fillMaxWidth().joyfulPress(interaction),
+                    interactionSource = interaction,
+                    shape = CircleShape
+                ) { Text("Start the sitting") }
+            }
+        }
+
         Text(
             "Short blocks, in the order that unblocks the most. Each is a few minutes and stops " +
                 "cleanly. Run them top down — the early ones produce the units the later ones need.",
@@ -217,6 +277,52 @@ private fun ColumnScope.BlockMenu(
         }
     }
     TextButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text("Back") }
+}
+
+// --- between blocks in a sitting -----------------------------------------------------------------
+
+/**
+ * The pause between two blocks of a sitting. The next block starts only when he says so, which is
+ * both a rest and a guarantee that nothing plays to an empty room.
+ */
+@Composable
+private fun ColumnScope.SittingPause(
+    next: LabBlocks.BlockSpec,
+    position: Int,
+    of: Int,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    Column(
+        modifier = Modifier.weight(1f).fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Block done. Saved.",
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "Next, $position of $of: ${next.title}",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "~${next.estimateMinutes} min. Take a breather if you want one.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        val interaction = remember { MutableInteractionSource() }
+        Button(
+            onClick = onStart,
+            modifier = Modifier.fillMaxWidth().joyfulPress(interaction),
+            interactionSource = interaction,
+            shape = CircleShape
+        ) { Text("Start") }
+        TextButton(onClick = onStop) { Text("Stop for tonight") }
+    }
 }
 
 // --- the runner ----------------------------------------------------------------------------------

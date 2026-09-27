@@ -121,9 +121,23 @@ Lab > Test battery**.
 | 4 | `smoothing` | preferred settling speed when the picture changes — the 2026-09-04 number | yes |
 | 5 | `jumps` | how big a change has to be before a cut beats an ease | yes |
 | 6 | `near_black` | where the floor sits, and whether dim scenes should be lifted into the smooth region | yes |
-| 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes, **answered** |
-| 8 | `hue_motion` | whether a hue sweep's built-in 2x brightness swing is visible, and wanted | yes, run **void** |
-| 9-10 | — | one visualiser taste block, then validation | no |
+| 7 | `ambiance_fall` | whether removing the smoother's downward bias makes a dark scene steadier | yes, **answered twice; shipped 2026-09-27** |
+| 8 | `hue_motion` | whether a hue sweep's built-in 2x brightness swing is visible, and wanted | **retired 2026-09-27** — flat in the wrong unit |
+| 9 | `colour_weights` | how much red, green and blue light look equally bright — the unit block 8 lacked | yes, 2026-09-27 |
+| 10-11 | — | one visualiser taste block, then validation | no |
+
+**Sittings (2026-09-27).** `LabBlocks.SITTING` runs a list of blocks from one button, with a pause
+screen between blocks that he starts himself. Joe asked for as many blocks per sitting as possible.
+Every sitting is preceded by a committed predictions file in `docs/predictions/`, scored after the
+results come in — **that running hit rate is the validation**, rather than a single block 11 at the
+end. The first sitting is blocks 0, 9, 4 and 5; 4 and 5 are re-runs chosen because their outcomes
+could be predicted from earlier results.
+
+**Block 9 reads through `ColourWeights`**: each rung is asked in both orders and scored +1 test / -1
+reference / 0 same, so the "second one" habit cancels; the match is the zero crossing in log ratio;
+and blue-green is measured directly *and* chained through red, so the three pairs check each other
+(`chainAgreement`). Its units are `StripResponse` units, which is exactly what `totalLight` needs
+weighting in.
 
 **Blocks 4-6 were built and run on 2026-09-06.** Results and their caveats:
 [taste-2026-09-06.md](taste-2026-09-06.md) — block 4 answered (the shipped 50ms ease is right, and

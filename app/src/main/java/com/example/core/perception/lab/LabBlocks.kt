@@ -137,6 +137,10 @@ object LabBlocks {
         title = "Hue motion: does it pulse",
         purpose = "Whether the brightness swing built into a hue sweep is visible to you",
         estimateMinutes = 4,
+        retiredBecause = "Its steady arm is steady only if red, green and blue light look equally " +
+            "bright, and they do not. On 2026-09-27 Joe saw both arms pulse and could not pick out " +
+            "even the deliberately pumped one. It can come back once block 9 has measured how " +
+            "bright each colour looks.",
         briefing = listOf(
             "You will see the strip cycle through every colour twice - first A, then B. Both take " +
                 "the same four seconds and go through the same colours at the same speed.",
@@ -159,9 +163,39 @@ object LabBlocks {
      * the results files, the docs and Joe all name these. Renumbering to close a gap would silently
      * rename block 3's data.
      */
-    val ALL = listOf(
-        FLOOR_GRID, SCALE, RATE, DITHER, SMOOTHING, JUMPS, NEAR_BLACK, AMBIANCE_FALL, HUE_MOTION
+    val COLOUR_WEIGHTS = BlockSpec(
+        id = "colour_weights",
+        title = "How bright each colour looks",
+        purpose = "How much red, green and blue light it takes to look equally bright to you",
+        estimateMinutes = 5,
+        commandsBrightness = true,
+        briefing = listOf(
+            "You will see two plain colours, one after the other - A, then B. Often they are " +
+                "different colours: red against green, blue against red, and so on.",
+            "Say which one was BRIGHTER. Not which colour you like, and not which is more vivid - " +
+                "which one gave off more light. If you imagine the room lit by each, which would " +
+                "be the brighter room?",
+            "Comparing brightness across two colours is genuinely hard, and sometimes they will " +
+                "look the same. When they do, say Same. That is not a failed answer - finding " +
+                "where two colours look the same is the whole point of this block.",
+            "Brightness goes to 100% for this block and is put back afterwards."
+        )
     )
+
+    val ALL = listOf(
+        FLOOR_GRID, SCALE, RATE, DITHER, SMOOTHING, JUMPS, NEAR_BLACK, AMBIANCE_FALL, HUE_MOTION,
+        COLOUR_WEIGHTS
+    )
+
+    /**
+     * The next sitting, run back to back from one button.
+     *
+     * Joe, 2026-09-27: "the more blocks you can have me do in one sitting the better". Block 0 goes
+     * first so every later block is placed against tonight's floor. Blocks 4 and 5 are re-runs, and
+     * they are there as **validation**: their answers were predicted in writing before the sitting,
+     * so this is the first time the model is scored against answers it had not seen.
+     */
+    val SITTING = listOf(FLOOR_GRID, COLOUR_WEIGHTS, SMOOTHING, JUMPS)
 
     /**
      * The rest of the battery, recorded so the plan survives this session.
@@ -175,9 +209,9 @@ object LabBlocks {
      * would silently rename its data, which is why [RATE] keeps its slot despite being retired.
      */
     val PLANNED: List<String> = listOf(
-        "9. Visualiser: where he sits on the measured comfort/coupling line (r=0.87, 27 tunings). " +
+        "10. Visualiser: where he sits on the measured comfort/coupling line (r=0.87, 27 tunings). " +
             "Needs a running visualiser to modulate, unlike block 8.",
-        "10. Validation - the app states its prediction before each trial and scores itself on " +
+        "11. Validation - the app states its prediction before each trial and scores itself on " +
             "held-out cases. THIS is the block that licenses tuning without his eyes."
     )
 
@@ -1491,6 +1525,198 @@ object LabBlocks {
      */
     const val HUE_BASE_VALUE = 0.8f
 
+    // --- block 9: how bright each colour looks ------------------------------------------------
+
+    /**
+     * How much light each channel has to emit to look as bright as another.
+     *
+     * ## Why this is the next block
+     *
+     * Block 8 came back "both pulsed" on 2026-09-27, with the anchor missed, and the likely reason is
+     * the unit its flat arm was flat in. [totalLight] adds the three channels on [StripResponse] as if
+     * a unit of red, green and blue light looked equally bright, and an eye does not - green reads
+     * several times brighter than blue. Every question about colour and brightness together (a
+     * light-flat hue sweep, ambiance hues at a matched level, the visualiser's colour motion) needs
+     * the three weights, and nothing measured them: the capture rig's camera had its own channel
+     * sensitivities, and it is gone.
+     *
+     * ## The shape
+     *
+     * Two steady colours, one after the other, and "which was brighter?". The reference sits at a
+     * fixed light; the test channel runs a ladder of lights around it (0.3x to 8x,
+     * and 1x to 16x for blue against green). Where
+     * the answers turn over from "reference" to "test" is the match, and the reciprocal of that
+     * ratio is the test channel's weight relative to the reference's - in [StripResponse] units,
+     * which is exactly the unit [totalLight] needs correcting in.
+     *
+     * Three pairs rather than two: red against green, blue against red, and blue against green. The
+     * third is implied by the first two, so it is a check on the model rather than more data - if
+     * the chained ratio and the direct one disagree, the weights are not one number per channel.
+     *
+     * **Every rung is asked in both orders** and the reading scores the pair of answers together.
+     * He names the second interval when he cannot tell, and in a brightness match "cannot tell" is
+     * exactly what happens at the crossover. Balanced orders make that habit cancel out instead of
+     * dragging the crossover towards whichever arm was played second more often.
+     *
+     * ## Why 100% brightness
+     *
+     * Eight times the reference has to be reachable. At 25% the strip tops out at level 64, which is
+     * [StripResponse] 0.48 - four times the reference at best. At 100% byte and level coincide, and
+     * the reference at byte ~18 is the same light as byte ~72 at his usual 25%, so the colours are
+     * not unusually bright to look at. The ratios transfer to any setting for the same reason block
+     * 1's did: a level emits the same light however it was commanded.
+     */
+    fun colourWeightTrials(seed: Long): List<LabTrial> {
+        val random = Random(seed)
+        val out = mutableListOf<LabTrial>()
+
+        COLOUR_PAIRS.forEachIndexed { pairIndex, pair ->
+            val testChannel = pair.test
+            val refChannel = pair.ref
+            val refByte = StripResponse.byteForLight(pair.refLight)
+            val refLight = StripResponse.lightForByte(refByte)
+            val ref = channelStimulus(refChannel, refByte)
+            pair.rungs.forEachIndexed { rung, k ->
+                val testByte = StripResponse.byteForLight(refLight * k)
+                val test = channelStimulus(testChannel, testByte)
+                // The ratio actually played, from the bytes rather than from the rung, because the
+                // table is searched and lands near the target rather than on it.
+                val kMilli = (StripResponse.lightForByte(testByte) / refLight * 1000).toInt()
+                for (testFirst in listOf(true, false)) {
+                    out.add(
+                        LabTrial(
+                            block = COLOUR_WEIGHTS.id,
+                            kind = "match",
+                            intervals = if (testFirst) listOf(test, ref) else listOf(ref, test),
+                            question = COLOUR_QUESTION,
+                            hint = COLOUR_HINT,
+                            options = COLOUR_OPTIONS,
+                            // Which looks brighter at a given ratio is a fact about his eye, and
+                            // finding where it turns over is the measurement. Never scored.
+                            truth = LabTruth.UNKNOWN,
+                            correctOptionId = null,
+                            meta = mapOf(
+                                "pair" to pairIndex,
+                                "rung" to rung,
+                                "kMilli" to kMilli,
+                                "testChannel" to testChannel,
+                                "refChannel" to refChannel,
+                                "testByte" to testByte,
+                                "refByte" to refByte,
+                                "testFirst" to if (testFirst) 1 else 0
+                            ),
+                            brightnessPercent = 100
+                        )
+                    )
+                }
+            }
+        }
+
+        // Catches: the reference against itself, once per reference colour. "Same" is right.
+        val refByte = StripResponse.byteForLight(COLOUR_REF_LIGHT)
+        val refLight = StripResponse.lightForByte(refByte)
+        for (channel in COLOUR_PAIRS.map { it.ref }.distinct()) {
+            val ref = channelStimulus(channel, refByte)
+            out.add(
+                LabTrial(
+                    block = COLOUR_WEIGHTS.id,
+                    kind = LabTrial.KIND_CATCH,
+                    intervals = listOf(ref, ref),
+                    question = COLOUR_QUESTION,
+                    hint = COLOUR_HINT,
+                    options = COLOUR_OPTIONS,
+                    truth = LabTruth.KNOWN,
+                    correctOptionId = "unsure",
+                    meta = mapOf("refChannel" to channel, "refByte" to refByte),
+                    brightnessPercent = 100
+                )
+            )
+        }
+
+        // Anchors: the same colour at four times the light, once in each order. Nothing about
+        // colour is in the way, so missing it means not watching.
+        val anchorByte = StripResponse.byteForLight(refLight * COLOUR_ANCHOR_RATIO)
+        for (brightFirst in listOf(true, false)) {
+            val dim = channelStimulus(CHANNEL_GREEN, refByte)
+            val bright = channelStimulus(CHANNEL_GREEN, anchorByte)
+            out.add(
+                LabTrial(
+                    block = COLOUR_WEIGHTS.id,
+                    kind = LabTrial.KIND_ANCHOR,
+                    intervals = if (brightFirst) listOf(bright, dim) else listOf(dim, bright),
+                    question = COLOUR_QUESTION,
+                    hint = COLOUR_HINT,
+                    options = COLOUR_OPTIONS,
+                    truth = LabTruth.KNOWN,
+                    correctOptionId = if (brightFirst) "a" else "b",
+                    meta = mapOf("refByte" to refByte, "testByte" to anchorByte),
+                    brightnessPercent = 100
+                )
+            )
+        }
+
+        // Shuffled as a whole, so a ladder is never climbed in order - an ascending run invites
+        // answering the trend rather than the pair in front of him.
+        return out.shuffled(random)
+    }
+
+    /** One channel lit at [byte], the others off. */
+    fun channelStimulus(channel: Int, byte: Int): Stimulus {
+        val rgb = when (channel) {
+            CHANNEL_RED -> Triple(byte, 0, 0)
+            CHANNEL_GREEN -> Triple(0, byte, 0)
+            else -> Triple(0, 0, byte)
+        }
+        return Stimulus("ch${channel}_$byte", listOf(StimulusStep(byte, COLOUR_HOLD_MS, rgb)))
+    }
+
+    const val CHANNEL_RED = 0
+    const val CHANNEL_GREEN = 1
+    const val CHANNEL_BLUE = 2
+
+    /** One comparison: [test] against [ref] held at [refLight], over [rungs] multiples of it. */
+    data class ColourPair(val test: Int, val ref: Int, val refLight: Double, val rungs: List<Double>)
+
+    /**
+     * The third pair is implied by the first two and is there as a check.
+     *
+     * Blue against green gets its own, longer ladder on a dimmer reference. On any luminance-like
+     * guess blue needs well over 8x green's light to look as bright, and the shared ladder tops out
+     * at 8x: the reading would have come back "outside the ladder" for the one pair that most needs
+     * a number. Its bottom rung is 1x because blue matching green at *less* light than green is not
+     * a live possibility - and if it happened, the reading would say so rather than invent a match.
+     */
+    val COLOUR_PAIRS = listOf(
+        ColourPair(CHANNEL_RED, CHANNEL_GREEN, COLOUR_REF_LIGHT, listOf(0.3, 0.6, 1.1, 2.1, 4.1, 8.0)),
+        ColourPair(CHANNEL_BLUE, CHANNEL_RED, COLOUR_REF_LIGHT, listOf(0.3, 0.6, 1.1, 2.1, 4.1, 8.0)),
+        ColourPair(CHANNEL_BLUE, CHANNEL_GREEN, 0.055, listOf(1.0, 1.75, 3.0, 5.3, 9.2, 16.0))
+    )
+
+    /**
+     * The shared reference light, in [StripResponse] units (byte 17).
+     *
+     * Chosen so both ends of its ladder land on measured bytes: 0.3x is byte 8, where the table
+     * stops being a lower bound, and 8x is byte ~206, short of the ceiling. Rungs roughly double,
+     * because the weights are ratios.
+     */
+    const val COLOUR_REF_LIGHT = 0.115
+
+    const val COLOUR_ANCHOR_RATIO = 4.0
+    const val COLOUR_HOLD_MS = 1500L
+
+    private const val COLOUR_QUESTION = "Which one was brighter?"
+    private const val COLOUR_HINT = "Ignore the colour - which one gave off more light?"
+
+    /**
+     * "Same" rather than "can't tell". At the crossover the two really do look equally bright, and
+     * that is the answer the block is hunting for, not an admission of defeat.
+     */
+    val COLOUR_OPTIONS = listOf(
+        LabOption("a", "A"),
+        LabOption("b", "B"),
+        LabOption("unsure", "Same")
+    )
+
     fun trialsFor(spec: BlockSpec, context: LabContext, seed: Long): List<LabTrial> = when (spec.id) {
         FLOOR_GRID.id -> floorGridTrials(context, seed)
         SCALE.id -> scaleTrials(seed)
@@ -1501,6 +1727,7 @@ object LabBlocks {
         HUE_MOTION.id -> hueMotionTrials(context, seed)
         JUMPS.id -> jumpTrials(context, seed)
         NEAR_BLACK.id -> nearBlackTrials(seed)
+        COLOUR_WEIGHTS.id -> colourWeightTrials(seed)
         else -> emptyList()
     }
 }
