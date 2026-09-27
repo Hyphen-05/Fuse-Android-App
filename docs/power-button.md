@@ -82,3 +82,9 @@ power command (`BroadcastCommand.includePoweredOff`). A strip dropping out of an
 **Not seen on hardware.** Watch for a strip dropping out of music: does it flash its old colour for an
 instant before going dark? The restore's colour-then-off order is a guess about firmware that nobody
 has checked.
+
+## Round 3 verdict (2026-09-27)
+
+Joe, on the release build of `2902946` on his Pixel: **"the power buttons are stunning."** Signed off.
+The flash-before-dark question (does a strip dropping out of music show its remembered colour before
+power-off lands) was not raised separately; nothing he reported suggests it happens.
