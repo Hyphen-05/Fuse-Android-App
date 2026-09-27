@@ -123,7 +123,7 @@ fun ColumnScope.LabBatteryPanel(
                     viewModel = viewModel,
                     joeBrightness = joeBrightness,
                     onFinish = { trials, answers ->
-                        lastSaved = writeBlockReport(context, spec, ctx, trials, answers)
+                        lastSaved = writeBlockReport(context, spec, ctx, trials, answers, viewModel.perceptionTargetCount())
                         clearBlockProgress(context, spec)
                         viewModel.setPerceptionBrightness(joeBrightness)
                         viewModel.holdPerceptionByte(0)
@@ -657,7 +657,8 @@ private fun writeBlockReport(
     spec: LabBlocks.BlockSpec,
     labContext: LabContext,
     trials: List<LabTrial>,
-    answers: List<LabAnswer>
+    answers: List<LabAnswer>,
+    stripCount: Int
 ): String? = try {
     val controls = LabAnalysis.controls(trials, answers)
     val root = JSONObject()
@@ -668,6 +669,9 @@ private fun writeBlockReport(
     root.put("floorClearlyOn", labContext.floorClearlyOn)
     root.put("brightnessPercent", labContext.brightnessPercent)
     root.put("gridSpacing", labContext.gridSpacing)
+    // How many strips were lit. Every stimulus goes to every connected strip, and sittings before
+    // 2026-09-27 did not record this, so which setup they were answered on is unknown.
+    root.put("stripCount", stripCount)
     root.put("catchTrials", controls.catchTrials)
     root.put("catchFalsePositives", controls.catchFalsePositives)
     root.put("anchorTrials", controls.anchorTrials)
