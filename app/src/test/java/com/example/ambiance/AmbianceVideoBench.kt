@@ -258,7 +258,8 @@ class AmbianceVideoBench {
         Arm("roi hysteresis", roi = RoiMode.HYSTERESIS),
         Arm("roi locked", roi = RoiMode.LOCKED),
         Arm("no deadband", ablation = AmbianceAblation(deadband = false)),
-        Arm("symmetric fall", ablation = AmbianceAblation(asymmetricFall = false)),
+        // Shipped until 2026-09-27; kept so the attribution run still shows what it cost.
+        Arm("asymmetric fall (old)", ablation = AmbianceAblation(asymmetricFall = true)),
         Arm("no sat boost", ablation = AmbianceAblation(saturationBoost = false)),
         Arm("no floor", ablation = AmbianceAblation(floor = false)),
         // The content control: no smoothing at all. Whatever shimmer survives here is in the film,
@@ -348,7 +349,9 @@ class AmbianceVideoBench {
         Assume.assumeTrue("set -Dambiance.frames and -Dambiance.traces to regenerate", root != null && outPath != null)
 
         val perExcerpt = (excerptMs / frameMs).toInt()
-        val shippedAblation = AmbianceAblation()
+        // Block 7's "shipped" arm is the rule that shipped when the traces were recorded - the
+        // asymmetric fall - and must stay so for the committed traces to regenerate byte for byte.
+        val shippedAblation = AmbianceAblation(asymmetricFall = true)
         val symmetricAblation = AmbianceAblation(asymmetricFall = false)
 
         val sb = StringBuilder()

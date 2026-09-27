@@ -306,8 +306,15 @@ class AmbianceFrameAnalyser {
 data class AmbianceAblation(
     /** The hold-still-until-it-moves-enough test on the aggregate colour. */
     val deadband: Boolean = true,
-    /** Falling transitions using a larger alpha than rising ones (the `pow(2.2)` line). */
-    val asymmetricFall: Boolean = true,
+    /**
+     * Falling transitions using a larger alpha than rising ones (the `pow(2.2)` line).
+     *
+     * **Off since 2026-09-27.** It rectified noise into a sawtooth in dark scenes
+     * (`AmbianceVideoBench`), and Joe picked the symmetric fall as steadier in both lab sittings:
+     * 5-0 without the film, 6-0 watching it. The cost is that the lights now dim at the same pace
+     * they brighten, everywhere; that trade is being judged by living with it.
+     */
+    val asymmetricFall: Boolean = false,
     /** The 1.4x chroma boost, which multiplies channel *differences* and so is loudest near black. */
     val saturationBoost: Boolean = true,
     /** Lifting dim-but-not-black content to a visible minimum. */
