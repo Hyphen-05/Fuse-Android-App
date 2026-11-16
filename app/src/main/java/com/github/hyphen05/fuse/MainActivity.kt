@@ -349,7 +349,6 @@ fun MainScreen() {
     var deviceAliasInput by rememberSaveable { mutableStateOf("") }
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
-    var showModeCaptureScreen by rememberSaveable { mutableStateOf(false) }
     // Unlocked by tapping the version footer at the bottom of Settings 7 times, same gesture as
     // stock Android's "tap Build number to enable Developer options" — familiar to anyone who'd
     // recognize the pattern, invisible to everyone else. Tapping the same sequence again re-hides
@@ -603,7 +602,6 @@ fun MainScreen() {
                 selectedTab = selectedTab,
                 onTabSelected = {
                     selectedTab = it
-                    showModeCaptureScreen = false
                 }
             )
         }
@@ -613,12 +611,7 @@ fun MainScreen() {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (showModeCaptureScreen) {
-                com.github.hyphen05.fuse.ui.components.ModeCaptureScreen(
-                    viewModel = viewModel,
-                    onClose = { showModeCaptureScreen = false }
-                )
-            } else if (selectedTab == 1) {
+            if (selectedTab == 1) {
                 ModesScreen(
                     viewModel = viewModel,
                     modifier = Modifier
@@ -694,7 +687,6 @@ fun MainScreen() {
                         state = uiState,
                         telemetry = telemetry,
                         viewModel = viewModel,
-                        onOpenModeCapture = { showModeCaptureScreen = true },
                         experimentalUnlocked = experimentalUnlocked,
                         onToggleExperimentalUnlocked = { experimentalUnlocked = !experimentalUnlocked }
                     )
