@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.Context
 import com.github.hyphen05.fuse.core.protocol.DuoCoProtocol
 import java.util.UUID
@@ -13,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import com.github.hyphen05.fuse.core.pacing.BlePacing
 
 /**
  * Result of [BleGattTransport.registerDuoCoCharacteristic]. Mirrors the two outcomes of the former
@@ -113,7 +116,7 @@ interface BleGattTransport {
     fun notifyWriteCompleted(address: String)
 
     /** Current pacing (ms) for a device's write manager, or [default] if none exists yet. */
-    fun getPacingMs(address: String, default: Int = 50): Int
+    fun getPacingMs(address: String, default: Int = BlePacing.DEFAULT_MS): Int
 
     /** Remove all three per-device maps and return the removed [BluetoothGatt] (for disconnect/close). */
     fun removeConnection(address: String): BluetoothGatt?
@@ -122,6 +125,13 @@ interface BleGattTransport {
     fun rawDisconnectAndClose(gatt: BluetoothGatt?)
 
     fun isConnected(address: String): Boolean
+
+    /**
+     * The Bluetooth stack's own view of the GATT link to [address], as a `BluetoothProfile.STATE_*`,
+     * or null when it cannot be asked. Unlike [isConnected] this is not the app's bookkeeping - see
+     * [ConnectionReconciler] for why the two can disagree.
+     */
+    fun systemLinkState(address: String): Int?
     fun activeConnectionAddresses(): Set<String>
     fun deviceWriteManagerAddresses(): Set<String>
 
@@ -147,6 +157,12 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     private val writeCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
     private val deviceWriteManagers = ConcurrentHashMap<String, DeviceWriteManager>()
     private val retryAttempts = ConcurrentHashMap<String, Int>()
+
+    /**
+     * Orders the MTU exchange ahead of service discovery. See [GattDiscoveryGate] for the race this
+     * exists to prevent and how it presented.
+     */
+    private val discoveryGate = GattDiscoveryGate()
     private val connectionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Most-recent gatt seen per address at a callback entry, so address-keyed ops can find it.
@@ -158,7 +174,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     @Volatile private var onCharacteristicWrite: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var onLog: (String) -> Unit = {}
 
-    @Volatile private var pacingProvider: (String) -> Int = { 50 }
+    @Volatile private var pacingProvider: (String) -> Int = { BlePacing.DEFAULT_MS }
     @Volatile private var calibrate: (String, ByteArray) -> ByteArray = { _, cmd -> cmd }
     @Volatile private var onFpsUpdate: (String, Int) -> Unit = { _, _ -> }
     @Volatile private var diagAttribution: (String) -> String = { "" }
@@ -174,6 +190,19 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
             val address = gatt?.device?.address ?: return
             callbackGatt[address] = gatt
             onServicesDiscovered(address, status)
+        }
+
+        /**
+         * The MTU exchange finishing is what releases service discovery — see [GattDiscoveryGate].
+         * Status is deliberately ignored: a refused MTU is fine (the default 23 works), what
+         * matters is that the GATT client is free again.
+         */
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            val address = gatt?.device?.address ?: return
+            callbackGatt[address] = gatt
+            discoveryGate.onMtuSettled(address)
+            onLog("MTU settled for $address (mtu=$mtu, status=$status); starting service discovery.")
+            issueDiscoveryIfWanted(address)
         }
 
         override fun onCharacteristicWrite(
@@ -228,6 +257,21 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun connect(context: Context, address: String) {
         val adapter = bluetoothAdapter ?: return
+        // Close any GATT client still held for this address before opening another. Every
+        // connectGatt() registers a client with the Bluetooth stack and only close() gives it
+        // back; overwriting the map entry leaks it. That matters most exactly when connecting is
+        // already failing — the auto-connect backoff retries five times, and a connection stranded
+        // at CONNECTING never reaches onConnectionStateChange(DISCONNECTED), which is the only
+        // place that used to close anything. Run the app's per-process registrations out and the
+        // stack stops answering, which reads as the app no longer finding devices at all.
+        activeConnections.remove(address)?.let { previous ->
+            try {
+                previous.close()
+            } catch (e: SecurityException) {
+                onLog("SecurityException closing the previous GATT client for $address.")
+            }
+        }
+        discoveryGate.forget(address)
         val device = adapter.getRemoteDevice(address)
         val gatt = device.connectGatt(context, false, gattCallback)
         activeConnections[address] = gatt
@@ -242,8 +286,18 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
         val gatt = activeConnections[address] ?: return
         try {
             gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
-            gatt.requestMtu(512)
+            discoveryGate.onMtuRequested(address)
+            if (!gatt.requestMtu(512)) {
+                // Refused outright: nothing is in flight, so discovery must not wait for a
+                // callback that will never come.
+                discoveryGate.onMtuSettled(address)
+                issueDiscoveryIfWanted(address)
+            } else {
+                armMtuFallback(address)
+            }
         } catch (e: SecurityException) {
+            discoveryGate.onMtuSettled(address)
+            issueDiscoveryIfWanted(address)
             onLog("SecurityException requesting priority or MTU for $address: ${e.message}")
         } catch (e: Exception) {
             onLog("Error requesting priority or MTU for $address: ${e.message}")
@@ -252,10 +306,49 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
 
     override fun discoverServices(address: String) {
         val gatt = activeConnections[address] ?: return
+        discoveryGate.onDiscoveryWanted(address)
+        issueDiscoveryIfWanted(address)
+    }
+
+    /**
+     * Issues discovery once per connection, and only when the GATT client is free.
+     *
+     * Idempotent on purpose: it is called from the connect path, from [onMtuChanged] and from the
+     * fallback timer, and exactly one of those should win. Whichever arrives first while no MTU
+     * exchange is outstanding does the work.
+     */
+    private fun issueDiscoveryIfWanted(address: String) {
+        if (!discoveryGate.shouldIssueDiscovery(address)) return
+        val gatt = callbackGatt[address] ?: activeConnections[address]
+        if (gatt == null) {
+            discoveryGate.onDiscoveryFailed(address)
+            return
+        }
         try {
-            gatt.discoverServices()
+            if (!gatt.discoverServices()) {
+                // Let a later trigger retry rather than stranding the connection at CONNECTING.
+                discoveryGate.onDiscoveryFailed(address)
+                onLog("discoverServices() refused for $address.")
+            }
         } catch (e: SecurityException) {
+            discoveryGate.onDiscoveryFailed(address)
             onLog("SecurityException: Service discovery denied for $address.")
+        }
+    }
+
+    /**
+     * Starts discovery anyway if the MTU callback never arrives.
+     *
+     * Some peripherals simply do not answer an MTU request. Without this the connection would hang
+     * at CONNECTING forever waiting on a callback — trading the old bug for a quieter one.
+     */
+    private fun armMtuFallback(address: String) {
+        connectionScope.launch {
+            kotlinx.coroutines.delay(MTU_FALLBACK_MS)
+            if (discoveryGate.onMtuSettled(address)) {
+                onLog("MTU callback never arrived for $address; starting service discovery anyway.")
+                issueDiscoveryIfWanted(address)
+            }
         }
     }
 
@@ -312,6 +405,7 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun removeConnection(address: String): BluetoothGatt? {
+        discoveryGate.forget(address)
         val gatt = activeConnections.remove(address)
         writeCharacteristics.remove(address)
         deviceWriteManagers.remove(address)?.release()
@@ -324,6 +418,17 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
     }
 
     override fun isConnected(address: String): Boolean = activeConnections.containsKey(address)
+
+    override fun systemLinkState(address: String): Int? = try {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = manager?.adapter
+        if (manager == null || adapter == null || !adapter.isEnabled) null
+        else manager.getConnectionState(adapter.getRemoteDevice(address), BluetoothProfile.GATT)
+    } catch (e: SecurityException) {
+        null
+    } catch (e: IllegalArgumentException) {
+        null
+    }
 
     override fun activeConnectionAddresses(): Set<String> = activeConnections.keys.toSet()
 
@@ -351,5 +456,14 @@ class AndroidBleGattTransport(private val context: Context) : BleGattTransport {
                 onRestored(address)
             }
         }
+    }
+
+    private companion object {
+        /**
+         * How long to wait for `onMtuChanged` before starting service discovery regardless.
+         * Generous: the observed exchange took ~700ms on a slow phone, and being late here costs a
+         * slower connect, while being early costs the dropped-discovery bug this fixes.
+         */
+        const val MTU_FALLBACK_MS = 2000L
     }
 }

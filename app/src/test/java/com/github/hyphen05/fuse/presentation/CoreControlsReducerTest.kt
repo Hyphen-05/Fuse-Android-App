@@ -681,4 +681,127 @@ class CoreControlsReducerTest {
 
         assertEquals("Unknown Device", newState.connectivity.connectedDeviceName)
     }
+
+    // ========================================================================
+    // One strip's own power (the switch on its device tile)
+    // ========================================================================
+
+    private val stripA = "AA:AA:AA:AA:AA:AA"
+    private val stripB = "BB:BB:BB:BB:BB:BB"
+
+    private fun directTo(effects: List<CoreSideEffect>, address: String, command: ByteArray) =
+        effects.any { it is CoreSideEffect.SendCommandToDeviceDirect && it.address == address && it.command.contentEquals(command) }
+
+    @Test
+    fun setPower_broadcastReachesStripsThatAreOff() {
+        val (_, effects) = reduce(intent = RgbIntent.SetPower(true), targetAddresses = listOf(stripA, stripB))
+
+        assertTrue(effects.any {
+            it is CoreSideEffect.BroadcastCommand && it.includePoweredOff &&
+                it.command.contentEquals(DuoCoProtocol.createPowerCommand(true))
+        })
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean(devicePowerPrefKey(stripA), true)))
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean(devicePowerPrefKey(stripB), true)))
+    }
+
+    @Test
+    fun setDevicePower_offWithAnotherStripOn_switchesOnlyThatStrip() {
+        val (newState, effects) = reduce(
+            intent = RgbIntent.SetDevicePower(stripA, false),
+            targetAddresses = listOf(stripA, stripB)
+        )
+
+        assertEquals(false, newState.connectivity.deviceStatesMap[stripA]!!.isPowerOn)
+        assertEquals(true, newState.connectivity.deviceStatesMap[stripB]!!.isPowerOn)
+        assertTrue("global switch stays on while a strip is still on", newState.coreControl.isPowerOn)
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createPowerCommand(false)))
+        assertFalse(directTo(effects, stripB, DuoCoProtocol.createPowerCommand(false)))
+        assertFalse(effects.any { it is CoreSideEffect.BroadcastCommand })
+        assertFalse(effects.any { it is CoreSideEffect.StopMusicSync })
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean(devicePowerPrefKey(stripA), false)))
+    }
+
+    @Test
+    fun setDevicePower_offOnTheLastStripOn_turnsGlobalOffAndStopsAutomation() {
+        val state = RgbUiState().let {
+            it.copy(connectivity = it.connectivity.copy(
+                deviceStatesMap = mapOf(stripB to ActiveDeviceState(isPowerOn = false))
+            ))
+        }
+        val (newState, effects) = reduce(
+            state = state,
+            intent = RgbIntent.SetDevicePower(stripA, false),
+            targetAddresses = listOf(stripA, stripB)
+        )
+
+        assertFalse(newState.coreControl.isPowerOn)
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean("power_on", false)))
+        assertTrue(effects.contains(CoreSideEffect.StopMusicSync(restoreState = true)))
+        assertTrue(effects.contains(CoreSideEffect.StopAmbiance(restoreState = true)))
+    }
+
+    @Test
+    fun setDevicePower_onWhileGlobalOff_wakesOnlyThatStripAndResendsWhatItRemembers() {
+        val state = RgbUiState().let {
+            it.copy(coreControl = it.coreControl.copy(isPowerOn = false, red = 10, green = 20, blue = 30, brightness = 40, activeFeatureName = "Colour"))
+        }
+        val (newState, effects) = reduce(
+            state = state,
+            intent = RgbIntent.SetDevicePower(stripA, true),
+            targetAddresses = listOf(stripA, stripB)
+        )
+
+        assertTrue(newState.coreControl.isPowerOn)
+        assertEquals(true, newState.connectivity.deviceStatesMap[stripA]!!.isPowerOn)
+        assertEquals("the untouched strip must not follow the global flag on", false, newState.connectivity.deviceStatesMap[stripB]!!.isPowerOn)
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createPowerCommand(true)))
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createBrightnessCommand(40)))
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createColorCommand(10, 20, 30)))
+        assertFalse(effects.any { it is CoreSideEffect.SendCommandToDeviceDirect && it.address == stripB })
+        assertTrue(effects.contains(CoreSideEffect.SavePrefBoolean("power_on", true)))
+    }
+
+    @Test
+    fun setDevicePower_offUnderMusic_dropsOutThroughTheRestoreNotABarePowerOff() {
+        val (_, effects) = reduce(
+            intent = RgbIntent.SetDevicePower(stripA, false),
+            targetAddresses = listOf(stripA, stripB),
+            deviceAutomationMode = mapOf(stripA to RgbControllerViewModel.AutomationType.AUDIO)
+        )
+
+        assertTrue(effects.contains(CoreSideEffect.RestoreDeviceState(stripA, RgbControllerViewModel.AutomationType.AUDIO)))
+        assertFalse(directTo(effects, stripA, DuoCoProtocol.createPowerCommand(false)))
+        assertTrue(effects.contains(CoreSideEffect.CancelSceneRunner(stripA)))
+    }
+
+    @Test
+    fun setDevicePower_onWhileMusicRuns_rejoinsInsteadOfSendingItsColour() {
+        val state = RgbUiState().let {
+            it.copy(
+                audioSettings = it.audioSettings.copy(musicMode = "phone_mic"),
+                connectivity = it.connectivity.copy(deviceStatesMap = mapOf(stripA to ActiveDeviceState(isPowerOn = false, red = 1, green = 2, blue = 3)))
+            )
+        }
+        val (_, effects) = reduce(
+            state = state,
+            intent = RgbIntent.SetDevicePower(stripA, true),
+            targetAddresses = listOf(stripA, stripB)
+        )
+
+        assertTrue(effects.contains(CoreSideEffect.SaveDeviceState(stripA, RgbControllerViewModel.AutomationType.AUDIO)))
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createPowerCommand(true)))
+        assertFalse(directTo(effects, stripA, DuoCoProtocol.createColorCommand(1, 2, 3)))
+    }
+
+    @Test
+    fun setDevicePower_onAStripNotUnderActiveControl_leavesTheGlobalSwitchAlone() {
+        val (newState, effects) = reduce(
+            intent = RgbIntent.SetDevicePower(stripA, false),
+            targetAddresses = listOf(stripB)
+        )
+
+        assertTrue(newState.coreControl.isPowerOn)
+        assertFalse(effects.any { it is CoreSideEffect.SavePrefBoolean && it.key == "power_on" })
+        assertTrue(directTo(effects, stripA, DuoCoProtocol.createPowerCommand(false)))
+    }
 }

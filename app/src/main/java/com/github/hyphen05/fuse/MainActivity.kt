@@ -91,6 +91,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.GraphicEq
+import com.github.hyphen05.fuse.ui.components.PowerButton
 import com.github.hyphen05.fuse.ui.components.ModesScreen
 import com.github.hyphen05.fuse.ui.components.MusicScreen
 import com.github.hyphen05.fuse.ui.components.HomeScreen
@@ -326,6 +327,10 @@ fun MainScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) checkPermissions()
+            // A process frozen in the background for hours can miss a disconnect and wake up
+            // showing strips that are gone. ON_START rather than ON_RESUME so it runs before the
+            // home screen decides what to draw, and once per return rather than per dialog.
+            if (event == Lifecycle.Event.ON_START) viewModel.reconcileConnections("returning to the app")
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -408,17 +413,6 @@ fun MainScreen() {
         label = "topBarSubtitleColor"
     )
 
-    val powerButtonBgColor by animateColorAsState(
-        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        animationSpec = tween(durationMillis = 300),
-        label = "powerButtonBgColor"
-    )
-
-    val powerButtonIconTint by animateColorAsState(
-        targetValue = if (uiState.coreControl.isPowerOn) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = tween(durationMillis = 300),
-        label = "powerButtonIconTint"
-    )
 
     // Scan/connect failures are written to coreControl.errorMessage by the ViewModel; this is the
     // only place that reads it. Without this the "Scan for Devices" button just silently no-ops
@@ -469,12 +463,71 @@ fun MainScreen() {
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
 
+    // The indicator covers the gap until there is something to look at, so both ends of it read one
+    // signal: uiState's CONNECTED, which is what HomeScreen gates its control deck on.
+    //
+    // That is not the same moment as the radio linking up, and the difference is the whole bug.
+    // handleConnectionStateChange calls connectionManager.setConnected the instant GATT connects;
+    // uiState only turns CONNECTED in onDuoCoCharacteristicRegistered, after the MTU exchange and
+    // service discovery (see GattDiscoveryGate). Between them the app has a radio link and nothing
+    // to draw. A predicate that stopped hunting on the earlier signal therefore uncovered an empty
+    // screen and left it there until the later one -- the reported "animation ends, half a second
+    // of nothing, then the UI pops up".
+    //
+    // So a device that is GATT-connected but not yet usable is still being hunted. connectionManager
+    // stays in the predicate for one thing only: it is the side that knows a disconnect was the
+    // user's own doing and must not be hunted at all.
+    fun isUsable(device: com.github.hyphen05.fuse.db.SavedDevice) =
+        uiState.connectivity.deviceConnectionStates[device.macAddress] == BleConnectionState.CONNECTED
+
+    // Stops at the *first* usable strip, not the last: with two saved strips the old predicate
+    // stayed non-null until both were up, so the second strip's whole connect held the indicator
+    // over an app that was already working.
+    val anyDeviceReady = savedDevices.any { it.isAutoConnectEnabled && isUsable(it) }
+
+    // Strips that are linked but still discovering. When the first strip becomes usable while
+    // another is already this far along, the page waits for it -- capped at partnerWaitMs -- so both
+    // tiles arrive together instead of one landing beside an empty slot. A strip that is only
+    // *trying* to connect is not waited for: that can take many seconds, or never finish. If the
+    // cap runs out, HomeScreen's tiles row handles the late arrival (full width, then a split).
+    val partnerWaitMs = 1_000L
+    val linkingDevices = savedDevices.filter { device ->
+        device.isAutoConnectEnabled &&
+            connectionStates[device.macAddress] is com.github.hyphen05.fuse.domain.ConnectionState.Connected &&
+            !isUsable(device)
+    }
+    // Timestamps rather than booleans, so a second connect in the same session starts a fresh wait
+    // synchronously instead of reading the previous wait's expiry for a frame.
+    val readyAt = remember(anyDeviceReady) {
+        if (anyDeviceReady) android.os.SystemClock.uptimeMillis() else null
+    }
+    var partnerWaitExpiredFor by remember { mutableStateOf<Long?>(null) }
+    androidx.compose.runtime.LaunchedEffect(readyAt) {
+        if (readyAt != null) {
+            kotlinx.coroutines.delay(partnerWaitMs)
+            partnerWaitExpiredFor = readyAt
+        }
+    }
+    // Latched: once the page has been revealed for this connect, a strip that links afterwards must
+    // not pull it back under the indicator. A plain array, not state -- it only records a decision
+    // this composition already made.
+    val revealedFor = remember { longArrayOf(-1L) }
+    val waitingForPartner = readyAt != null && linkingDevices.isNotEmpty() &&
+        partnerWaitExpiredFor != readyAt && revealedFor[0] != readyAt
+    if (readyAt != null && !waitingForPartner) revealedFor[0] = readyAt
     val huntingDevice = if (!bluetoothEnabled && !uiState.coreControl.isDemoMode) {
+        null
+    } else if (waitingForPartner) {
+        // Keeps the indicator up over the hold. Naming the partner restarts the surface's own
+        // timeout, which is harmless: the hold is capped far below it.
+        linkingDevices.first()
+    } else if (anyDeviceReady) {
         null
     } else {
         savedDevices.firstOrNull { device ->
             device.isAutoConnectEnabled && when (val s = connectionStates[device.macAddress]) {
-                is com.github.hyphen05.fuse.domain.ConnectionState.Connected -> false
+                // Linked, but still discovering services. Keep covering it.
+                is com.github.hyphen05.fuse.domain.ConnectionState.Connected -> !isUsable(device)
                 is com.github.hyphen05.fuse.domain.ConnectionState.Disconnected -> !s.isManual
                 else -> true // Connecting, or never attempted this session
             }
@@ -524,21 +577,10 @@ fun MainScreen() {
                             .padding(end = 8.dp)
                             .offset(y = (-6).dp)
                     ) {
-                        val powerInteractionSource = remember { MutableInteractionSource() }
-                        IconButton(
-                            onClick = { viewModel.setPower(!uiState.coreControl.isPowerOn) },
-                            interactionSource = powerInteractionSource,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(powerButtonBgColor)
-                                .joyfulPress(powerInteractionSource)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PowerSettingsNew,
-                                contentDescription = "Toggle Power",
-                                tint = powerButtonIconTint
-                            )
-                        }
+                        PowerButton(
+                            isOn = uiState.coreControl.isPowerOn,
+                            onToggle = { viewModel.setPower(it) }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -604,6 +646,9 @@ fun MainScreen() {
             } else if (selectedTab == 0) {
                 HomeScreen(
                     viewModel = viewModel,
+                    // Holds Home in its disconnected state while a second, already-linked strip
+                    // finishes, so both tiles are revealed together. See waitingForPartner.
+                    holdReveal = waitingForPartner,
                     permissionsGranted = permissionsGranted,
                     permissionsBlocked = permissionsBlocked,
                     onGrantPermissions = {

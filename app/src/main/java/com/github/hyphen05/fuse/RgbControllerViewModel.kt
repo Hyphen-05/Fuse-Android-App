@@ -1,5 +1,6 @@
 package com.github.hyphen05.fuse
 
+import com.github.hyphen05.fuse.hardware.ble.ConnectionReconciler
 import com.github.hyphen05.fuse.core.protocol.DuoCoProtocol
 import com.github.hyphen05.fuse.core.color.ColorConverter
 import com.github.hyphen05.fuse.core.calibration.CalibrationMatrixSolver
@@ -57,6 +58,7 @@ import com.github.hyphen05.fuse.domain.model.DeviceSceneState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import java.util.UUID
+import com.github.hyphen05.fuse.core.pacing.BlePacing
 
 private const val TAG = "BleRgbController"
 
@@ -162,6 +164,13 @@ class RgbControllerViewModel(
         // state (activeConnections/writeCharacteristics/retryAttempts/deviceWriteManagers/
         // connectionScope) moved to com.github.hyphen05.fuse.hardware.ble.AndroidBleGattTransport (Phase 6).
         val activeExcludedMacs = ConcurrentHashMap.newKeySet<String>()
+
+        /**
+         * The status passed when a disconnect is synthesised by [reconcileConnections] rather than
+         * delivered by the stack. Negative, so it can never collide with a real GATT status, and it
+         * shows up in the diagnostics log's `handleConnectionStateChange` line.
+         */
+        const val STATUS_RECONCILED = -1
     }
 
         private val deviceStateStore = DeviceStateStore(application)
@@ -355,7 +364,7 @@ class RgbControllerViewModel(
                 bleGattTransport.setPacing(effect.address, effect.ms)
             }
             com.github.hyphen05.fuse.presentation.CalibrationSideEffect.ResetAllDeviceManagerPacing -> {
-                bleGattTransport.resetAllPacing(100)
+                bleGattTransport.resetAllPacing(BlePacing.DEFAULT_MS)
             }
             // CONTRACT: the metronome tick re-dispatches RgbIntent.SendCalibrationFlash rather
             // than constructing the pulse itself — see CalibrationSideEffect.StartMetronome.
@@ -465,7 +474,11 @@ class RgbControllerViewModel(
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.SavePrefInt -> prefsRepo.putAppStatePrefInt(effect.key, effect.value)
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.SavePrefString -> prefsRepo.putAppStatePrefString(effect.key, effect.value)
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.Log -> addLog(effect.message)
-            is com.github.hyphen05.fuse.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes)
+            is com.github.hyphen05.fuse.presentation.CoreSideEffect.BroadcastCommand -> sendCommand(effect.command, effect.logMessage, effect.cancelRunningScenes, effect.includePoweredOff)
+            is com.github.hyphen05.fuse.presentation.CoreSideEffect.CancelSceneRunner -> {
+                sceneRunners[effect.address]?.release()
+                sceneRunners.remove(effect.address)
+            }
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.SendCommandToDeviceDirect -> sendCommandToDeviceDirect(effect.address, effect.command)
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.ConnectDevice -> connectDeviceHardware(effect.address)
             is com.github.hyphen05.fuse.presentation.CoreSideEffect.DisconnectDevice -> {
@@ -785,15 +798,25 @@ class RgbControllerViewModel(
             deviceAutomationMode.remove(macAddress)
             deviceSnapshotTaken.remove(macAddress)
             viewModelScope.launch(Dispatchers.IO) {
+                // A strip that is switched off by now - dropped out on its tile, or everything
+                // turned off - gets its colour back but stays off. Power goes last, so nothing
+                // after it can wake the strip, and the snapshot's own power (usually on) is ignored.
+                val stayOff = isSwitchedOff(macAddress)
                 val state = deviceStateStore.getState(macAddress)
                 if (state != null) {
-                    val powerCmd = DuoCoProtocol.createPowerCommand(state.power)
+                    val powerCmd = DuoCoProtocol.createPowerCommand(state.power && !stayOff)
                     val brightnessCmd = DuoCoProtocol.createBrightnessCommand(state.brightness)
                     val colorCmd = DuoCoProtocol.createColorCommand(state.red, state.green, state.blue)
                     
-                    sendCommandToDeviceDirect(macAddress, powerCmd)
-                    sendCommandToDeviceDirect(macAddress, brightnessCmd)
-                    sendCommandToDeviceDirect(macAddress, colorCmd)
+                    if (stayOff) {
+                        sendCommandToDeviceDirect(macAddress, brightnessCmd)
+                        sendCommandToDeviceDirect(macAddress, colorCmd)
+                        sendCommandToDeviceDirect(macAddress, powerCmd)
+                    } else {
+                        sendCommandToDeviceDirect(macAddress, powerCmd)
+                        sendCommandToDeviceDirect(macAddress, brightnessCmd)
+                        sendCommandToDeviceDirect(macAddress, colorCmd)
+                    }
                     
                     val memoryFeatureName = deviceRestoredFeatureName.remove(macAddress)
                     val restoredFeatureName = if (memoryFeatureName != null) {
@@ -815,10 +838,12 @@ class RgbControllerViewModel(
                             blue = state.blue,
                             warmth = state.warmth,
                             brightness = state.brightness,
-                            isPowerOn = state.power
+                            isPowerOn = existing.isPowerOn && state.power
                         )
                         current.copy(connectivity = current.connectivity.copy(deviceStatesMap = newMap))
                     }
+                } else if (stayOff) {
+                    sendCommandToDeviceDirect(macAddress, DuoCoProtocol.createPowerCommand(false))
                 }
                 // Only once the restore has actually been sent, so a crash between the two leaves
                 // the marker in place and the next launch tries again.
@@ -848,7 +873,7 @@ class RgbControllerViewModel(
             onLog = { message -> addLog(message) }
         )
         bleGattTransport.registerWriteHooks(
-            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, 50) },
+            pacingProvider = { address -> prefsRepo.getPacingPrefInt(address, BlePacing.DEFAULT_MS) },
             calibrate = { address, command -> processCommandWithCalibration(address, command) },
             onFpsUpdate = { address, fps ->
                 _telemetry.update { s -> s.copy(deviceAchievedFps = s.deviceAchievedFps + (address to fps)) }
@@ -1216,8 +1241,25 @@ class RgbControllerViewModel(
             }
         }
 
-        // Sync initial UI state with existing active BLE connections
-        val activeAddresses = bleGattTransport.activeConnectionAddresses()
+        // Sync initial UI state with existing active BLE connections.
+        //
+        // The transport outlives this ViewModel (it is process-scoped, so connections survive the
+        // Activity being recreated), and this used to copy every address it held straight into the
+        // UI as CONNECTED. After hours in the background that set can hold connections that are gone,
+        // and the home screen then loaded straight into tiles for strips that were not there.
+        // Confirm each one with the Bluetooth stack first, and close what it
+        // disowns rather than showing it.
+        val heldAddresses = bleGattTransport.activeConnectionAddresses()
+        val disowned = ConnectionReconciler.stale(heldAddresses) { bleGattTransport.systemLinkState(it) }
+        disowned.forEach { address ->
+            com.github.hyphen05.fuse.DiagnosticLogger.log("BLE", "Startup: $address held by the transport but not linked; closing it.")
+            try {
+                bleGattTransport.removeConnection(address)?.close()
+            } catch (e: SecurityException) {
+                addLog("SecurityException closing stale GATT client for $address.")
+            }
+        }
+        val activeAddresses = heldAddresses - disowned
         if (activeAddresses.isNotEmpty()) {
             val initialStates = activeAddresses.associateWith { BleConnectionState.CONNECTED }
             val firstConnectedAddress = activeAddresses.first()
@@ -1252,7 +1294,7 @@ class RgbControllerViewModel(
                     0
                 } else {
                     connected.keys.mapNotNull { addr ->
-                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, 100)
+                        state.connectivity.devicePacingMs[addr] ?: prefsRepo.getPacingPrefInt(addr, BlePacing.DEFAULT_MS)
                     }.maxOrNull() ?: 0
                 }
                 prefsRepo.putPacingPrefInt("slowest_connected_pacing", slowest)
@@ -1735,6 +1777,45 @@ class RgbControllerViewModel(
     // since the transport is a singleton that always calls the currently-registered VM. The
     // exponential-backoff/retry decision logic and all _uiState updates stay here.
 
+    /**
+     * Correct any connection the app believes in that the Bluetooth stack says is gone.
+     *
+     * Called whenever the app returns to the foreground. After hours in the background Android
+     * freezes the process, and a disconnect that lands while it is frozen can fail to reach it - so
+     * the app wakes up showing strips as connected that are not. See [ConnectionReconciler].
+     *
+     * A stale connection is run through the ordinary disconnect path as an unexpected drop, so it
+     * gets exactly what a delivered callback would have given it: the client closed, the state
+     * cleared, and auto-connect's retries if the device has auto-connect on.
+     */
+    fun reconcileConnections(reason: String) {
+        if (_uiState.value.coreControl.isDemoMode) return
+        val held = bleGattTransport.activeConnectionAddresses()
+        // Two places can claim a device is connected, and the home screen draws from the second:
+        // the connection manager, and the UI state itself. Check both. A device the UI shows as
+        // connected that the transport holds nothing for is stale on the face of it - there is no
+        // link to ask the stack about.
+        val shownConnected = _uiState.value.connectivity.deviceConnectionStates
+            .filterValues { it == BleConnectionState.CONNECTED }.keys
+        val managerConnected = connectionManager.connectionStates.value
+            .filterValues { it is com.github.hyphen05.fuse.domain.ConnectionState.Connected }.keys
+        val believed = (shownConnected + managerConnected).intersect(held)
+        val orphaned = shownConnected - held
+        if (believed.isEmpty() && orphaned.isEmpty()) return
+        val stale = ConnectionReconciler.stale(believed) { bleGattTransport.systemLinkState(it) } + orphaned
+        val summary = "reconcileConnections($reason): believed=${believed.size} orphaned=${orphaned.size} " +
+            "stale=${stale.size} " +
+            believed.joinToString { "$it=${bleGattTransport.systemLinkState(it)}" }
+        com.github.hyphen05.fuse.DiagnosticLogger.log("BLE", summary)
+        // Also to logcat: the healthy case (stale=0) is the one worth being able to see on a phone,
+        // since the risk in this check is dropping strips that are really there.
+        Log.d(TAG, summary)
+        for (address in stale) {
+            addLog("$address was no longer connected after $reason. Treating it as a drop.")
+            handleConnectionStateChange(address, STATUS_RECONCILED, BluetoothProfile.STATE_DISCONNECTED)
+        }
+    }
+
     fun handleConnectionStateChange(address: String, status: Int, newState: Int) {
         com.github.hyphen05.fuse.DiagnosticLogger.log(
             "BLE",
@@ -1752,7 +1833,16 @@ class RgbControllerViewModel(
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
             addLog("Disconnected from GATT ($address).")
             val wasActive = bleGattTransport.isConnected(address)
-            bleGattTransport.removeConnection(address)
+            // Close the client, not just forget it. Every connectGatt() registers a client with the
+            // Bluetooth stack and only close() gives it back; this path used to drop the reference
+            // without closing, so each unexpected disconnect leaked one registration. Enough of
+            // those and the stack stops answering the process - the "finds no devices until a
+            // force-stop" failure that a stranded CONNECTING once caused the same way.
+            try {
+                bleGattTransport.removeConnection(address)?.close()
+            } catch (e: SecurityException) {
+                addLog("SecurityException closing GATT client for $address.")
+            }
 
             dispatch(RgbIntent.InternalConnectionStateChanged(address, BleConnectionState.DISCONNECTED))
 
@@ -1831,9 +1921,32 @@ class RgbControllerViewModel(
             restoreDeviceState(address, AutomationType.AUDIO)
         }
 
+        // A strip switched off on its own tile stays off across launches. Until something touches
+        // it there is no deviceStatesMap entry, and without one it would read the global switch.
+        val savedOwnPower = prefsRepo.getAppStatePrefBoolean(
+            com.github.hyphen05.fuse.presentation.devicePowerPrefKey(address),
+            _uiState.value.coreControl.isPowerOn
+        )
+
         _uiState.update { state ->
+            val core = state.coreControl
+            val statesMap = if (state.connectivity.deviceStatesMap[address] == null && savedOwnPower != core.isPowerOn) {
+                state.connectivity.deviceStatesMap + (address to ActiveDeviceState(
+                    activeFeatureName = core.activeFeatureName,
+                    red = core.red,
+                    green = core.green,
+                    blue = core.blue,
+                    warmth = core.warmth,
+                    modeIndex = core.modeIndex,
+                    brightness = core.brightness,
+                    isPowerOn = savedOwnPower
+                ))
+            } else {
+                state.connectivity.deviceStatesMap
+            }
             state.copy(
                 connectivity = state.connectivity.copy(
+                    deviceStatesMap = statesMap,
                     deviceConnectionStates = state.connectivity.deviceConnectionStates + (address to BleConnectionState.CONNECTED),
                     connectionState = BleConnectionState.CONNECTED,
                     connectedDeviceAddress = address,
@@ -1938,7 +2051,9 @@ class RgbControllerViewModel(
     }
 
     private fun broadcastAudioResultDirect(result: com.github.hyphen05.fuse.core.audio.AudioDspResult) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
+        // A strip switched off on its tile drops out of the visualiser, roles and all, so the
+        // alternating and band-split groups re-form around the strips still lit.
+        val targetAddresses = getCurrentlyControlledDeviceAddresses().filterNot { isSwitchedOff(it) }
         // used to increment on result.isBeat, which since P1
         // fires ~180ms+flashTimingOffsetMs after the frame that actually rendered the flash peak --
         // device A would show the flash's rising/peak envelope, then mid-decay the target would
@@ -2026,7 +2141,7 @@ class RgbControllerViewModel(
     }
 
     private fun broadcastCommandDirect(command: ByteArray) {
-        val targetAddresses = getCurrentlyControlledDeviceAddresses()
+        val targetAddresses = getCurrentlyControlledDeviceAddresses().filterNot { isSwitchedOff(it) }
         targetAddresses.forEach { address ->
             sceneRunners[address]?.release()
             sceneRunners.remove(address)
@@ -2044,6 +2159,14 @@ class RgbControllerViewModel(
         }
     }
 
+    /**
+     * True for a strip that is off, whether by its own tile or by the global switch. Colour,
+     * brightness, music and ambiance all skip it: what changes while it is off is remembered in
+     * `deviceStatesMap` and sent when it comes back on.
+     */
+    private fun isSwitchedOff(address: String): Boolean =
+        _uiState.value.connectivity.deviceStatesMap[address]?.isPowerOn == false
+
     fun getCurrentlyControlledDeviceAddresses(): List<String> {
         return savedDevices.value
             .filter { it.isActiveControlEnabled }
@@ -2057,8 +2180,9 @@ class RgbControllerViewModel(
     }
 
 
-    fun broadcastCommand(command: ByteArray, cancelRunningScenes: Boolean = true) {
+    fun broadcastCommand(command: ByteArray, cancelRunningScenes: Boolean = true, includePoweredOff: Boolean = false) {
         val targetAddresses = getCurrentlyControlledDeviceAddresses()
+            .filter { includePoweredOff || !isSwitchedOff(it) }
         
         targetAddresses.forEach { address ->
             if (cancelRunningScenes) {
@@ -2095,7 +2219,7 @@ class RgbControllerViewModel(
      * `connectivity.devicePacingMs`. Exists so the Settings screen doesn't have to build its own
      * AppPreferencesRepositoryImpl inside a composable and bypass AppContainer's DI.
      */
-    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, 100)
+    fun savedPacingMs(address: String): Int = prefsRepo.getPacingPrefInt(address, BlePacing.DEFAULT_MS)
 
     override fun writeAmbianceColor(r: Int, g: Int, b: Int) {
         dispatch(RgbIntent.WriteAmbianceColor(r, g, b))
@@ -2105,10 +2229,10 @@ class RgbControllerViewModel(
         dispatch(RgbIntent.SetAmbianceCaptureActive(active))
     }
 
-    private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true) {
+    private fun sendCommand(command: ByteArray, debugName: String, cancelRunningScenes: Boolean = true, includePoweredOff: Boolean = false) {
         val hexStr = command.joinToString(" ") { String.format("0x%02X", it.toInt() and 0xFF) }
         addLog("Send Command ($debugName): $hexStr")
-        broadcastCommand(command, cancelRunningScenes)
+        broadcastCommand(command, cancelRunningScenes, includePoweredOff)
     }
 
     private fun syncPhysicalBulb() {
@@ -2276,6 +2400,10 @@ class RgbControllerViewModel(
 
     fun setPower(isOn: Boolean) {
         dispatch(RgbIntent.SetPower(isOn))
+    }
+
+    fun setDevicePower(address: String, isOn: Boolean) {
+        dispatch(RgbIntent.SetDevicePower(address, isOn))
     }
 
     fun setColor(r: Int, g: Int, b: Int) {

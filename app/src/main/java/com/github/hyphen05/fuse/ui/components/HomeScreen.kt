@@ -1,5 +1,7 @@
 package com.github.hyphen05.fuse.ui.components
 
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,14 +23,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
 import com.github.hyphen05.fuse.ActiveDeviceState
 import com.github.hyphen05.fuse.BleConnectionState
@@ -37,6 +44,9 @@ import com.github.hyphen05.fuse.RgbUiState
 import com.github.hyphen05.fuse.ambiance.AmbianceCaptureState
 import com.github.hyphen05.fuse.db.SavedDevice
 import com.github.hyphen05.fuse.domain.model.AppScene
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -46,7 +56,11 @@ fun HomeScreen(
     permissionsBlocked: Boolean,
     onGrantPermissions: () -> Unit,
     onStartAmbianceCapture: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // True while MainActivity holds the page for a second strip that is already linked, so both
+    // tiles arrive together. Home keeps showing its disconnected state, under the indicator, until
+    // then -- nothing changes on screen during the hold.
+    holdReveal: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val savedDevices by viewModel.savedDevices.collectAsState()
@@ -190,6 +204,22 @@ fun HomeScreen(
         )
     }
 
+    // The connect used to end with the control deck simply being there on the next frame. It is
+    // now choreographed in *drawing* only -- see connectReveal at the bottom of this file. Layout
+    // lands in one frame; each piece then fades and rises into its own place, one beat after the
+    // piece above it.
+    //
+    // revealAt marks a connect that happened while this screen was already on show. It is null on
+    // the first composition, so a cold launch, a tab switch back to Home, or a ViewModel that was
+    // already connected all draw the page at rest. composedOnce is a plain array rather than state
+    // on purpose: writing state from SideEffect would cost a recomposition for nothing.
+    val connected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED && !holdReveal
+    val composedOnce = remember { booleanArrayOf(false) }
+    SideEffect { composedOnce[0] = true }
+    val revealAt = remember(connected) {
+        if (connected && composedOnce[0]) SystemClock.uptimeMillis() else null
+    }
+
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp),
@@ -198,7 +228,7 @@ fun HomeScreen(
     ) {
         // --- Permissions Alert Card (when in Real Mode & no permissions) ---
         if (!permissionsGranted && !uiState.coreControl.isDemoMode) {
-            item {
+            item(key = "permissions_card") {
                 val grantPermissionsInteractionSource = remember { MutableInteractionSource() }
                 Card(
                     colors = CardDefaults.cardColors(
@@ -273,8 +303,8 @@ fun HomeScreen(
 
         // --- Connected Device Tiles ---
         val connectedAddresses = uiState.connectivity.deviceConnectionStates.filter { it.value == BleConnectionState.CONNECTED }.keys.toList()
-        if (connectedAddresses.isEmpty()) {
-            item {
+        if (connectedAddresses.isEmpty() || holdReveal) {
+            item(key = "disconnected_card") {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -317,21 +347,91 @@ fun HomeScreen(
                 }
             }
         } else {
-            item {
+            item(key = "device_tiles") {
                 if (connectedAddresses.size <= 2) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        connectedAddresses.forEach { address ->
-                            DeviceTile(
-                                address = address,
-                                viewModel = viewModel,
-                                uiState = uiState,
-                                savedDevices = savedDevices,
-                                activeComposeColor = activeComposeColor,
-                                modifier = Modifier.weight(1f)
-                            )
+                    // Two strips normally arrive together, because MainActivity holds the page while a
+                    // strip that is already linked finishes (holdReveal). This row is for the case
+                    // where one is slower than that hold: the first tile lands alone at full width,
+                    // and when its partner arrives it springs to half as the partner fades in beside
+                    // it. Replaces a reserved empty slot, which read as a hole for up to a second.
+                    //
+                    // Both widths come from one spring, split, read in the *layout* phase, so the
+                    // animation costs no recomposition. The arriving tile is always measured at its
+                    // final half width and clipped to its growing slot, so its text never wraps into
+                    // a tall column while the slot is narrow -- that would change the row's height
+                    // and push the whole deck down mid-spring.
+                    val alone = remember { arrayOfNulls<String>(1) }
+                    if (connectedAddresses.size == 1) alone[0] = connectedAddresses[0]
+                    // The strip that was alone stays on the left, so it never changes sides.
+                    val first = alone[0]?.takeIf { it in connectedAddresses } ?: connectedAddresses.first()
+                    val second = connectedAddresses.firstOrNull { it != first }
+
+                    val motion = remember { MotionScheme.expressive() }
+                    // Starts split when both are already there, so the ordinary together-arrival and a
+                    // return to the Home tab never animate it.
+                    val split = remember { Animatable(if (second != null) 1f else 0f) }
+                    LaunchedEffect(second != null) {
+                        if (second == null) {
+                            split.snapTo(0f)
+                        } else if (split.value < 1f) {
+                            split.animateTo(1f, motion.defaultSpatialSpec())
+                        }
+                    }
+
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val gapPx = with(LocalDensity.current) { 16.dp.roundToPx() }
+                        val fullPx = constraints.maxWidth
+                        val halfPx = (fullPx - gapPx) / 2
+                        // The second slot is always whatever the first leaves, so the two sum to the
+                        // row's width exactly -- including through the spring's overshoot.
+                        fun firstWidthPx() =
+                            (fullPx + (halfPx - fullPx) * split.value).roundToInt().coerceIn(0, fullPx)
+
+                        Row(Modifier.fillMaxWidth()) {
+                            key(first) {
+                                val arrivedAt = remember {
+                                    if (composedOnce[0]) SystemClock.uptimeMillis() else null
+                                }
+                                DeviceTile(
+                                    address = first,
+                                    viewModel = viewModel,
+                                    uiState = uiState,
+                                    savedDevices = savedDevices,
+                                    activeComposeColor = activeComposeColor,
+                                    modifier = Modifier
+                                        .layout { measurable, _ ->
+                                            val w = firstWidthPx()
+                                            val placeable = measurable.measure(Constraints.fixedWidth(w))
+                                            layout(w, placeable.height) { placeable.place(0, 0) }
+                                        }
+                                        .connectReveal(arrivedAt, 0)
+                                )
+                            }
+                            if (second != null) {
+                                key(second) {
+                                    val arrivedAt = remember {
+                                        if (composedOnce[0]) SystemClock.uptimeMillis() else null
+                                    }
+                                    Box(
+                                        Modifier
+                                            .clipToBounds()
+                                            .layout { measurable, _ ->
+                                                val slot = fullPx - firstWidthPx()
+                                                val placeable = measurable.measure(Constraints.fixedWidth(halfPx))
+                                                layout(slot, placeable.height) { placeable.place(gapPx, 0) }
+                                            }
+                                    ) {
+                                        DeviceTile(
+                                            address = second,
+                                            viewModel = viewModel,
+                                            uiState = uiState,
+                                            savedDevices = savedDevices,
+                                            activeComposeColor = activeComposeColor,
+                                            modifier = Modifier.connectReveal(arrivedAt, 0)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -356,19 +456,24 @@ fun HomeScreen(
         }
 
         // --- Control Deck (Only displayed when CONNECTED) ---
-        if (uiState.connectivity.connectionState == BleConnectionState.CONNECTED) {
+        if (connected) {
             val controlsInert = !uiState.coreControl.isPowerOn
 
             if (controlsInert) {
-                item {
-                    PowerOffHintCard(onTurnOn = { viewModel.setPower(true) })
+                item(key = "power_off_hint") {
+                    PowerOffHintCard(
+                        onTurnOn = { viewModel.setPower(true) },
+                        modifier = Modifier
+                            .connectReveal(revealAt, 1)
+                    )
                 }
             }
 
             // CCT Warmth Slider Card (in place of power status card)
-            item {
+            item(key = "cct_card") {
                 Card(
                     modifier = Modifier
+                        .connectReveal(revealAt, 2)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("cct_control_card"),
@@ -437,9 +542,10 @@ fun HomeScreen(
                 }
             }
             // Brightness Slider Card (below power card)
-            item {
+            item(key = "brightness_card") {
                 Card(
                     modifier = Modifier
+                        .connectReveal(revealAt, 3)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("brightness_control_card"),
@@ -491,9 +597,10 @@ fun HomeScreen(
             }
 
             // Color Preview Card (existing colour card)
-            item {
+            item(key = "colour_card") {
                 Card(
                     modifier = Modifier
+                        .connectReveal(revealAt, 4)
                         .fillMaxWidth()
                         .inertWhen(controlsInert)
                         .testTag("control_deck_card"),
@@ -594,10 +701,14 @@ fun HomeScreen(
         // --- Grid-based Quick Access Scenes ---
         val gridItems = scenes + listOf(null)
         val chunked = gridItems.chunked(2)
-        chunked.forEach { rowItems ->
-            item {
+        // The last beats of the connect reveal. The deck pushes these ~1000px down, so they re-enter
+        // at their new position rather than travelling to it -- the travel was what looked wrong.
+        chunked.forEachIndexed { rowIndex, rowItems ->
+            item(key = "scene_row_" + rowIndex) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .connectReveal(revealAt, 5 + rowIndex)
+                        .fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     rowItems.forEach { scene ->
@@ -876,21 +987,36 @@ fun DeviceTile(
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = displayName,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (isActiveControlled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (isActiveControlled) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
 
-                Text(
-                    text = deviceState.activeFeatureName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isActiveControlled) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    Text(
+                        text = deviceState.activeFeatureName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isActiveControlled) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                PowerButton(
+                    isOn = deviceState.isPowerOn,
+                    onToggle = { viewModel.setDevicePower(address, it) },
+                    testTag = "power_button_$address",
+                    label = "Power, $displayName"
                 )
             }
         }
@@ -904,9 +1030,9 @@ fun DeviceTile(
  * that the power button in the top bar is what brings the controls back.
  */
 @Composable
-private fun PowerOffHintCard(onTurnOn: () -> Unit) {
+private fun PowerOffHintCard(onTurnOn: () -> Unit, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .testTag("power_off_hint_card"),
         shape = RoundedCornerShape(24.dp),
@@ -948,5 +1074,51 @@ private fun PowerOffHintCard(onTurnOn: () -> Unit) {
                 Text("Turn on")
             }
         }
+    }
+}
+
+/** How far behind the piece above it each piece of the connect reveal starts. */
+private const val REVEAL_STAGGER_MS = 50L
+
+/**
+ * A piece that first composes this long after the connect draws at rest. Lazy items compose as they
+ * scroll in, and without this a card first reached a minute later would play an entrance for nobody.
+ */
+private const val REVEAL_WINDOW_MS = 1_000L
+
+/** Small on purpose: a settle into place, not travel. Long moves are what looked wrong before. */
+private val REVEAL_RISE = 24.dp
+
+/**
+ * One beat of the connect reveal: fade in and rise [REVEAL_RISE] into place, [index] beats after the
+ * connect, on the Expressive motion scheme's springs (MotionScheme.expressive) -- effects spec for
+ * the fade, which has no bounce because a bouncing opacity reads as flicker, and spatial spec for the
+ * rise, whose bounce is the settle.
+ *
+ * All of it happens in graphicsLayer, and that is the point. The card is full-size in layout from the
+ * first frame, so nothing below it is pushed while it animates. Both earlier attempts failed on
+ * layout moving -- once as a jump, once as a 1000px slide.
+ */
+@Composable
+private fun Modifier.connectReveal(revealAt: Long?, index: Int): Modifier {
+    val motion = remember { MotionScheme.expressive() }
+    val risePx = with(LocalDensity.current) { REVEAL_RISE.toPx() }
+    val startDelayMs = remember(revealAt) {
+        revealAt?.let { at ->
+            val elapsed = SystemClock.uptimeMillis() - at
+            if (elapsed > REVEAL_WINDOW_MS) null else (index * REVEAL_STAGGER_MS - elapsed).coerceAtLeast(0L)
+        }
+    }
+    val fade = remember(revealAt) { Animatable(if (startDelayMs == null) 1f else 0f) }
+    val lift = remember(revealAt) { Animatable(if (startDelayMs == null) 0f else 1f) }
+    LaunchedEffect(revealAt) {
+        if (startDelayMs == null) return@LaunchedEffect
+        delay(startDelayMs)
+        launch { fade.animateTo(1f, motion.defaultEffectsSpec()) }
+        lift.animateTo(0f, motion.defaultSpatialSpec())
+    }
+    return this.graphicsLayer {
+        alpha = fade.value
+        translationY = lift.value * risePx
     }
 }

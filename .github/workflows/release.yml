@@ -35,6 +35,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list still asks for the retired "tools" package,
+          # which the current sdkmanager refuses.
+          packages: "platform-tools"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

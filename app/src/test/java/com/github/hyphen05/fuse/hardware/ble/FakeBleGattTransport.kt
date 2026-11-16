@@ -136,6 +136,10 @@ class FakeBleGattTransport(
 
     override fun isConnected(address: String): Boolean = connected.contains(address)
 
+    /** Null by default: the fake has no stack to ask, and null means "could not check". */
+    var systemLinkStates: MutableMap<String, Int> = mutableMapOf()
+    override fun systemLinkState(address: String): Int? = systemLinkStates[address]
+
     override fun activeConnectionAddresses(): Set<String> = connected.toSet()
 
     override fun deviceWriteManagerAddresses(): Set<String> = writeManagers.toSet()
