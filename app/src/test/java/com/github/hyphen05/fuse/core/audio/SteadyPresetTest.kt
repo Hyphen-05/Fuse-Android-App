@@ -127,6 +127,18 @@ class SteadyPresetTest {
     }
 
     @Test
+    fun `presets with flashing off never white out and never pulse on a kick`() {
+        listOf("Smooth Flow", "Ambient Chill", "Ebb & Flow").forEach { preset ->
+            val trace = play(preset)
+            // Skip the first seconds, where the trackers are still settling.
+            val settled = trace.sat.drop(200)
+            assertTrue("$preset washed out to saturation ${settled.min()}", settled.min() > 0.3f)
+            val jump = worstLightJump(trace)
+            assertTrue("$preset light changed by ${jump}x within a tenth of a second", jump < 3.0)
+        }
+    }
+
+    @Test
     fun `steady never moves the hue faster than its cap`() {
         val trace = play("Steady")
         val capPerFrame = AudioDspProcessor.STEADY_MAX_HUE_DEG_PER_SEC * frameMs / 1000f

@@ -84,6 +84,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
     private var macroLoudnessCeiling = 0f
     private var macroLoudnessFloor = 0f
     private var lastDropFiredAtMs = 0L
+    private var dropLoudSinceMs = 0L
     private var dropFlashRangeBoostUntilMs = 0L
 
     // --- DSP state (function-local vars in the original, now instance fields) ---
@@ -373,9 +374,20 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         // doesn't retrigger every few seconds. 2.5x is a judgment call, not a measured value --
         // large enough that ordinary chorus-level loudness (already captured by macroPercentile
         // above) doesn't itself qualify as a "drop."
+        //
+        // The spike has to hold for DROP_SUSTAIN_MS. A single frame was enough before, and a kick
+        // drum over a quiet verse is a single frame 2.5x above the 6s mean, so ordinary songs
+        // were treated as dropping about every 30 seconds.
         var dropFiredThisFrame = false
-        if (totalEnergy > macroLoudnessCeiling * 2.5f &&
-            macroLoudnessCeiling > state.noiseGateThreshold &&
+        val aboveDropLevel = totalEnergy > macroLoudnessCeiling * 2.5f &&
+            macroLoudnessCeiling > state.noiseGateThreshold
+        if (!aboveDropLevel) {
+            dropLoudSinceMs = 0L
+        } else if (dropLoudSinceMs == 0L) {
+            dropLoudSinceMs = nowMs
+        }
+        if (aboveDropLevel &&
+            nowMs - dropLoudSinceMs >= DROP_SUSTAIN_MS &&
             nowMs - lastDropFiredAtMs > 30000L
         ) {
             lastDropFiredAtMs = nowMs
@@ -385,7 +397,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // existing whiteHotFlashOffset recovery mechanic (per-preset whiteFlashRecoveryMs)
             // rather than inventing a second decay, so it fades back at whatever rate the current
             // preset is already tuned for.
-            if (!steady) whiteHotFlashOffset = 0f
+            // A preset with flashing turned off does not white out either: that is the one thing
+            // someone choosing it has asked not to see.
+            if (!steady && state.audioFlashStrength > 0f) whiteHotFlashOffset = 0f
             dropFiredThisFrame = true
             DiagnosticLogger.log(
                 "MacroDrop",
@@ -1015,6 +1029,9 @@ class AudioDspProcessor(private val backend: AudioBackend) {
          * without changing how a beat looks.
          */
         const val FLASH_DECAY_FLOOR_MS = 125f
+
+        /** How long loudness must stay above the drop level before it counts as a drop. */
+        const val DROP_SUSTAIN_MS = 300L
 
         /** The preset that keeps the light level still and moves only the colour. */
         const val STEADY_PRESET = "Steady"
