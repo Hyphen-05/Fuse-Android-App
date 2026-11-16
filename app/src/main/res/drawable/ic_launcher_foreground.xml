@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- RGB control ring: open arc, blue -> green -> red sweep, closed loop to avoid a seam at the round caps -->
+    <group
+        android:name="ring"
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="125">
+        <path
+            android:pathData="M73,54 A19,19 0 1,1 53.83,35"
+            android:strokeWidth="9"
+            android:strokeLineCap="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="sweep"
+                    android:centerX="54"
+                    android:centerY="54">
+                    <item android:offset="0" android:color="#4C8DFF" />
+                    <item android:offset="0.1273" android:color="#4C9FFF" />
+                    <item android:offset="0.2545" android:color="#4CD9CF" />
+                    <item android:offset="0.3743" android:color="#4CD98D" />
+                    <item android:offset="0.5016" android:color="#D6E85A" />
+                    <item android:offset="0.6288" android:color="#F2B854" />
+                    <item android:offset="0.7486" android:color="#F2545B" />
+                    <item android:offset="1" android:color="#4C8DFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
+    <!-- Power line through the arc's gap, CCT gradient white -> warm, well inside the safe circle -->
+    <path
+        android:pathData="M58.63,79.58 L53.11,49.08"
+        android:strokeWidth="8"
+        android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="58.63"
+                android:startY="79.58"
+                android:endX="53.11"
+                android:endY="49.08"
+                android:startColor="#FFFFFF"
+                android:endColor="#FFB454" />
+        </aapt:attr>
+    </path>
+
+</vector>

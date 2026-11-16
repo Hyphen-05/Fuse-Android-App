@@ -1,0 +1,39 @@
+# Built artifacts
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Build outputs and directories
+/build/
+/app/build/
+.build-outputs/
+captures/
+
+# Gradle caches and configuration
+.gradle/
+/local.properties
+
+# Kotlin / Java / Backup files
+*.class
+*.klib
+*.kt.bak
+*.bak
+
+# Android Studio / IntelliJ IDEA
+*.iml
+.idea/
+.navigation/
+
+# Local configurations / Keys / Secrets
+.env
+.env.local
+debug.keystore
+debug.keystore.base64
+
+# Log files
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db

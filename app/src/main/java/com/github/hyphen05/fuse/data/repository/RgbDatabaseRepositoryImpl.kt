@@ -1,0 +1,62 @@
+package com.github.hyphen05.fuse.data.repository
+
+import kotlinx.coroutines.flow.Flow
+import com.github.hyphen05.fuse.db.CustomMode
+import com.github.hyphen05.fuse.db.RgbDeviceAlias
+import com.github.hyphen05.fuse.db.SavedDevice
+import com.github.hyphen05.fuse.db.ColorCalibration
+import com.github.hyphen05.fuse.db.RgbDao
+import com.github.hyphen05.fuse.domain.repository.RgbDatabaseRepository
+
+class RgbDatabaseRepositoryImpl(private val rgbDao: RgbDao) : RgbDatabaseRepository {
+    override val allDeviceAliases: Flow<List<RgbDeviceAlias>> = rgbDao.getAllDeviceAliases()
+    override val allSavedDevices: Flow<List<SavedDevice>> = rgbDao.getAllSavedDevices()
+    override val allCustomModes: Flow<List<CustomMode>> = rgbDao.getAllCustomModes()
+    override val allColorCalibrations: Flow<List<ColorCalibration>> = rgbDao.getAllColorCalibrations()
+
+    override suspend fun saveDeviceAlias(macAddress: String, name: String) {
+        rgbDao.insertDeviceAlias(RgbDeviceAlias(macAddress, name))
+    }
+    override suspend fun deleteDeviceAlias(macAddress: String) {
+        rgbDao.deleteDeviceAlias(macAddress)
+    }
+    override suspend fun insertSavedDevice(device: SavedDevice) {
+        rgbDao.insertSavedDevice(device)
+    }
+    override suspend fun deleteSavedDevice(macAddress: String) {
+        rgbDao.deleteSavedDevice(macAddress)
+    }
+    override suspend fun updateAutoConnect(macAddress: String, enabled: Boolean) {
+        rgbDao.updateAutoConnect(macAddress, enabled)
+    }
+    override suspend fun updateActiveControl(macAddress: String, enabled: Boolean) {
+        rgbDao.updateActiveControl(macAddress, enabled)
+    }
+    override suspend fun updateDeviceRole(macAddress: String, role: String) {
+        rgbDao.updateDeviceRole(macAddress, role)
+    }
+    override suspend fun updateHueOffsetDegrees(macAddress: String, degrees: Float) {
+        rgbDao.updateHueOffsetDegrees(macAddress, degrees)
+    }
+    override suspend fun insertCustomMode(customMode: CustomMode) {
+        rgbDao.insertCustomMode(customMode)
+    }
+    override suspend fun deleteAllCustomModes() {
+        rgbDao.deleteAllCustomModes()
+    }
+    override suspend fun insertCustomModes(customModes: List<CustomMode>) {
+        rgbDao.insertCustomModes(customModes)
+    }
+    override suspend fun renameCategory(oldName: String, newName: String) {
+        rgbDao.renameCategory(oldName, newName)
+    }
+    override suspend fun getColorCalibration(macAddress: String): ColorCalibration? {
+        return rgbDao.getColorCalibration(macAddress)
+    }
+    override suspend fun insertColorCalibration(calibration: ColorCalibration) {
+        rgbDao.insertColorCalibration(calibration)
+    }
+    override suspend fun deleteColorCalibration(macAddress: String) {
+        rgbDao.deleteColorCalibration(macAddress)
+    }
+}

@@ -1,0 +1,1328 @@
+package com.github.hyphen05.fuse.ui.components
+
+import android.content.Context
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.dp
+import com.github.hyphen05.fuse.RgbUiState
+import com.github.hyphen05.fuse.TelemetryState
+import com.github.hyphen05.fuse.RgbControllerViewModel
+import com.github.hyphen05.fuse.BleConnectionState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+
+@Composable
+fun ExpandableCategoryCard(
+    title: String,
+    icon: ImageVector,
+    iconTint: Color,
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    // rememberSaveable, not remember: these cards live in a LazyColumn, so a plain remember loses
+    // the expanded flag as soon as the card scrolls out of composition.
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = "$title Icon",
+                        tint = iconTint
+                    )
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Toggle",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandVertically(
+                    animationSpec = tween(
+                        durationMillis = 250,
+                        easing = FastOutSlowInEasing
+                    )
+                ) + fadeIn(
+                    animationSpec = tween(
+                        durationMillis = 250,
+                        easing = FastOutSlowInEasing
+                    )
+                ),
+                exit = shrinkVertically(
+                    animationSpec = tween(
+                        durationMillis = 250,
+                        easing = FastOutSlowInEasing
+                    )
+                ) + fadeOut(
+                    animationSpec = tween(
+                        durationMillis = 250,
+                        easing = FastOutSlowInEasing
+                    )
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    content()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Confirm step for the three "Reset … Defaults" buttons. Each one wipes a whole card's worth of
+ * tuned values in a single tap, and several of them (pacing, calibration delay, the visualizer
+ * table) represent real on-device tuning work that isn't recoverable.
+ */
+@Composable
+internal fun ResetConfirmDialog(
+    title: String,
+    message: String,
+    confirmTestTag: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+        text = { Text(message) },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                ),
+                modifier = Modifier.height(44.dp).testTag(confirmTestTag),
+                shape = CircleShape
+            ) {
+                Text("Reset")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+fun LazyListScope.SettingsTabContent(
+    state: RgbUiState,
+    telemetry: TelemetryState,
+    viewModel: RgbControllerViewModel,
+    onOpenModeCapture: () -> Unit = {},
+    experimentalUnlocked: Boolean = false,
+    onToggleExperimentalUnlocked: () -> Unit = {}
+) {
+    if (state.calibrationFlow.showCalibrationPrompt && state.audioSettings.detectedAudioDeviceName != null) {
+        item {
+            val calibratePromptInteractionSource = remember { MutableInteractionSource() }
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("calibration_prompt_card"),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Warning, contentDescription = "Alert")
+                        Text(
+                            text = "New Audio Device Detected",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Text(
+                        text = "We noticed you're outputting audio to '${state.audioSettings.detectedAudioDeviceName}'. Bluetooth output latency, combined with internal beat-detection latency, causes the lights to flash out of sync. Calibrate to fix this.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(
+                        onClick = { viewModel.startCalibrationMode() },
+                        interactionSource = calibratePromptInteractionSource,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("start_calibration_btn")
+                            .joyfulPress(calibratePromptInteractionSource),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Calibrate",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Calibrate Audio Delay (Recommended)")
+                    }
+                }
+            }
+        }
+    }
+
+    item {
+        AmbianceFineTuneControls(state = state, viewModel = viewModel)
+    }
+
+    item {
+        ExpandableCategoryCard(
+            title = "Calibration",
+            icon = Icons.Default.Build,
+            iconTint = MaterialTheme.colorScheme.primary,
+            initiallyExpanded = false
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                BLEPacingCard(state, telemetry, viewModel)
+                
+                val calibrateSliderInteractionSource = remember { MutableInteractionSource() }
+                ExpandableCategoryCard(
+                    title = "Bluetooth Sync Delay",
+                    icon = Icons.Default.Timer,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Delay",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${state.audioSettings.bluetoothDelayMs} ms",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Text(
+                            text = "Delays LED updates to stay in sync with Bluetooth speaker lag.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            HapticBouncySlider(
+                                value = state.audioSettings.bluetoothDelayMs.toFloat(),
+                                onValueChange = { viewModel.setBluetoothDelayMs(it.toInt()) },
+                                valueRange = 0f..1000f,
+                                totalSteps = 1000,
+                                modifier = Modifier.weight(1f).testTag("bluetooth_delay_slider")
+                            )
+                            OutlinedButton(
+                                onClick = { viewModel.startCalibrationMode() },
+                                interactionSource = calibrateSliderInteractionSource,
+                                modifier = Modifier
+                                        .height(44.dp)
+                                        .testTag("open_calibration_btn")
+                                        .joyfulPress(calibrateSliderInteractionSource),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                shape = CircleShape
+                            ) {
+                                Text("Calibrate")
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                val resetCalibrationInteractionSource = remember { MutableInteractionSource() }
+                var confirmResetCalibration by rememberSaveable { mutableStateOf(false) }
+                if (confirmResetCalibration) {
+                    ResetConfirmDialog(
+                        title = "Reset Calibration Defaults",
+                        message = "This clears the Bluetooth sync delay and puts every device's pacing back to 100ms. Any tuning you did against the metronome is lost.",
+                        confirmTestTag = "confirm_reset_calibration",
+                        onConfirm = {
+                            viewModel.resetCalibrationSettings()
+                            confirmResetCalibration = false
+                        },
+                        onDismiss = { confirmResetCalibration = false }
+                    )
+                }
+                OutlinedButton(
+                    onClick = { confirmResetCalibration = true },
+                    interactionSource = resetCalibrationInteractionSource,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("reset_calibration_btn")
+                        .joyfulPress(resetCalibrationInteractionSource),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Reset", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Reset Calibration Defaults")
+                }
+            }
+        }
+    }
+
+    item {
+        ExpandableCategoryCard(
+            title = "Audio",
+            icon = Icons.Default.Audiotrack,
+            iconTint = MaterialTheme.colorScheme.primary,
+            initiallyExpanded = false
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Which strip plays which half of a layout depends on where they are in the room,
+                // and nothing in the app can know that — so the layout itself is picked on the
+                // Audio tab, and reversing it is one action here.
+                val controlledDevices = viewModel.savedDevices.collectAsState().value
+                    .filter { it.isActiveControlEnabled }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Switch Device Roles",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = when {
+                            controlledDevices.size < 2 ->
+                                "Swaps which strip plays which part of a multi-strip visualiser layout. Needs two or more connected."
+                            !rolesAreSwappable(controlledDevices) ->
+                                "Every strip plays the same part in this layout, so there's nothing to swap. Pick Hue Split or Band Split on the Audio tab first."
+                            else ->
+                                "Swaps which strip plays which part of the visualiser layout chosen on the Audio tab."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // The roles themselves are invisible until music is playing, so the swap gets a
+                    // readout: each strip and the part it plays, straight from the saved roles.
+                    // Tapping the button visibly moves the labels down the list.
+                    if (controlledDevices.size >= 2) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.testTag("device_role_summary")
+                        ) {
+                            deviceRoleSummaries(controlledDevices).forEach { (device, roleLabel) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = device.customName.ifBlank { device.macAddress },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Text(
+                                        text = roleLabel,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val swapHaptic = LocalHapticFeedback.current
+                    val canSwap = rolesAreSwappable(controlledDevices)
+                    // Expressive's own button feedback: ButtonDefaults.shapes() morphs the
+                    // container on press, and the label confirms in place afterwards. A toast
+                    // would have said the same thing somewhere else on the screen.
+                    var justSwapped by remember { mutableStateOf(false) }
+                    LaunchedEffect(justSwapped) {
+                        if (justSwapped) {
+                            delay(1600)
+                            justSwapped = false
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            swapHaptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            viewModel.rotateDeviceRoles()
+                            justSwapped = true
+                        },
+                        enabled = canSwap,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("swap_device_roles_btn")
+                    ) {
+                        AnimatedContent(targetState = justSwapped, label = "swapRolesLabel") { swapped ->
+                            if (swapped) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text("Swapped")
+                                }
+                            } else {
+                                Text("Swap Roles")
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                ExpandableCategoryCard(
+                    title = "Temporal Filtering & Smoothing",
+                    icon = Icons.Default.FilterAlt,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Filter Attack Coefficient",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.2f", state.audioSettings.audioSmoothingAttack),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "How fast the lights rise to a loud peak. Higher values mean quicker responsiveness.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.audioSmoothingAttack,
+                            onValueChange = { viewModel.setAudioSmoothingAttack(it) },
+                            valueRange = 0.05f..1.00f,
+                            totalSteps = 95,
+                            modifier = Modifier.fillMaxWidth().testTag("smoothing_attack_slider")
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Filter Decay Coefficient",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.3f", state.audioSettings.audioSmoothingDecay),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "How fast the lights fade after a peak. Lower values create a smoother, lingering fade. Higher values are snappier.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.audioSmoothingDecay,
+                            onValueChange = { viewModel.setAudioSmoothingDecay(it) },
+                            valueRange = 0.005f..0.500f,
+                            totalSteps = 495,
+                            modifier = Modifier.fillMaxWidth().testTag("smoothing_decay_slider")
+                        )
+                    }
+                }
+
+                ExpandableCategoryCard(
+                    title = "Noise Gate & Beat Sensitivity",
+                    icon = Icons.Default.Tune,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Noise Gate Threshold",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.3f", state.audioSettings.noiseGateThreshold),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                        Text(
+                            text = "Minimum volume required before lights activate. Increase this to ignore background hiss and room noise.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.noiseGateThreshold,
+                            onValueChange = { viewModel.setNoiseGateThreshold(it) },
+                            valueRange = 0.001f..0.100f,
+                            totalSteps = 99,
+                            modifier = Modifier.fillMaxWidth().testTag("noise_gate_slider")
+                        )
+                    }
+                }
+
+                ExpandableCategoryCard(
+                    title = "Equalizer & Frequency Band Gains",
+                    icon = Icons.Default.GraphicEq,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Bass Gain",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.1fx", state.audioSettings.bassGain),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        HapticBouncySlider(
+                            value = state.audioSettings.bassGain,
+                            onValueChange = { viewModel.setBassGain(it) },
+                            valueRange = 0.5f..5.0f,
+                            totalSteps = 45,
+                            modifier = Modifier.fillMaxWidth().testTag("bass_gain_slider")
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Mid Gain",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.1fx", state.audioSettings.midGain),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        HapticBouncySlider(
+                            value = state.audioSettings.midGain,
+                            onValueChange = { viewModel.setMidGain(it) },
+                            valueRange = 0.5f..5.0f,
+                            totalSteps = 45,
+                            modifier = Modifier.fillMaxWidth().testTag("mid_gain_slider")
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "High Gain",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.1fx", state.audioSettings.highGain),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        HapticBouncySlider(
+                            value = state.audioSettings.highGain,
+                            onValueChange = { viewModel.setHighGain(it) },
+                            valueRange = 0.5f..5.0f,
+                            totalSteps = 45,
+                            modifier = Modifier.fillMaxWidth().testTag("high_gain_slider")
+                        )
+                    }
+                }
+
+                ExpandableCategoryCard(
+                    title = "Flags & Options",
+                    icon = Icons.Default.Settings,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Automatic Gain Control (AGC)",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Dynamically adjusts sensitivity based on the overall volume of the music.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = state.audioSettings.isAutoGainEnabled,
+                                onCheckedChange = { viewModel.setAutoGainEnabled(it) },
+                                modifier = Modifier.testTag("auto_gain_switch")
+                            )
+                        }
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Palette Cycling Mode",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Constantly shifts base colors over time regardless of audio pitch.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = state.audioSettings.isPaletteCyclingEnabled,
+                                onCheckedChange = { viewModel.setPaletteCyclingEnabled(it) },
+                                modifier = Modifier.testTag("palette_cycling_switch")
+                            )
+                        }
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Logarithmic Pitch Scale",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Translates pitch to color using a human auditory logarithmic curve rather than linear frequencies.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = state.audioSettings.isLogarithmicScalingEnabled,
+                                onCheckedChange = { viewModel.setLogarithmicScalingEnabled(it) },
+                                modifier = Modifier.testTag("log_scale_switch")
+                            )
+                        }
+                    }
+                }
+
+                ExpandableCategoryCard(
+                    title = "Advanced Visualizer Dynamics",
+                    icon = Icons.Default.Science,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    initiallyExpanded = false
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Audio Gamma Exponent",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.2f", state.audioSettings.audioGammaExponent),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Power factor to compress or expand perceived brightness ranges.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.audioGammaExponent,
+                            onValueChange = { viewModel.setAudioGammaExponent(it) },
+                            valueRange = 0.10f..2.50f,
+                            totalSteps = 240,
+                            modifier = Modifier.fillMaxWidth().testTag("gamma_exponent_slider")
+                        )
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Minimum Base Brightness",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.2f", state.audioSettings.visualizerMinBrightness),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Ensures LEDs never turn completely off during silent moments.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.visualizerMinBrightness,
+                            onValueChange = { viewModel.setVisualizerMinBrightness(it) },
+                            valueRange = 0.00f..1.00f,
+                            totalSteps = 100,
+                            modifier = Modifier.fillMaxWidth().testTag("min_brightness_slider")
+                        )
+                    }
+                    
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Beat Flash Overlay Strength",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.2f", state.audioSettings.audioFlashStrength),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Strength of the bypass linear flash overlay triggered on beat registrations.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.audioFlashStrength,
+                            onValueChange = { viewModel.setAudioFlashStrength(it) },
+                            valueRange = 0.00f..1.00f,
+                            totalSteps = 100,
+                            modifier = Modifier.fillMaxWidth().testTag("flash_strength_slider")
+                        )
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Color Transition Speed",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = String.format("%.2fx", state.audioSettings.visualizerColorSpeed),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Text(
+                            text = "Multiplier for how fast the color changes in response to music.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HapticBouncySlider(
+                            value = state.audioSettings.visualizerColorSpeed,
+                            onValueChange = { viewModel.setVisualizerColorSpeed(it) },
+                            valueRange = 0.10f..5.00f,
+                            totalSteps = 490,
+                            modifier = Modifier.fillMaxWidth().testTag("color_speed_slider")
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+            val resetAudioInteractionSource = remember { MutableInteractionSource() }
+            var confirmResetAudio by rememberSaveable { mutableStateOf(false) }
+            if (confirmResetAudio) {
+                ResetConfirmDialog(
+                    title = "Reset Audio Defaults",
+                    message = "This puts the whole audio pipeline — smoothing, gains, beat detection, the visualiser preset and sensitivity — back to defaults.",
+                    confirmTestTag = "confirm_reset_audio",
+                    onConfirm = {
+                        viewModel.resetAudioPipelineSettings()
+                        confirmResetAudio = false
+                    },
+                    onDismiss = { confirmResetAudio = false }
+                )
+            }
+            OutlinedButton(
+                onClick = { confirmResetAudio = true },
+                interactionSource = resetAudioInteractionSource,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("reset_audio_btn")
+                    .joyfulPress(resetAudioInteractionSource),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                shape = CircleShape
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = "Reset", modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Reset Audio Defaults")
+            }
+        }
+    }
+
+    item {
+        ExpandableCategoryCard(
+            title = "Misc",
+            icon = Icons.Default.Tune,
+            iconTint = MaterialTheme.colorScheme.primary,
+            initiallyExpanded = false
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("fps_tracker_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "FPS Live Tracker",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Show live frame processing rate in the status text of the top bar.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.coreControl.showFpsTracker,
+                    onCheckedChange = { viewModel.setShowFpsTracker(it) },
+                    modifier = Modifier.testTag("fps_tracker_switch")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("demo_mode_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Simulate hardware",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Fake devices and fake scan results, so you can explore the app with " +
+                            "nothing plugged in. Turning this on disconnects any real lights.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.coreControl.isDemoMode,
+                    onCheckedChange = { viewModel.setDemoMode(it) },
+                    modifier = Modifier.testTag("demo_mode_switch")
+                )
+            }
+        }
+    }
+
+    if (experimentalUnlocked) {
+    item {
+        val context = LocalContext.current
+        var isExporting by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+
+        ExpandableCategoryCard(
+            title = "Experimental",
+            icon = Icons.Default.Science,
+            iconTint = MaterialTheme.colorScheme.primary,
+            initiallyExpanded = false
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Export Custom Modes",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Copies the complete custom modes database (including all of your modifications) to the clipboard as JSON data.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                val exportModesInteractionSource = remember { MutableInteractionSource() }
+                Button(
+                    onClick = {
+                        isExporting = true
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                val modesList = viewModel.customModes.value
+                                val jsonBuilder = StringBuilder()
+                                jsonBuilder.append("[\n")
+                                modesList.forEachIndexed { index, mode ->
+                                    jsonBuilder.append("  {\n")
+                                    jsonBuilder.append("    \"byteValue\": ${mode.byteValue},\n")
+                                    jsonBuilder.append("    \"name\": \"${mode.name.replace("\"", "\\\"")}\",\n")
+                                    jsonBuilder.append("    \"category\": \"${mode.category.replace("\"", "\\\"")}\",\n")
+                                    jsonBuilder.append("    \"direction\": \"${mode.direction}\",\n")
+                                    jsonBuilder.append("    \"colors\": \"${mode.colors}\"\n")
+                                    if (index < modesList.size - 1) {
+                                        jsonBuilder.append("  },\n")
+                                    } else {
+                                        jsonBuilder.append("  }\n")
+                                    }
+                                }
+                                jsonBuilder.append("]")
+                                val jsonText = jsonBuilder.toString()
+                                
+                                val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clipData = android.content.ClipData.newPlainText("Exported Custom Modes", jsonText)
+                                clipboardManager.setPrimaryClip(clipData)
+                                
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(context, "Exported ${modesList.size} modes to clipboard!", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            } finally {
+                                isExporting = false
+                            }
+                        }
+                    },
+                    interactionSource = exportModesInteractionSource,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("export_modes_btn")
+                        .joyfulPress(exportModesInteractionSource),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary,
+                        contentColor = MaterialTheme.colorScheme.onTertiary
+                    ),
+                    shape = CircleShape,
+                    enabled = !isExporting
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Export to Clipboard",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isExporting) "Exporting..." else "Export Modes to Clipboard",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                AmbianceDiagnosticsCard()
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // LED Freeze Diagnostic Logging Section
+                var isDiagnosticRecording by remember { mutableStateOf(com.github.hyphen05.fuse.DiagnosticLogger.isRecording()) }
+                var exportedLogUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                var excludeBleNoise by remember { mutableStateOf(false) }
+                val diagInteractionSource = remember { MutableInteractionSource() }
+                val exportInteractionSource = remember { MutableInteractionSource() }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "LED Freeze Diagnostic Recorder",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Logs Bluetooth activity, write queues, watchdogs, smoother drift, and exception traces to debug intermittent freezing bugs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !isDiagnosticRecording) { excludeBleNoise = !excludeBleNoise },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = excludeBleNoise,
+                            onCheckedChange = { excludeBleNoise = it },
+                            enabled = !isDiagnosticRecording
+                        )
+                        Text(
+                            text = "Exclude BLE write/watchdog logs (for audio diagnostics — prevents the buffer filling up before a full phone-mic/on-device session is captured)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (isDiagnosticRecording) {
+                                    com.github.hyphen05.fuse.DiagnosticLogger.stop()
+                                    isDiagnosticRecording = false
+                                    exportedLogUri = com.github.hyphen05.fuse.DiagnosticLogger.exportToFile(context)
+                                    android.widget.Toast.makeText(context, "Recording stopped. Log exported!", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val excludedTags = if (excludeBleNoise) {
+                                        setOf("DeviceWriteManager", "BleWriteWatchdog", "BLE")
+                                    } else {
+                                        emptySet()
+                                    }
+                                    com.github.hyphen05.fuse.DiagnosticLogger.start(excludedTags)
+                                    isDiagnosticRecording = true
+                                    exportedLogUri = null
+                                    android.widget.Toast.makeText(context, "Recording started", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            interactionSource = diagInteractionSource,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("toggle_diagnostic_recording_btn")
+                                .joyfulPress(diagInteractionSource),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isDiagnosticRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                contentColor = if (isDiagnosticRecording) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = if (isDiagnosticRecording) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                contentDescription = if (isDiagnosticRecording) "Stop" else "Start",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isDiagnosticRecording) "Stop Diagnostic Recording" else "Start Diagnostic Recording",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    if (!isDiagnosticRecording && exportedLogUri != null) {
+                        Button(
+                            onClick = {
+                                try {
+                                    val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_STREAM, exportedLogUri)
+                                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Diagnostic Log"))
+                                } catch (e: java.lang.Exception) {
+                                    android.widget.Toast.makeText(context, "Failed to share: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            interactionSource = exportInteractionSource,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("export_diagnostic_log_btn")
+                                .joyfulPress(exportInteractionSource),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            ),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Export Log & Share",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Mode Capture (Camera) Section
+                val modeCaptureInteractionSource = remember { MutableInteractionSource() }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Mode Capture (Camera)",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "One-time diagnostic tool: auto-cycles every mode except Auto Play while your phone camera records color and motion along the strip, for correcting mode labels/categories/direction offline.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onOpenModeCapture,
+                        interactionSource = modeCaptureInteractionSource,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_mode_capture_btn")
+                            .joyfulPress(modeCaptureInteractionSource),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary
+                        ),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Mode Capture",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Start Mode Capture",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+        }
+    }
+    }
+
+    item { Spacer(modifier = Modifier.height(8.dp)) }
+
+    item {
+        var tapCount by remember { mutableStateOf(0) }
+        var lastTapAtMs by remember { mutableStateOf(0L) }
+        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+        val githubUrl = "https://github.com/Hyphen-05/Fuse-Android-App"
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Fuse",
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            // Same gesture as stock Android's "tap Build number 7 times" — unlocks on the
+                            // 7th tap, and the same sequence hides it again since this just toggles.
+                            // Deliberately silent (no Toast) so the gesture stays undiscoverable.
+                            val now = System.currentTimeMillis()
+                            tapCount = if (now - lastTapAtMs > 1500L) 1 else tapCount + 1
+                            lastTapAtMs = now
+                            if (tapCount >= 7) {
+                                tapCount = 0
+                                onToggleExperimentalUnlocked()
+                            }
+                        }
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Version ${com.github.hyphen05.fuse.BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Fuse talks Bluetooth LE directly to MELK, ELK-BLEDOM, and other compatible RGB strip controllers — colour, ambiance sync, and audio-reactive lighting with no cloud, account, excessive permissions, or tracking.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                val githubInteractionSource = remember { MutableInteractionSource() }
+                Button(
+                    onClick = { uriHandler.openUri(githubUrl) },
+                    interactionSource = githubInteractionSource,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .joyfulPress(githubInteractionSource),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Code,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "View source on GitHub",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+    }
+
+    item { Spacer(modifier = Modifier.height(24.dp)) }
+}

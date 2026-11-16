@@ -1,0 +1,547 @@
+package com.github.hyphen05.fuse.ui.components
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.github.hyphen05.fuse.BleConnectionState
+import com.github.hyphen05.fuse.RgbControllerViewModel
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun DevicesScreen(
+    viewModel: RgbControllerViewModel,
+    onScanClick: () -> Unit,
+    onEditAlias: (address: String, currentName: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val savedDevices by viewModel.savedDevices.collectAsState()
+
+    // Deleting a saved device also forgets its alias, role and auto-connect setting, so it gets a
+    // confirm step rather than firing on one tap of a 32dp icon.
+    var deviceToForget by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        item {
+            // --- Unified Device Center Dashboard ---
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header
+                // The button keeps its place and size in both states so nothing jumps when a scan
+                // starts, and the scan indicator sits *below* it rather than replacing it — a
+                // running scan used to leave no way to stop it short of the 15s timeout.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val isScanning = uiState.connectivity.isScanning
+                    Button(
+                        onClick = { if (isScanning) viewModel.stopScanning() else onScanClick() },
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("scan_button")
+                    ) {
+                        Text(if (isScanning) "Scanning… tap to stop" else "Scan for Devices")
+                    }
+
+                    if (isScanning) {
+                        // The same Expressive shape-morph as the connect indicator
+                        // (ConnectionStatusSurface), sized for a header rather than a
+                        // full-screen moment — big enough to read as the page's focal point
+                        // while scanning, not a spinner tucked into a row of text. The old
+                        // "Scanning..." caption under it is gone: the button above now says it.
+                        LoadingIndicator(
+                            modifier = Modifier.size(64.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // Section 1: Saved Devices
+                Text(
+                    text = "Saved Devices (${savedDevices.size})",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                )
+
+                if (savedDevices.isEmpty() && uiState.coreControl.isDbLoaded) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bluetooth,
+                                contentDescription = "Bluetooth Logo",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "No saved devices in your center yet. Connect to a device below to register it.",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    savedDevices.forEach { saved ->
+                        val connState = uiState.connectivity.deviceConnectionStates[saved.macAddress] ?: BleConnectionState.DISCONNECTED
+                        val isConnected = connState == BleConnectionState.CONNECTED
+                        val isConnecting = connState == BleConnectionState.CONNECTING
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("saved_device_card_${saved.macAddress}"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isConnected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, if (isConnected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Row 1: Header (Name, Mac, status and delete)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isConnected) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth,
+                                        contentDescription = "Bluetooth Device",
+                                        tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = saved.customName,
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = saved.macAddress,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        )
+                                    }
+
+                                    // Connection Status Badge
+                                    Surface(
+                                        color = when (connState) {
+                                            BleConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+                                            BleConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+                                            BleConnectionState.DISCONNECTING -> MaterialTheme.colorScheme.error
+                                            BleConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                                        },
+                                        contentColor = when (connState) {
+                                            BleConnectionState.CONNECTED -> MaterialTheme.colorScheme.onPrimary
+                                            BleConnectionState.CONNECTING -> MaterialTheme.colorScheme.onTertiary
+                                            BleConnectionState.DISCONNECTING -> MaterialTheme.colorScheme.onError
+                                            BleConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = connState.name,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                        )
+                                    }
+
+                                    // Edit Name
+                                    IconButton(
+                                        onClick = {
+                                            onEditAlias(saved.macAddress, saved.customName)
+                                        },
+                                        modifier = Modifier.size(32.dp).testTag("edit_alias_button_${saved.macAddress}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit alias",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    // Delete Device
+                                    IconButton(
+                                        onClick = { deviceToForget = saved.macAddress },
+                                        modifier = Modifier.size(32.dp).testTag("delete_saved_${saved.macAddress}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete saved device",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider(color = if (isConnected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.outlineVariant)
+
+                                // Row 2: Switches and Control
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Toggles
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Switch(
+                                                checked = saved.isAutoConnectEnabled,
+                                                onCheckedChange = { viewModel.toggleAutoConnect(saved.macAddress, saved.customName, it) },
+                                                modifier = Modifier.testTag("auto_connect_switch_${saved.macAddress}")
+                                            )
+                                            Text(
+                                                text = "Auto-Connect",
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            )
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Switch(
+                                                checked = saved.isActiveControlEnabled,
+                                                onCheckedChange = { viewModel.toggleActiveControl(saved.macAddress, saved.customName, it) },
+                                                modifier = Modifier.testTag("active_control_switch_${saved.macAddress}")
+                                            )
+                                            Text(
+                                                text = "Active Control",
+                                                style = MaterialTheme.typography.labelMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    // Connect / Disconnect button
+                                    val connectInteractionSource = remember(saved.macAddress) { MutableInteractionSource() }
+                                    val isDisconnecting = connState == BleConnectionState.DISCONNECTING
+                                    if (isConnected || isDisconnecting) {
+                                        Button(
+                                            onClick = { viewModel.disconnectDevice(saved.macAddress) },
+                                            enabled = !isDisconnecting,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            shape = CircleShape,
+                                            interactionSource = connectInteractionSource,
+                                            modifier = Modifier
+                                                .height(44.dp)
+                                                .testTag("disconnect_saved_${saved.macAddress}")
+                                                .joyfulPress(connectInteractionSource, enabled = !isDisconnecting)
+                                        ) {
+                                            Text(if (isDisconnecting) "Disconnecting..." else "Disconnect")
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { viewModel.connectDevice(saved.macAddress) },
+                                            enabled = !isConnecting,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ),
+                                            shape = CircleShape,
+                                            interactionSource = connectInteractionSource,
+                                            modifier = Modifier
+                                                .height(44.dp)
+                                                .testTag("connect_saved_${saved.macAddress}")
+                                                .joyfulPress(connectInteractionSource, enabled = !isConnecting)
+                                        ) {
+                                            Text(if (isConnecting) "Connecting..." else "Connect")
+                                        }
+                                    }
+                                }
+
+                                // The per-device "Visualizer Role" chips used to sit here. They now
+                                // live on the Audio tab as one whole-setup choice
+                                // (VisualizerRoleLayoutCard) — a role is only meaningful relative
+                                // to the other strips, and setting them one at a time made it easy
+                                // to land on a combination that does nothing.
+                            }
+                        }
+                    }
+                }
+
+                // Section 2: Scanned/Discovered Devices (excluding saved devices)
+                Text(
+                    text = "Discovered Devices",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                )
+
+                val unsavedScannedDevices = uiState.connectivity.scannedDevices.filter { scanned ->
+                    savedDevices.none { it.macAddress == scanned.address }
+                }
+
+                // Suppressed mid-scan: "no devices found" is a conclusion about a finished scan,
+                // not a fact about the one in progress, and showing it under the loading indicator
+                // reads as the scan having already failed.
+                if (unsavedScannedDevices.isEmpty() && uiState.coreControl.isDbLoaded && !uiState.connectivity.isScanning) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "No new devices found in range. Click Scan to discover.",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    unsavedScannedDevices.forEach { device ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.connectDevice(device.address) }
+                                .testTag("scanned_device_card_${device.address}"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bluetooth,
+                                    contentDescription = "Discovered BLE Device",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = device.alias ?: device.name ?: "Unknown Device",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (device.isDuoCoSuspected) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "DuoCo",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        color = MaterialTheme.colorScheme.secondary,
+                                                        fontSize = 8.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = device.address,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        )
+                                        SignalStrengthBars(rssi = device.rssi)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                val connectDiscoveredInteractionSource = remember(device.address) { MutableInteractionSource() }
+                                val deviceConnState = uiState.connectivity.deviceConnectionStates[device.address] ?: BleConnectionState.DISCONNECTED
+                                val isDeviceConnecting = deviceConnState == BleConnectionState.CONNECTING
+                                Button(
+                                    onClick = { viewModel.connectDevice(device.address) },
+                                    enabled = !isDeviceConnecting,
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondary,
+                                        contentColor = MaterialTheme.colorScheme.onSecondary
+                                    ),
+                                    interactionSource = connectDiscoveredInteractionSource,
+                                    modifier = Modifier
+                                        .height(44.dp)
+                                        .testTag("connect_discovered_${device.address}")
+                                        .joyfulPress(connectDiscoveredInteractionSource, enabled = !isDeviceConnecting)
+                                ) {
+                                    Text(if (isDeviceConnecting) "Connecting..." else "Connect", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (deviceToForget != null) {
+        val target = savedDevices.find { it.macAddress == deviceToForget }
+        AlertDialog(
+            onDismissRequest = { deviceToForget = null },
+            title = { Text("Forget Device", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+            text = {
+                Text(
+                    "Forget '${target?.customName ?: deviceToForget}'? Its alias, role and auto-connect " +
+                        "setting are removed too, and it will be disconnected."
+                )
+            },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deviceToForget?.let { viewModel.deleteSavedDevice(it) }
+                        deviceToForget = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.height(44.dp).testTag("confirm_forget_device"),
+                    shape = CircleShape
+                ) {
+                    Text("Forget")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deviceToForget = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Four rising bars filled according to signal strength, with the raw dBm beside them.
+ *
+ * The scan already carries RSSI (`ScannedRgbDevice.rssi`, and the discovered list is sorted by it),
+ * but nothing surfaced it — with several strips in range there was no way to tell which entry is
+ * the one in the room with you.
+ */
+@Composable
+private fun SignalStrengthBars(rssi: Int) {
+    // The usual Android Wi-Fi/BLE buckets: -60 and up is across-the-room strong, below -80 is
+    // barely there and likely to drop mid-connect.
+    val level = when {
+        rssi >= -60 -> 4
+        rssi >= -70 -> 3
+        rssi >= -80 -> 2
+        else -> 1
+    }
+    val tint = when (level) {
+        4, 3 -> MaterialTheme.colorScheme.secondary
+        2 -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.outline
+    }
+    Row(
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.testTag("signal_bars_level_$level")
+    ) {
+        repeat(4) { index ->
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height((3 + index * 2).dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(if (index < level) tint else MaterialTheme.colorScheme.outlineVariant)
+            )
+        }
+        Text(
+            text = "$rssi dBm",
+            style = MaterialTheme.typography.labelSmall.copy(color = tint)
+        )
+    }
+}
