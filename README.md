@@ -44,7 +44,7 @@ These strips flash briefly at the firmware level any time the pixel count change
 
 ## Building from source
 
-Needs JDK 21 and the Android SDK (compileSdk 36).
+Needs JDK 21 and the Android SDK (compileSdk 37).
 
 ```
 ./gradlew assembleDebug
