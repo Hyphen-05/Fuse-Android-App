@@ -189,6 +189,20 @@ private fun visualizerConfigFor(preset: String): VisualizerConfig = when (preset
         hueBeatNudgeDeg = 55f, hueNudgeReturnMs = 450f,
         sustainResponse = "HUE_SHIFT", sustainRampMs = 3000f
     )
+    // Brightness and saturation never move (AudioDspProcessor holds them for this preset by name),
+    // so the music is carried entirely by colour: it leans with the balance of mids and highs,
+    // drifts with the tempo, and each beat pulls it back a little. minBrightness is the fixed
+    // level; the strip's own brightness setting still scales it.
+    "Steady" -> VisualizerConfig(
+        attack = 0.25f, decay = 0.06f, flash = 0.0f, gamma = 0.8f, idleDelay = 4000L,
+        noiseGate = 4.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 0.7f, paletteCycling = true,
+        beatMult = 1.6f, minBrightness = 1.0f, colorSpeed = 0.65f, beatFlashDecayMs = 400f,
+        ambientCapFraction = 0.0f, midFluxWeight = 0.25f,
+        anchorBeatsPerAdvance = 0, hueAnchorJumpDeg = 0f, hueJumpConfidenceGate = 1.0f,
+        hueBreathRangeDeg = 45f, hueDriftDegPerSec = 9f, hueDegreesPerBeat = 2.0f,
+        hueBeatNudgeDeg = 45f, hueNudgeReturnMs = 450f,
+        sustainResponse = "HUE_SHIFT", sustainRampMs = 3000f
+    )
     else -> VisualizerConfig(
         attack = 0.85f, decay = 0.12f, flash = 0.3f, gamma = 0.45f, idleDelay = 2500L,
         noiseGate = 5.0f, bassGain = 1.0f, midGain = 1.0f, highGain = 1.0f, paletteCycling = true,

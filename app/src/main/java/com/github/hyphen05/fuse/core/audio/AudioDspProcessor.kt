@@ -295,6 +295,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
 
         val state = settings
 
+        // The Steady preset holds brightness and saturation still and lets only the colour move.
+        // It is checked by name, like Beat Only, because it switches whole mechanisms off (the
+        // drop white-out, hue snaps, the amplitude envelope) rather than tuning them.
+        val steady = state.visualizerPreset == STEADY_PRESET
+
         // Floor the effective decay window to the wire --
         // moved up from its original spot further down in this function so the P1 scheduling
         // block below (which needs a decay window at the moment a flash fires) can read it too.
@@ -380,7 +385,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             // existing whiteHotFlashOffset recovery mechanic (per-preset whiteFlashRecoveryMs)
             // rather than inventing a second decay, so it fades back at whatever rate the current
             // preset is already tuned for.
-            whiteHotFlashOffset = 0f
+            if (!steady) whiteHotFlashOffset = 0f
             dropFiredThisFrame = true
             DiagnosticLogger.log(
                 "MacroDrop",
@@ -719,6 +724,7 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         val targetX = Math.cos(targetRad).toFloat()
         val targetY = Math.sin(targetRad).toFloat()
 
+        val previousSmoothedHue = smoothedHue
         val smoothedRad = Math.toRadians(smoothedHue.toDouble())
         val curSmoothedX = Math.cos(smoothedRad).toFloat()
         val curSmoothedY = Math.sin(smoothedRad).toFloat()
@@ -735,7 +741,18 @@ class AudioDspProcessor(private val backend: AudioBackend) {
         }
 
         val recoveredHueRad = Math.atan2(nextY.toDouble(), nextX.toDouble())
-        smoothedHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
+        val nextHue = ((Math.toDegrees(recoveredHueRad).toFloat() + 360f) % 360f)
+        smoothedHue = if (steady && dtMs > 0L) {
+            // At a fixed brightness setting the strip still emits about twice the light on a
+            // two-channel colour as on a primary, so a fast colour move is a brightness pulse.
+            // Capping how fast the hue may travel turns that into a slow swell: 60 degrees, the
+            // distance from a primary to its neighbour, takes at least two thirds of a second.
+            val maxStep = STEADY_MAX_HUE_DEG_PER_SEC * dtMs.toFloat() / 1000f
+            val delta = ((nextHue - previousSmoothedHue + 540f) % 360f) - 180f
+            (previousSmoothedHue + delta.coerceIn(-maxStep, maxStep) + 360f) % 360f
+        } else {
+            nextHue
+        }
 
         if (state.isAutoGainEnabled) {
             // Aggressive dual-rate auto-gain: rapid decay in low-amplitude states to boost quiet
@@ -879,6 +896,15 @@ class AudioDspProcessor(private val backend: AudioBackend) {
             ambientValue = (ambientValue + 0.10f * sustainIntensity).coerceIn(0.0f, 1.0f)
         }
 
+        if (steady) {
+            // Nothing about the light level follows the music: no envelope, no swell, and full
+            // saturation, because a colour washing out toward white lights more channels and
+            // reads as a flash.
+            sat = 1f
+            value = state.visualizerMinBrightness
+            ambientValue = value
+        }
+
         val (r, g, b) = ColorConverter.hsvToRgb(smoothedHue, sat, value)
 
         val isBelow = totalEnergy < state.noiseGateThreshold
@@ -989,5 +1015,11 @@ class AudioDspProcessor(private val backend: AudioBackend) {
          * without changing how a beat looks.
          */
         const val FLASH_DECAY_FLOOR_MS = 125f
+
+        /** The preset that keeps the light level still and moves only the colour. */
+        const val STEADY_PRESET = "Steady"
+
+        /** Fastest the hue may travel under [STEADY_PRESET], in degrees per second. */
+        const val STEADY_MAX_HUE_DEG_PER_SEC = 90f
     }
 }
