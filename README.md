@@ -15,7 +15,7 @@ Grab an APK from the [Releases page](../../releases) and sideload it. These are 
 
 ## Compatible hardware
 
-Built and tested against MELK-branded DuoCo strips (the ones that pair with the duoCo Strip / duoCo StripX app). Turns out that protocol is identical to the ELK-BLEDOM chipset, which gets sold under a lot of names, so the scanner also picks up:
+Built and tested against MELK-branded DuoCo strips (the ones that pair with the duoCo Strip / duoCo StripX app). That protocol is identical to the ELK-BLEDOM chipset, which gets sold under a lot of names, so the scanner also picks up:
 
 **Confirmed working:**
 - MELK-branded DuoCo strips
@@ -38,10 +38,6 @@ MVI / unidirectional data flow — picked this over MVVM to handle BLE, audio ca
 - `hardware/` — BLE and audio I/O
 - `presentation/` — Compose UI, ViewModels/reducers
 
-## Hardware note
-
-These strips flash briefly at the firmware level any time the pixel count changes. That's a hardware limitation, not a bug — animations are built around it instead of trying to hide it.
-
 ## Building from source
 
 Needs JDK 21 and the Android SDK (compileSdk 37).
@@ -58,13 +54,13 @@ keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass andr
   -dname "CN=Android Debug,O=Android,C=US"
 ```
 
-`./gradlew testDebugUnitTest` runs the unit test suite. `./gradlew assembleRelease` also works with no keystore configured — `app/build.gradle.kts` falls back to an unsigned release APK in that case (useful for reproducible-build pipelines like F-Droid's), but you can't install an unsigned APK directly. Use the debug build or a Releases-page APK if you actually want to install it.
+`./gradlew testDebugUnitTest` runs the unit test suite. `./gradlew assembleRelease` also works with no keystore configured — `app/build.gradle.kts` falls back to an unsigned release APK in that case, but you can't install an unsigned APK directly. Use the debug build or a Releases-page APK if you actually want to install it.
 
 CI runs the test suite and builds a debug APK on every push to `main` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); pushing a `v*` tag builds a debug APK and attaches it to a new GitHub Release ([`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
 ## Contributing
 
-Hobby project, still rough in places. Bug reports, hardware compatibility reports, and "this part of the UI doesn't make sense" are all fine to open as issues. No formal process.
+Hobby project, still rough in places. Bug reports, hardware compatibility reports, and anything else are welcome as issues. No formal process.
 
 ## License
 
