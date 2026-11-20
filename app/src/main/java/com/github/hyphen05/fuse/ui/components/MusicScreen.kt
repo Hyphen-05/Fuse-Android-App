@@ -501,6 +501,7 @@ fun MusicScreen(
         // their config tables are unchanged.
         val smoothPresets = remember {
             listOf(
+                ExternalMicPreset("Steady", "Steady", "Colour follows the music, no flashing", Color(0xFF5C6BC0)),
                 ExternalMicPreset("Ebb & Flow", "Ebb & Flow", "Drifting colours, beats pull them back", Color(0xFF26A69A)),
                 ExternalMicPreset("Smooth Flow", "Smooth Flow", "Gliding fluid transitions", Color(0xFF00ACC1)),
                 ExternalMicPreset("Ambient Chill", "Ambient Chill", "Slow lingering fades", Color(0xFF3949AB)),

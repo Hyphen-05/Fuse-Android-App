@@ -1336,6 +1336,13 @@ class RgbControllerViewModel(
                  lastActive = active
             }
         }
+
+        // Nobody has picked a visualiser preset on this install, so start on the one that does
+        // not flash. Going through the intent writes the whole preset table to prefs, which the
+        // field-by-field defaults loaded above would otherwise disagree with.
+        if (prefsRepo.getAppStatePrefString("visualizer_preset", null) == null) {
+            dispatch(RgbIntent.SetVisualizerPreset(com.github.hyphen05.fuse.core.audio.AudioDspProcessor.STEADY_PRESET))
+        }
     }
 
 
