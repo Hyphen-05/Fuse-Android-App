@@ -1187,7 +1187,7 @@ fun LazyListScope.SettingsTabContent(
         var tapCount by remember { mutableStateOf(0) }
         var lastTapAtMs by remember { mutableStateOf(0L) }
         val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-        val githubUrl = "https://github.com/Hyphen-05/Fuse-Android-App"
+        val githubUrl = GITHUB_URL
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1266,6 +1266,39 @@ fun LazyListScope.SettingsTabContent(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "View source on GitHub",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
+                val websiteInteractionSource = remember { MutableInteractionSource() }
+                OutlinedButton(
+                    onClick = { uriHandler.openUri(WEBSITE_URL) },
+                    interactionSource = websiteInteractionSource,
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .joyfulPress(websiteInteractionSource),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Public,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Visit the website",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.width(6.dp))

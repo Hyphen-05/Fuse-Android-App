@@ -214,6 +214,7 @@ fun HomeScreen(
     // already connected all draw the page at rest. composedOnce is a plain array rather than state
     // on purpose: writing state from SideEffect would cost a recomposition for nothing.
     val connected = uiState.connectivity.connectionState == BleConnectionState.CONNECTED && !holdReveal
+    val connectedLaunches = rememberConnectedLaunches(connected)
     val composedOnce = remember { booleanArrayOf(false) }
     SideEffect { composedOnce[0] = true }
     val revealAt = remember(connected) {
@@ -888,6 +889,8 @@ fun HomeScreen(
             }
         }
     }
+
+    StarPromptSheet(connected = connected, connectedLaunches = connectedLaunches)
 }
 
 @Composable
