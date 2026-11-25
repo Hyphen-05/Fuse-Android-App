@@ -2,8 +2,16 @@
 
 Android app for controlling Bluetooth LE RGB LED strips. Power, color, brightness, modes, warmth, plus a few bigger features:
 
+<p align="center">
+  <img src="docs/screenshots/home.webp" width="30%" alt="Home screen with two connected strips, the warmth and dimming sliders and the colour wheel">
+  <img src="docs/screenshots/music.webp" width="30%" alt="Music screen with the live visualiser bars, sensitivity and audio source">
+  <img src="docs/screenshots/devices.webp" width="30%" alt="Devices screen with two saved strips">
+</p>
+
+More at [comettea.com/fuse](https://comettea.com/fuse/).
+
 - Ambiance mode: syncs LED color to whatever's on screen, using screen capture with smoothing and scene-cut detection so it doesn't flicker on cuts
-- Audio visualizer: reacts to audio picked up by the phone mic or on-device audio, with beat detection and a handful of presets (Smooth Flow, Ambient Chill, Vocal Floor, etc.)
+- Audio visualizer: reacts to audio picked up by the phone mic or on-device audio, with beat detection and a handful of presets (Steady, Ebb & Flow, Smooth Flow, Strobe Blast, etc.)
 - Scene chaining: queue up multiple scenes with delays and looping, cancels automatically if you touch the controls manually
 - Multiple devices at once, each saved and aliased separately
 

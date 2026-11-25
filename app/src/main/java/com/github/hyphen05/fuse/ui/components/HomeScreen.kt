@@ -80,7 +80,7 @@ fun HomeScreen(
         val state = scene.state
         val modeName = when (state?.groupASelection) {
             "Colour" -> "Solid Colour"
-            "CCT" -> "Color Temp (CCT)"
+            "CCT" -> "Warmth"
             "HardwareMode" -> "LED Animation"
             "Audio" -> "Audio Visualizer"
             "Ambiance" -> "Video Ambiance"
@@ -499,7 +499,7 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "Color Temperature (CCT)",
+                                    text = "Warmth",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onSurface

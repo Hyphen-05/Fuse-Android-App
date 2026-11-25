@@ -95,13 +95,13 @@ fun MusicScreen(
     val presets = remember {
         listOf(
             ExternalMicPreset("energetic_1", "Energetic 1", "Fast pace dynamic flash", Color(0xFFE53935)),
-            ExternalMicPreset("energetic_2", "Energetic 2", "Alternating pulse colors", Color(0xFFF4511E)),
+            ExternalMicPreset("energetic_2", "Energetic 2", "Alternating pulse colours", Color(0xFFF4511E)),
             ExternalMicPreset("rhythm_1", "Rhythm 1", "Beat-sensitive slow fade", Color(0xFFFDD835)),
-            ExternalMicPreset("rhythm_2", "Rhythm 2", "Multi-color jumping beat", Color(0xFF43A047)),
+            ExternalMicPreset("rhythm_2", "Rhythm 2", "Multi-colour jumping beat", Color(0xFF43A047)),
             ExternalMicPreset("spectrum_1", "Spectrum 1", "Frequency band strobe", Color(0xFF00ACC1)),
             ExternalMicPreset("spectrum_2", "Spectrum 2", "Continuous spectrum sweep", Color(0xFF1E88E5)),
             ExternalMicPreset("rolling_1", "Rolling 1", "Chasing waves flow effect", Color(0xFF8E24AA)),
-            ExternalMicPreset("rolling_2", "Rolling 2", "Color wave bounce reverse", Color(0xFFD81B60))
+            ExternalMicPreset("rolling_2", "Rolling 2", "Colour wave bounce reverse", Color(0xFFD81B60))
         )
     }
 

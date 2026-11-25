@@ -602,7 +602,7 @@ fun EditModeDialog(
                 // Colors included multi-selector
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Colors Included",
+                        text = "Colours Included",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

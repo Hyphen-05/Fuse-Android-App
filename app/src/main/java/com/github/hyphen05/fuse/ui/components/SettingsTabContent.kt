@@ -825,7 +825,7 @@ fun LazyListScope.SettingsTabContent(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Color Transition Speed",
+                                text = "Colour Transition Speed",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
