@@ -983,7 +983,7 @@ fun DeviceTile(
                     }
                     Icon(
                         imageVector = icon,
-                        contentDescription = "Mode: ${deviceState.activeFeatureName}",
+                        contentDescription = "Mode: ${featureDisplayName(deviceState.activeFeatureName)}",
                         modifier = Modifier.size(20.dp),
                         tint = if (isActiveControlled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1007,7 +1007,7 @@ fun DeviceTile(
                     )
 
                     Text(
-                        text = deviceState.activeFeatureName,
+                        text = featureDisplayName(deviceState.activeFeatureName),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isActiveControlled) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha=0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

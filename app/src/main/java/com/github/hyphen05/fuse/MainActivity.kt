@@ -554,9 +554,9 @@ fun MainScreen() {
                         val subtitleText = remember(uiState.coreControl.isPowerOn, uiState.coreControl.activeFeatureName, uiState.coreControl.showFpsTracker, fpsLabel) {
                             if (uiState.coreControl.isPowerOn) {
                                 if (uiState.coreControl.showFpsTracker) {
-                                    "Active • ${uiState.coreControl.activeFeatureName} • $fpsLabel"
+                                    "Active • ${com.github.hyphen05.fuse.ui.components.featureDisplayName(uiState.coreControl.activeFeatureName)} • $fpsLabel"
                                 } else {
-                                    "Active • ${uiState.coreControl.activeFeatureName}"
+                                    "Active • ${com.github.hyphen05.fuse.ui.components.featureDisplayName(uiState.coreControl.activeFeatureName)}"
                                 }
                             } else {
                                 "Standby"
