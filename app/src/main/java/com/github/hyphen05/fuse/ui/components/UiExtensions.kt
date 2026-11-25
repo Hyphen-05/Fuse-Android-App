@@ -63,6 +63,10 @@ fun Modifier.inertWhen(inert: Boolean): Modifier = this
         }
     )
 
+/** The name a feature is shown under. "CCT" stays the stored name so saved state and scenes keep working. */
+fun featureDisplayName(featureName: String): String =
+    if (featureName == "CCT") "Warmth" else featureName
+
 @Composable
 fun Modifier.joyfulPress(
     interactionSource: MutableInteractionSource,

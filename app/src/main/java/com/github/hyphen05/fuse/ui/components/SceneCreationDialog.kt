@@ -85,7 +85,7 @@ fun SceneCreationScreenContent(
     
     val modeOptions = listOf(
         Triple("Colour", "Colour", "Save the current solid colour picker value"),
-        Triple("CCT", "CCT", "Save the current color temperature"),
+        Triple("CCT", "Warmth", "Save the current warmth"),
         Triple("HardwareMode", "LED Mode", "Save the current built-in hardware animation mode and speed"),
         Triple("Audio", "Audio Visualiser", "Save the current music sync mode, preset, and settings"),
         Triple("Ambiance", "Ambiance", "Save the current video ambiance capture state and settings"),
