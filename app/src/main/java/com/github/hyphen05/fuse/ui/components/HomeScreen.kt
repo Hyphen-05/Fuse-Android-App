@@ -888,11 +888,9 @@ fun HomeScreen(
                 }
             }
         }
-
-        item(key = "star_prompt") {
-            StarPromptCard(connected = connected, connectedLaunches = connectedLaunches)
-        }
     }
+
+    StarPromptSheet(connected = connected, connectedLaunches = connectedLaunches)
 }
 
 @Composable
