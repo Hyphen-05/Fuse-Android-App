@@ -15,14 +15,12 @@ Two other ways in, both still supported:
 ## Where the version number comes from
 
 A tag push releases under its own tag. A `main` push builds one as `v<versionName>.<run_number>` —
-`versionName` read out of `app/build.gradle.kts` (currently `1.0`), the run number supplied by
-GitHub. So merges produce `v1.0.41`, `v1.0.42` and so on: unique and ordered without anyone having to
-remember to bump anything.
+`versionName` read out of `app/build.gradle.kts` (currently `1.1`), the run number supplied by
+GitHub. So pushes produce `v1.1.3`, `v1.1.4` and so on: unique and ordered.
 
-`versionCode` in `app/build.gradle.kts` is **still 1 and is not touched by any of this**. It has never
-been bumped. Android uses it to decide what counts as an upgrade, so if these APKs ever need to
-upgrade each other properly rather than being installed over the top, that is the thing to wire to the
-run number.
+`versionCode` in `app/build.gradle.kts` is **not touched by any of this**; bump it by hand in the
+commit before each release. Android uses it to decide what counts as an upgrade, so a release that
+reuses the previous code will not install as an update.
 
 ## The signing problem, which is real and predates all of this
 
@@ -36,7 +34,8 @@ data: scenes, paired devices, calibration, every toggle. That is almost certainl
 forcing the clean installs seen so far, and it is not something the phone or the app is
 doing wrong.
 
-**The fix is one repository secret.** Generate a keystore once, base64 it, and store it as
+**The fix is one repository secret, and it is now set** (every release from v1.1.2 on shares one
+certificate). Generate a keystore once, base64 it, and store it as
 `RELEASE_KEYSTORE_BASE64`; the workflow uses it when present and falls back to the throwaway with a
 build warning when it is not:
 
